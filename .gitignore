@@ -19,6 +19,7 @@ chroma_db/
 # Sentence-transformers / HF cache
 .cache/
 models_cache/
+.hf_cache/
 
 # IDE
 .idea/
