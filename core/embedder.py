@@ -104,6 +104,23 @@ def get_all_chunks() -> List[dict]:
     return items
 
 
+def get_collection_stats() -> dict:
+    collection = _get_collection()
+    chunk_count = collection.count()
+    if chunk_count == 0:
+        return {"chunk_count": 0, "email_count": 0, "collection": cfg.CHROMA_COLLECTION}
+    result = collection.get(include=["metadatas"])
+    email_ids = {
+        (m or {}).get("email_id", "") for m in result["metadatas"]
+    }
+    email_ids.discard("")
+    return {
+        "chunk_count": chunk_count,
+        "email_count": len(email_ids),
+        "collection": cfg.CHROMA_COLLECTION,
+    }
+
+
 def clear_collection():
     global _collection
     client = chromadb.PersistentClient(path=cfg.CHROMA_PERSIST_DIR)

@@ -66,6 +66,14 @@ with st.sidebar:
     health = _get("/health")
     if health:
         st.success(f"✅ 已连接  |  模型: `{health.get('model', '?')}`")
+        status = _get("/index/status")
+        if status:
+            ec = status.get("email_count", 0)
+            cc = status.get("chunk_count", 0)
+            if cc:
+                st.info(f"📚 已索引 **{ec}** 封邮件 / **{cc}** 个片段")
+            else:
+                st.warning("⚠️ 索引为空，请先点击下方 “索引邮件”")
     else:
         st.error("❌ 后端未连接，请运行：\n`uvicorn api.main:app --reload`")
 

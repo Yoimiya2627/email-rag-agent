@@ -6,8 +6,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from models.schemas import (
@@ -21,7 +22,7 @@ from models.schemas import (
 from core.loader import load_emails
 from core.cleaner import clean_email
 from core.chunker import chunk_email
-from core.embedder import index_chunks, clear_collection
+from core.embedder import index_chunks, clear_collection, get_collection_stats
 from agents.coordinator import route
 import config.settings as cfg
 
@@ -60,7 +61,7 @@ async def health():
 
 
 @app.post("/index", response_model=IndexResponse)
-async def index_emails(request: IndexRequest = None):
+async def index_emails(request: Optional[IndexRequest] = Body(None)):
     try:
         path = (request.data_path if request else None) or None
         emails = load_emails(path)
@@ -87,6 +88,15 @@ async def clear_index():
         clear_collection()
         return {"success": True, "message": "Index cleared"}
     except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/index/status")
+async def index_status():
+    try:
+        return get_collection_stats()
+    except Exception as exc:
+        logger.exception("Status fetch failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

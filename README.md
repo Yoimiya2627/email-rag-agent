@@ -98,6 +98,7 @@ streamlit run frontend/app.py
 | GET  | `/health`        | 健康检查 |
 | POST | `/index`         | 索引邮件（body: `{"data_path": "..."}`，可省） |
 | POST | `/index/clear`   | 清空索引 |
+| GET  | `/index/status`  | 已索引邮件 / 片段数 |
 | POST | `/chat`          | 多 Agent 问答（含意图识别） |
 | POST | `/query`         | 直连 RAG 查询（不走意图路由） |
 
