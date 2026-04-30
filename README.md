@@ -1,150 +1,188 @@
-# 邮件智能助手 (Email RAG Agent)
+# Email RAG Agent
 
-基于 RAG + Multi-Agent 架构的邮件智能问答系统。支持邮件检索、摘要、回复草稿生成与统计分析。
+一个基于检索增强生成（RAG）和多 Agent 架构的邮件智能问答系统。
 
-## 技术栈
+做这个项目的初衷是想把"RAG 链路里每一层（向量检索 / BM25 / RRF 融合 / LLM 重排 / Query Rewrite）到底各自贡献多少"这件事真正搞清楚——所以从一开始就把所有组件做成可开关的特性，配套写了消融评测脚本去量化它们。
 
-- **后端**：FastAPI
-- **前端**：Streamlit
-- **向量库**：ChromaDB（本地持久化）
-- **嵌入模型**：`BAAI/bge-m3`（本地 sentence-transformers，零 API 成本）
-- **LLM**：DeepSeek（通过 OpenAI SDK 调用）
-- **检索**：向量检索 + BM25，使用 RRF 融合
-- **重排**：基于 LLM 的相关性打分（0–10）
-- **意图识别**：基于 LLM 的分类（非关键词匹配）
+## 它能做什么
 
-## 项目结构
-
-```
-.
-├── config/settings.py          # 全局配置（读取 .env）
-├── models/schemas.py           # Pydantic 数据模型
-├── core/                       # RAG 流水线
-│   ├── loader.py               # 加载 JSON 邮件
-│   ├── cleaner.py              # HTML / 签名清洗
-│   ├── chunker.py              # 段落感知切块
-│   ├── embedder.py             # 嵌入 + ChromaDB 索引
-│   ├── retriever.py            # 向量 + BM25 + RRF
-│   ├── reranker.py             # LLM 重排
-│   └── generator.py            # 答案生成
-├── agents/                     # 多 Agent
-│   ├── coordinator.py          # 意图识别 + 路由
-│   ├── retriever_agent.py      # 检索问答
-│   ├── summarizer_agent.py     # 摘要
-│   ├── writer_agent.py         # 回复草稿
-│   └── analyzer_agent.py       # 统计分析
-├── api/main.py                 # FastAPI 服务（端口 8000）
-├── frontend/app.py             # Streamlit UI（端口 8501）
-├── data/emails.json            # 示例邮件（15 封中文商务邮件）
-├── requirements.txt
-└── .env.example
-```
-
-## 多 Agent 流程
-
-```
-用户问题
-   ↓
-Coordinator（LLM 意图识别）
-   ↓
-┌──────────────┬──────────────┬──────────────┬──────────────┐
-│ retrieve     │ summarize    │ write_reply  │ analyze      │
-│ Retriever    │ Summarizer   │ Writer       │ Analyzer     │
-│ Agent        │ Agent        │ Agent        │ Agent        │
-└──────────────┴──────────────┴──────────────┴──────────────┘
-       ↓ (前三个共享)
-   Hybrid Search → LLM Rerank → Generate Answer
-```
-
-`AnalyzerAgent` 直接对索引中的元数据做聚合统计（发件人 Top5、标签分布、每日邮件量），再交由 LLM 做自然语言解读。
+- **检索式问答**："Q3 预算评审会议是谁发的？" → 从 5000 封邮件里找出相关邮件回答
+- **批量摘要**："这周项目进展整理一下" → 多封相关邮件综合摘要
+- **回信草稿**："帮我回 Bob 那封询价邮件" → 起草回复
+- **统计分析**："本月每个发件人发了多少封？" → 聚合元数据回答
+- **多轮对话**：每个 session 独立记忆，5 轮滑窗
+- **流式输出**：SSE 真流式（不是攒齐再放）
 
 ## 快速开始
 
-### 1. 安装依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. 配置环境变量
+### Docker（推荐）
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
+# 编辑 .env，填 DEEPSEEK_API_KEY
+docker-compose up --build
 ```
 
-### 3. 启动后端
+启动完成后：
+- API：http://localhost:8000（Swagger UI: `/docs`）
+- 前端：http://localhost:8501
+
+首次启动会在镜像构建时预下载 bge-m3 嵌入模型（~570MB），之后冷启动 ~10 秒。
+
+### 本地开发
 
 ```bash
-uvicorn api.main:app --reload
-# 监听 http://localhost:8000
+python -m venv .venv
+.venv/Scripts/activate            # Windows
+# source .venv/bin/activate        # Linux/macOS
+pip install -r requirements.txt
+
+cp .env.example .env               # 填 DEEPSEEK_API_KEY
+uvicorn api.main:app --reload      # 后端 :8000
+streamlit run frontend/app.py      # 前端 :8501
 ```
 
-### 4. 启动前端
+第一次访问前端时点侧边栏的"索引邮件"按钮，会把 `data/emails.json` 里的 5000 封邮件向量化并写入 ChromaDB。
+
+## 系统架构
+
+完整的架构图、时序图、状态机详见 [`docs/architecture.md`](docs/architecture.md)（10 张 Mermaid 图，覆盖离线索引、在线问答、混合检索 + RRF、Self-RAG 状态机、SSE 线程桥接、降级策略等）。
+
+简化版本：
+
+```
+                  ┌──────────────────────────────────────────────┐
+   用户 query  →  │  Coordinator（LLM 意图分类）                 │
+                  └─────┬─────────┬──────────┬─────────┬─────────┘
+                        │         │          │         │
+                  RetrieverAgent  Summarizer  Writer   Analyzer
+                        │         │          │         │
+                        └────┬────┴──────────┘         │
+                             ↓                          │
+              ┌──────────────────────────┐              │
+              │ Query Rewrite (LLM)      │              │
+              │ Hybrid Search:           │              │
+              │   Vector (bge-m3)        │              │
+              │ ⊕ BM25 (rank_bm25)       │              │
+              │   → RRF 融合             │              │
+              │ → 后过滤 (sender/date)   │              │
+              │ → LLM Rerank (熔断器)    │              │
+              │ → DeepSeek Generate      │              │
+              └──────────────────────────┘              │
+                             ↓                          ↓
+                          Answer ←── 元数据聚合（发件人 Top / 日期分布）
+```
+
+另有一条 Self-RAG 链路（`POST /chat/graph`），用 LangGraph 实现状态机，在生成前加一步"LLM 判断检索结果是否真的相关"，不相关就改写 query 重试（最多 2 次）。
+
+## 技术栈
+
+| 层 | 选择 | 理由 |
+|---|---|---|
+| 嵌入 | `BAAI/bge-m3`（本地） | 中文好、8192 token 长上下文、零 API 成本 |
+| 向量库 | ChromaDB（本地持久化） | 开发期零运维、迁移到 Milvus/Qdrant 改一个文件即可 |
+| 关键词检索 | `rank_bm25` + RRF 融合 | RRF 不依赖分数量纲（BM25 无界 vs 余弦 0~1） |
+| LLM | DeepSeek `deepseek-v4-flash` | 推理模型，重排和打分质量更稳 |
+| 工作流 | LangGraph 1.x | Self-RAG 状态机，支持条件边和循环重试 |
+| API | FastAPI + SSE | 流式 token 实时推送 |
+| 前端 | Streamlit | 快速搭 chat UI，能切换流式/Self-RAG/普通三种模式 |
+| 备选实现 | LangChain | 平行写了一版 `langchain_version/`，验证手写链路和框架版的一致性 |
+
+## 评测
+
+`scripts/run_ragas_eval.py` 实现了 6 个版本的消融对比：
+
+| 版本 | BM25 | RRF | Reranker | Query Rewrite |
+|------|------|-----|----------|---------------|
+| V1   | ❌   | ❌  | ❌       | ❌            |
+| V2   | ✅   | ✅  | ❌       | ❌            |
+| V3   | ✅   | ✅  | ✅       | ❌            |
+| V4   | ✅   | ✅  | ✅       | ✅            |
+| V5   | ✅   | ❌  | ✅       | ✅            |
+| V6   | ✅   | ✅  | ❌       | ✅            |
+
+三维度指标（每条都用 LLM 打分，0~1）：
+- `answer_relevancy`：答案与问题切题度
+- `faithfulness`：答案是否有上下文依据（不编）
+- `context_precision`：检索片段中真正有用的比例
+
+跑法：
 
 ```bash
-streamlit run frontend/app.py
-# 浏览器打开 http://localhost:8501
+python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 30
 ```
 
-### 5. 索引数据
+输出 `data/eval_results/comparison.json` + 终端对比表。
 
-在 Streamlit 侧边栏点击 **"🗂️ 索引邮件"**（首次会下载 ~500MB 嵌入模型）。
+## 一些值得记一笔的工程问题
+
+完整的"踩坑 + 修复 + 反思"放在 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md)。这里只列最有意思的几个：
+
+1. **推理模型 `max_tokens` 陷阱**：`deepseek-v4-flash` 的 `max_tokens` 同时覆盖 `reasoning_content` 和 `content`。原代码各处写的是 128~256，结果推理过程吃光预算后 `content` 永远是空字符串——RAGAS 全 0 分、query rewrite 失效、reranker 熔断、意图分类永远走兜底分支……一个看似简单的参数，把整个评测体系都污染了。修复后 bump 到 1500/3000 并加 `reasoning_content` 兜底解析。
+
+2. **SSE 假流式**：`/chat/stream` 端点用 `list(stream_generate(...))` 把所有 token 收完才 yield，等于伪装的非流式。改成 `asyncio.Queue` + 工作线程 `call_soon_threadsafe` 桥接才是真流式。
+
+3. **BM25 每次查询都重建索引**：5000 文档单次 800ms+。加了 `(chunk_count, BM25Okapi, ...)` 三元组缓存 + 用 `collection.count()` 做 cheap probe 检测漂移，命中后 22ms（40× 提升）。
+
+4. **消融实验里 reranker 熔断器状态泄漏**：模块全局变量 `_consecutive_failures` 被 V1~V6 共用，V3 偶发失败会永久关闭后续版本的 reranker。加 `reset_circuit_breaker()` 在每个版本开始前清零。
+
+5. **多线程 session 状态丢失**：`defaultdict(ConversationMemory)` 的 get-or-create 不是原子操作，并发首次访问同一 session 会互相覆盖。换成显式 lock + helper。
+
+## 已知限制
+
+- 单进程方案：`_sessions` 是进程内 dict，多 worker 部署需要换 Redis
+- 推理模型流式 UX：当前只转发 `delta.content`，长推理任务用户感知是"等 30s + 突然刷出来"——理想方案是同时转发 `delta.reasoning_content` 让前端展示思考过程
+- 检索 pipeline 在三处重复实现（RetrieverAgent / graph_workflow / run_ragas_eval），值得抽到 `core/pipeline.py`
+- 5000 邮件下 in-memory BM25 仍可接受，到 100 万级别需要换 Elasticsearch
 
 ## API 端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET  | `/health`        | 健康检查 |
-| POST | `/index`         | 索引邮件（body: `{"data_path": "..."}`，可省） |
-| POST | `/index/clear`   | 清空索引 |
-| GET  | `/index/status`  | 已索引邮件 / 片段数 |
-| POST | `/chat`          | 多 Agent 问答（含意图识别） |
-| POST | `/query`         | 直连 RAG 查询（不走意图路由） |
+| GET  | `/health` | 健康检查 |
+| POST | `/index` | 索引邮件 |
+| POST | `/index/clear` | 清空索引 |
+| GET  | `/index/status` | 已索引数量 |
+| POST | `/chat` | 多 Agent 问答（含意图分类） |
+| POST | `/chat/stream` | SSE 流式问答 |
+| POST | `/chat/graph` | Self-RAG 工作流（LangGraph） |
+| DELETE | `/chat/history` | 清除指定 session 记忆 |
+| POST | `/query` | 直连 RAG（不走意图路由） |
 
-示例：
-
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"query": "最近有哪些重要邮件？"}'
-```
-
-## 邮件 JSON 格式
-
-`data/emails.json` 是一个数组，每条记录字段：
+请求体（除 `/index` 外）通用：
 
 ```json
 {
-  "id": "email_001",
-  "subject": "项目进度同步",
-  "sender": "alice@example.com",
-  "recipients": ["bob@example.com"],
-  "date": "2026-04-15 10:30:00",
-  "body": "邮件正文...",
-  "labels": ["工作", "项目"],
-  "thread_id": "thread_001"
+  "query": "最近有哪些重要邮件？",
+  "session_id": "user-001"
 }
 ```
 
-`labels`、`thread_id` 可选；其余字段为必填。
+## 目录结构
 
-## 关键配置项（`.env`）
+```
+.
+├── api/main.py                # FastAPI 入口
+├── frontend/app.py            # Streamlit
+├── agents/                    # Coordinator + 4 个专家 agent + LangGraph 工作流
+├── core/                      # loader/cleaner/chunker/embedder/retriever/reranker/generator/memory
+├── config/settings.py         # 配置 + .env
+├── models/schemas.py          # Pydantic schemas
+├── scripts/                   # 数据生成 + RAGAS 评测 + 调试 probe
+├── langchain_version/         # LangChain 平行实现
+├── data/                      # emails.json + ragas_testset.json + eval_results/
+├── chroma_db/                 # ChromaDB 持久化（runtime 生成）
+├── docs/
+│   ├── architecture.md        # 架构图与流程详解
+│   ├── engineering_pitfalls.md  # 真实踩坑记录
+│   └── project_roadmap.md     # 任务路线图
+├── Dockerfile + docker-compose.yml
+└── requirements.txt
+```
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `DEEPSEEK_API_KEY` | — | 必填 |
-| `EMBEDDING_MODEL` | `BAAI/bge-m3` | 本地嵌入模型 |
-| `EMBEDDING_DEVICE` | `cpu` | 改为 `cuda` 启用 GPU |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 500 / 50 | 切块参数 |
-| `TOP_K` | 5 | 初检数量 |
-| `VECTOR_WEIGHT` / `BM25_WEIGHT` | 0.7 / 0.3 | 融合权重 |
-| `RERANK_TOP_N` | 3 | 重排后保留数 |
+## 开发笔记
 
-## 设计要点
-
-- **每模块单文件，分层清晰**：core / agents / api / frontend 各自独立。
-- **首次运行会下载嵌入模型**（约 500MB），之后离线可用，无嵌入 API 调用成本。
-- **重排失败有兜底**：LLM 评分异常时回退到原始顺序。
-- **意图识别失败有兜底**：异常时回退到 `general`，由 RetrieverAgent 处理。
-- **检索后过滤**：RetrieverAgent 提取的发件人过滤若清空结果会自动回退。
+- 每个新功能都加了 `ENABLE_XXX` 开关，方便消融实验切换
+- 所有 LLM 调用都带超时（默认 60s）+ 三段降级（重试 → 回退到无 LLM 的合理默认 → 友好提示）
+- 旧实现保留为降级路径，从不直接删除——这次几次重大重构（SSE / LangGraph / BM25 缓存）都遵守这个规则
+- `.env` 在 `.gitignore` 里；密钥不入库
