@@ -46,14 +46,6 @@ VERSION_FLAGS = {
     "V6": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=True),
 }
 
-_EVAL_SYSTEM = """你是一个RAG系统评测专家。请对以下内容打分（0.0到1.0之间的小数，保留2位）。
-
-评测维度：
-1. answer_relevancy：答案与问题的相关程度（1.0=完全相关，0.0=完全无关）
-2. faithfulness：答案是否完全基于提供的上下文（1.0=完全有依据，0.0=完全臆造）
-3. context_precision：检索到的上下文中有多少比例真正有助于回答问题（1.0=全部有用）
-
-严格按JSON格式返回：{"answer_relevancy": 0.xx, "faithfulness": 0.xx, "context_precision": 0.xx}"""
 
 
 def apply_flags(flags: dict):
@@ -80,33 +72,109 @@ def run_single(client: OpenAI, question: str, ground_truth: str) -> Dict[str, An
     return {"answer": answer, "contexts": contexts}
 
 
+_EVAL_USER_TMPL = """你是RAG系统评测专家。请给下面的检索问答打分。
+
+【问题】{question}
+
+【检索到的上下文片段】
+{ctx_text}
+
+【系统生成的答案】
+{answer}
+
+请根据以下三个维度打分（每个维度0.00到1.00之间的小数）：
+1. answer_relevancy：答案与问题的相关程度（1.0=完全切题）
+2. faithfulness：答案是否有上下文依据（1.0=完全有据可查）
+3. context_precision：上下文中真正有用的片段比例（1.0=全部有用）
+
+请直接输出JSON，例如：
+{{"answer_relevancy": 0.85, "faithfulness": 0.90, "context_precision": 0.75}}"""
+
+
+def _cosine(a: List[float], b: List[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
+    return dot / (na * nb + 1e-9)
+
+
+def _score_by_embedding(question: str, answer: str, contexts: List[str]) -> Dict[str, float]:
+    """降级方案：用向量相似度打分，不依赖 LLM。"""
+    from core.embedder import embed_texts
+    texts = [question, answer] + contexts
+    vecs = embed_texts(texts)
+    q_vec, a_vec, ctx_vecs = vecs[0], vecs[1], vecs[2:]
+
+    answer_relevancy = round(max(0.0, _cosine(q_vec, a_vec)), 4)
+    faithfulness = round(max((max(0.0, _cosine(a_vec, c)) for c in ctx_vecs), default=0.0), 4)
+    threshold = 0.5
+    relevant = sum(1 for c in ctx_vecs if _cosine(q_vec, c) >= threshold)
+    context_precision = round(relevant / max(len(ctx_vecs), 1), 4)
+    return {"answer_relevancy": answer_relevancy, "faithfulness": faithfulness, "context_precision": context_precision}
+
+
+def _extract_json_obj(text: str) -> str:
+    """从一段文本里抽出最后一个 {...} JSON 对象。"""
+    text = text.strip()
+    if "```" in text:
+        # 优先提取 ```json ... ``` 代码块内的内容
+        parts = text.split("```")
+        if len(parts) >= 2:
+            text = parts[1].lstrip("json").strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        return text[start:end]
+    return text
+
+
 def score_response(client: OpenAI, question: str, answer: str, contexts: List[str]) -> Dict[str, float]:
+    """先尝试 LLM 打分，失败则降级为向量相似度打分。
+
+    DEEPSEEK_MODEL=deepseek-v4-flash 是推理模型，会先输出 reasoning_content 再输出
+    content。max_tokens 太小会让推理过程吃光预算，content 为空（finish_reason='length'）。
+    这里给到 1500 token 留足空间，并在 content 仍为空时从 reasoning_content 中兜底解析 JSON。
+    """
     ctx_text = "\n\n".join(f"[{i+1}] {c[:300]}" for i, c in enumerate(contexts))
-    prompt = (
-        f"问题：{question}\n\n"
-        f"检索到的上下文：\n{ctx_text}\n\n"
-        f"系统答案：{answer}"
-    )
+    prompt = _EVAL_USER_TMPL.format(question=question, ctx_text=ctx_text, answer=answer)
     for attempt in range(3):
         try:
             resp = client.chat.completions.create(
                 model=cfg.DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": _EVAL_SYSTEM},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-                max_tokens=128,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=1500,
             )
-            raw = resp.choices[0].message.content.strip()
-            if "```" in raw:
-                raw = raw.split("```")[1].lstrip("json").strip()
+            choice = resp.choices[0]
+            raw = choice.message.content or ""
+            finish = getattr(choice, "finish_reason", None)
+
+            # content 为空时尝试从 reasoning_content（推理模型独有字段）兜底
+            if not raw.strip():
+                rc = getattr(choice.message, "reasoning_content", None) or ""
+                logger.warning(
+                    f"LLM score attempt {attempt+1}: empty content "
+                    f"(finish_reason={finish!r}, reasoning_len={len(rc)})"
+                )
+                if rc and "{" in rc and "}" in rc:
+                    raw = rc
+                else:
+                    raise ValueError(f"Empty response from LLM (finish_reason={finish!r})")
+
+            raw = _extract_json_obj(raw)
             return json.loads(raw)
         except Exception as exc:
-            logger.warning(f"Score attempt {attempt+1} failed: {exc}")
+            logger.warning(f"LLM score attempt {attempt+1} failed: {exc}")
             if attempt < 2:
                 time.sleep(1)
-    return {"answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0}
+
+    # 降级：LLM 打分全部失败，改用向量相似度
+    logger.warning("LLM scoring failed 3 times, falling back to embedding-based scoring")
+    try:
+        return _score_by_embedding(question, answer, contexts)
+    except Exception as exc:
+        logger.warning(f"Embedding scoring also failed: {exc}")
+        return {"answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0}
 
 
 def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) -> Dict[str, Any]:
