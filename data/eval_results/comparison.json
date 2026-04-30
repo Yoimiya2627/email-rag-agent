@@ -1,0 +1,88 @@
+{
+  "summaries": [
+    {
+      "version": "V1",
+      "flags": {
+        "ENABLE_BM25": false,
+        "ENABLE_RRF": false,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": false
+      },
+      "avg": {
+        "answer_relevancy": 0.8983,
+        "faithfulness": 0.8683,
+        "context_precision": 0.5077
+      }
+    },
+    {
+      "version": "V2",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": false
+      },
+      "avg": {
+        "answer_relevancy": 0.9517,
+        "faithfulness": 0.9117,
+        "context_precision": 0.5543
+      }
+    },
+    {
+      "version": "V3",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": false
+      },
+      "avg": {
+        "answer_relevancy": 0.9227,
+        "faithfulness": 0.905,
+        "context_precision": 0.5787
+      }
+    },
+    {
+      "version": "V4",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": true
+      },
+      "avg": {
+        "answer_relevancy": 0.9117,
+        "faithfulness": 0.9233,
+        "context_precision": 0.55
+      }
+    },
+    {
+      "version": "V5",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": false,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": true
+      },
+      "avg": {
+        "answer_relevancy": 0.87,
+        "faithfulness": 0.8517,
+        "context_precision": 0.6383
+      }
+    },
+    {
+      "version": "V6",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": true
+      },
+      "avg": {
+        "answer_relevancy": 0.94,
+        "faithfulness": 0.9117,
+        "context_precision": 0.5533
+      }
+    }
+  ]
+}

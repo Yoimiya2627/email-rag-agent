@@ -1,0 +1,18 @@
+{
+  "summaries": [
+    {
+      "version": "V1",
+      "flags": {
+        "ENABLE_BM25": false,
+        "ENABLE_RRF": false,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": false
+      },
+      "avg": {
+        "answer_relevancy": 0.675,
+        "faithfulness": 1.0,
+        "context_precision": 0.33
+      }
+    }
+  ]
+}
