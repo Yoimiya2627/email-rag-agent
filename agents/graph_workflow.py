@@ -16,6 +16,7 @@ import logging
 from typing import Any, Dict, List, Optional, TypedDict
 
 from openai import OpenAI
+from langgraph.graph import StateGraph, END
 
 import config.settings as cfg
 from core.retriever import hybrid_search
@@ -65,9 +66,17 @@ def node_rewrite(state: RAGState) -> RAGState:
             model=cfg.DEEPSEEK_MODEL,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": query}],
             temperature=0.3 * (retry + 1),
-            max_tokens=128,
+            # 推理模型预留充足空间；128 token 会被推理过程吃光导致 content 为空
+            max_tokens=1500,
+            timeout=cfg.LLM_TIMEOUT,
         )
-        state["rewritten_query"] = resp.choices[0].message.content.strip() or query
+        choice = resp.choices[0]
+        rewritten = (choice.message.content or "").strip()
+        if not rewritten:
+            rc = getattr(choice.message, "reasoning_content", None) or ""
+            lines = [ln.strip() for ln in rc.splitlines() if ln.strip()]
+            rewritten = lines[-1] if lines else ""
+        state["rewritten_query"] = rewritten or query
     except Exception as exc:
         logger.warning(f"Rewrite failed: {exc}")
         state["rewritten_query"] = query
@@ -135,12 +144,17 @@ def node_generate(state: RAGState) -> RAGState:
     return state
 
 
+def _bump_retry(state: RAGState) -> RAGState:
+    """LangGraph node: increment retry counter before re-entering rewrite."""
+    state["retry_count"] = state.get("retry_count", 0) + 1
+    return state
+
+
 def _should_retry(state: RAGState) -> str:
-    """Conditional edge: retry if no relevant results and retries remain."""
+    """Conditional edge label: 'retry' if no relevant docs and retries remain."""
     retry = state.get("retry_count", 0)
     has_relevant = bool(state.get("relevant_results"))
     if not has_relevant and retry < MAX_RETRIES:
-        state["retry_count"] = retry + 1
         return "retry"
     return "generate"
 
@@ -148,23 +162,34 @@ def _should_retry(state: RAGState) -> str:
 # ── Graph builder ──────────────────────────────────────────────────────────────
 
 def build_graph():
-    """
-    Build and return a simple state-machine executor.
-    (Uses a manual loop instead of langgraph to avoid the extra dependency.)
-    """
-    def run(state: RAGState) -> RAGState:
-        state = node_rewrite(state)
-        for _ in range(MAX_RETRIES + 1):
-            state = node_retrieve(state)
-            state = node_grade_contexts(state)
-            decision = _should_retry(state)
-            if decision == "generate":
-                break
-            state = node_rewrite(state)  # retry with rewritten query
-        state = node_generate(state)
-        return state
+    """Build the Self-RAG state graph using langgraph.
 
-    return run
+    Flow:
+        rewrite → retrieve → grade ─┬─relevant→ generate → END
+                                    └─retry→ bump_retry → rewrite (loop)
+
+    The conditional edge after `grade` checks both whether any relevant
+    contexts were found and whether retry budget remains (MAX_RETRIES).
+    """
+    graph = StateGraph(RAGState)
+    graph.add_node("rewrite", node_rewrite)
+    graph.add_node("retrieve", node_retrieve)
+    graph.add_node("grade", node_grade_contexts)
+    graph.add_node("bump_retry", _bump_retry)
+    graph.add_node("generate", node_generate)
+
+    graph.set_entry_point("rewrite")
+    graph.add_edge("rewrite", "retrieve")
+    graph.add_edge("retrieve", "grade")
+    graph.add_conditional_edges(
+        "grade",
+        _should_retry,
+        {"retry": "bump_retry", "generate": "generate"},
+    )
+    graph.add_edge("bump_retry", "rewrite")
+    graph.add_edge("generate", END)
+
+    return graph.compile()
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -191,6 +216,6 @@ def run_graph(request: AgentRequest, memory=None) -> AgentResponse:
         "retry_count": 0,
         "history": history,
     }
-    final_state = get_graph()(state)
+    final_state = get_graph().invoke(state)
     sources = final_state.get("relevant_results") or final_state.get("results", [])
     return AgentResponse(answer=final_state["answer"], sources=sources[:cfg.RERANK_TOP_N])
