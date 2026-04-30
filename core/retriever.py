@@ -1,11 +1,12 @@
 import logging
 import re
-from typing import List
+import threading
+from typing import List, Optional, Tuple
 
 from rank_bm25 import BM25Okapi
 
 from models.schemas import SearchResult
-from core.embedder import search_similar, get_all_chunks
+from core.embedder import search_similar, get_all_chunks, get_collection_count
 import config.settings as cfg
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,43 @@ logger = logging.getLogger(__name__)
 def _tokenize(text: str) -> List[str]:
     # Handle both Chinese characters and English words/numbers
     return re.findall(r"[一-鿿]|[a-zA-Z0-9]+", text.lower())
+
+
+# BM25 index cache. With 5000 emails, rebuilding the index from scratch on
+# every query (ChromaDB full read + tokenize all chunks + Okapi build) is the
+# dominant retrieval cost. Cache the index and invalidate when the chunk count
+# changes (e.g. after re-indexing).
+_bm25_lock = threading.Lock()
+_bm25_cache: Optional[Tuple[int, BM25Okapi, List[dict], List[str]]] = None
+# tuple: (chunk_count, bm25_index, all_chunks, corpus_texts)
+
+
+def _get_bm25_index() -> Optional[Tuple[BM25Okapi, List[dict], List[str]]]:
+    """Return cached (bm25, all_chunks, corpus). Rebuild if chunk count drifted.
+
+    Fast path uses `collection.count()` (cheap) — only fetch all documents
+    from ChromaDB and rebuild Okapi if the count diverges from the cache.
+    """
+    global _bm25_cache
+    n = get_collection_count()
+    if n == 0:
+        return None
+    with _bm25_lock:
+        if _bm25_cache is not None and _bm25_cache[0] == n:
+            return _bm25_cache[1], _bm25_cache[2], _bm25_cache[3]
+        logger.info(f"Building BM25 index over {n} chunks")
+        all_chunks = get_all_chunks()
+        corpus = [c["content"] for c in all_chunks]
+        bm25 = BM25Okapi([_tokenize(doc) for doc in corpus])
+        _bm25_cache = (n, bm25, all_chunks, corpus)
+        return bm25, all_chunks, corpus
+
+
+def invalidate_bm25_cache() -> None:
+    """Call after re-indexing emails so the next query rebuilds BM25."""
+    global _bm25_cache
+    with _bm25_lock:
+        _bm25_cache = None
 
 
 def vector_search(query: str, top_k: int = None) -> List[SearchResult]:
@@ -33,12 +71,10 @@ def vector_search(query: str, top_k: int = None) -> List[SearchResult]:
 
 def bm25_search(query: str, top_k: int = None) -> List[SearchResult]:
     top_k = top_k or cfg.TOP_K
-    all_chunks = get_all_chunks()
-    if not all_chunks:
+    cached = _get_bm25_index()
+    if cached is None:
         return []
-
-    corpus = [c["content"] for c in all_chunks]
-    bm25 = BM25Okapi([_tokenize(doc) for doc in corpus])
+    bm25, all_chunks, corpus = cached
     scores = bm25.get_scores(_tokenize(query))
 
     top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]

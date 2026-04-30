@@ -91,6 +91,11 @@ def search_similar(query: str, top_k: int = None) -> List[dict]:
     return items
 
 
+def get_collection_count() -> int:
+    """Cheap count probe — does not fetch any documents."""
+    return _get_collection().count()
+
+
 def get_all_chunks() -> List[dict]:
     collection = _get_collection()
     if collection.count() == 0:

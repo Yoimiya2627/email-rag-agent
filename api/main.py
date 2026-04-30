@@ -93,6 +93,9 @@ async def index_emails(request: Optional[IndexRequest] = Body(None)):
             cleaned = clean_email(email)
             all_chunks.extend(chunk_email(cleaned))
         count = index_chunks(all_chunks)
+        # Invalidate BM25 cache so the next query rebuilds it over the new corpus
+        from core.retriever import invalidate_bm25_cache
+        invalidate_bm25_cache()
         return IndexResponse(
             success=True,
             message=f"Indexed {len(emails)} emails into {count} chunks",
@@ -109,6 +112,8 @@ async def index_emails(request: Optional[IndexRequest] = Body(None)):
 async def clear_index():
     try:
         clear_collection()
+        from core.retriever import invalidate_bm25_cache
+        invalidate_bm25_cache()
         return {"success": True, "message": "Index cleared"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
