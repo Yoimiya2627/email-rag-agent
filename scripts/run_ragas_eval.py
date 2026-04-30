@@ -180,6 +180,9 @@ def score_response(client: OpenAI, question: str, answer: str, contexts: List[st
 def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) -> Dict[str, Any]:
     flags = VERSION_FLAGS[version]
     apply_flags(flags)
+    # 重置 reranker 熔断器，避免上一个版本的失败计数泄漏到当前版本，污染消融对比
+    from core.reranker import reset_circuit_breaker
+    reset_circuit_breaker()
     logger.info(f"\n=== {version} | flags={flags} ===")
 
     samples = testset[:limit]

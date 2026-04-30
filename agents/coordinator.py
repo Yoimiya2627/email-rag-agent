@@ -42,11 +42,23 @@ def classify_intent(query: str) -> IntentType:
                 {"role": "user", "content": query},
             ],
             temperature=0,
-            max_tokens=128,
+            # 推理模型预留推理 + 答案空间，避免 content 为空
+            max_tokens=1500,
+            timeout=cfg.LLM_TIMEOUT,
         )
-        raw = resp.choices[0].message.content.strip()
+        choice = resp.choices[0]
+        raw = (choice.message.content or "").strip()
+        if not raw:
+            rc = getattr(choice.message, "reasoning_content", None) or ""
+            if rc and "{" in rc and "}" in rc:
+                raw = rc
+            else:
+                raise ValueError(f"Empty intent response (finish_reason={choice.finish_reason!r})")
         if "```" in raw:
             raw = raw.split("```")[1].lstrip("json").strip()
+        s, e = raw.find("{"), raw.rfind("}") + 1
+        if s >= 0 and e > s:
+            raw = raw[s:e]
         data = json.loads(raw)
         return IntentType(data["intent"])
     except Exception as exc:

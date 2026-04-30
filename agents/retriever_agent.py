@@ -48,9 +48,19 @@ class RetrieverAgent:
                     {"role": "user", "content": query},
                 ],
                 temperature=0,
-                max_tokens=128,
+                # 推理模型需要给推理过程 + 答案都留足空间，否则 content 空
+                max_tokens=1500,
+                timeout=cfg.LLM_TIMEOUT,
             )
-            rewritten = resp.choices[0].message.content.strip()
+            choice = resp.choices[0]
+            rewritten = (choice.message.content or "").strip()
+            if not rewritten:
+                # 兜底：从 reasoning_content 取最后一行非空文本作为改写结果
+                rc = getattr(choice.message, "reasoning_content", None) or ""
+                lines = [ln.strip() for ln in rc.splitlines() if ln.strip()]
+                rewritten = lines[-1] if lines else ""
+                if rewritten:
+                    logger.debug(f"Query rewrite: empty content, used reasoning fallback")
             if rewritten:
                 logger.debug(f"Query rewritten: {query!r} → {rewritten!r}")
                 return rewritten
@@ -67,11 +77,22 @@ class RetrieverAgent:
                     {"role": "user", "content": query},
                 ],
                 temperature=0,
-                max_tokens=256,
+                max_tokens=1500,
+                timeout=cfg.LLM_TIMEOUT,
             )
-            raw = resp.choices[0].message.content.strip()
+            choice = resp.choices[0]
+            raw = (choice.message.content or "").strip()
+            if not raw:
+                rc = getattr(choice.message, "reasoning_content", None) or ""
+                if rc and "{" in rc and "}" in rc:
+                    raw = rc
+                else:
+                    raise ValueError(f"Empty filter response (finish_reason={choice.finish_reason!r})")
             if "```" in raw:
                 raw = raw.split("```")[1].lstrip("json").strip()
+            s, e = raw.find("{"), raw.rfind("}") + 1
+            if s >= 0 and e > s:
+                raw = raw[s:e]
             return json.loads(raw)
         except Exception as exc:
             logger.warning(f"Filter extraction failed: {exc}")

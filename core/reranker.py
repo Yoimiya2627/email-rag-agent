@@ -16,6 +16,13 @@ _consecutive_failures = 0
 _FAILURE_THRESHOLD = 3  # disable reranker after this many consecutive failures
 
 
+def reset_circuit_breaker() -> None:
+    """Reset failure counter — call between RAGAS ablation versions so a bad
+    run on V3 does not silently disable reranker for V4/V5/V6."""
+    global _consecutive_failures
+    _consecutive_failures = 0
+
+
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
@@ -60,12 +67,25 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
             model=cfg.DEEPSEEK_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=256,
+            # DEEPSEEK_MODEL=deepseek-v4-flash 是推理模型，先输出 reasoning_content
+            # 再输出 content。max_tokens 太小会让推理过程吃光预算，content 为空。
+            max_tokens=1500,
             timeout=cfg.LLM_TIMEOUT,
         )
-        raw = resp.choices[0].message.content.strip()
+        choice = resp.choices[0]
+        raw = (choice.message.content or "").strip()
+        if not raw:
+            rc = getattr(choice.message, "reasoning_content", None) or ""
+            if rc and "{" in rc and "}" in rc:
+                raw = rc.strip()
+            else:
+                raise ValueError(f"Empty rerank response (finish_reason={choice.finish_reason!r})")
         if "```" in raw:
             raw = raw.split("```")[1].lstrip("json").strip()
+        # 推理模型有时会在 content/reasoning 中夹杂解释文本，抽出最后一个 JSON 对象
+        s, e = raw.find("{"), raw.rfind("}") + 1
+        if s >= 0 and e > s:
+            raw = raw[s:e]
         data = json.loads(raw)
         scores = data.get("scores", [])
 

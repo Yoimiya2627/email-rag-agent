@@ -102,11 +102,23 @@ def node_grade_contexts(state: RAGState) -> RAGState:
             model=cfg.DEEPSEEK_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=64,
+            # 推理模型需要充足空间；64 token 会让 content 永远为空
+            max_tokens=1500,
+            timeout=cfg.LLM_TIMEOUT,
         )
-        raw = resp.choices[0].message.content.strip()
+        choice = resp.choices[0]
+        raw = (choice.message.content or "").strip()
+        if not raw:
+            rc = getattr(choice.message, "reasoning_content", None) or ""
+            if rc and "[" in rc and "]" in rc:
+                raw = rc
+            else:
+                raise ValueError(f"Empty grade response (finish_reason={choice.finish_reason!r})")
         if "```" in raw:
             raw = raw.split("```")[1].lstrip("json").strip()
+        s, e = raw.find("["), raw.rfind("]") + 1
+        if s >= 0 and e > s:
+            raw = raw[s:e]
         indices = json.loads(raw)
         state["relevant_results"] = [results[i] for i in indices if 0 <= i < len(results)]
     except Exception as exc:
