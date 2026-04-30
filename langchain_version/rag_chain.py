@@ -100,8 +100,11 @@ def build_chain(k: int = 5, window: int = 5):
 
 
 def ask(chain, question: str) -> dict:
-    """Run a question through the chain and return answer + sources."""
-    result = chain({"question": question})
+    """Run a question through the chain and return answer + sources.
+
+    Modern langchain (>=0.2) replaces Chain.__call__/__call with .invoke().
+    """
+    result = chain.invoke({"question": question})
     sources = [
         {
             "content": doc.page_content[:300],
