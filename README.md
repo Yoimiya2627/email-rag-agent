@@ -109,10 +109,29 @@ streamlit run frontend/app.py      # 前端 :8501
 跑法：
 
 ```bash
-python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 30
+python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 ```
 
 输出 `data/eval_results/comparison.json` + 终端对比表。
+
+### 实测结果（5000 封语料 / 100 题测试集）
+
+| Version | BM25 | RRF | Rerank | Rewrite | Relevancy | Faithful | Precision |
+|---------|:----:|:---:|:------:|:-------:|----------:|---------:|----------:|
+| V1 纯向量 | ❌ | ❌ | ❌ | ❌ | 0.8983 | 0.8683 | 0.5077 |
+| **V2** +BM25+RRF | ✅ | ✅ | ❌ | ❌ | **0.9517** | 0.9117 | 0.5543 |
+| V3 +Reranker | ✅ | ✅ | ✅ | ❌ | 0.9227 | 0.9050 | 0.5787 |
+| V4 全开 | ✅ | ✅ | ✅ | ✅ | 0.9117 | **0.9233** | 0.5500 |
+| V5 V4-RRF | ✅ | ❌ | ✅ | ✅ | 0.8700 | 0.8517 | **0.6383** |
+| V6 V4-Reranker | ✅ | ✅ | ❌ | ✅ | 0.9400 | 0.9117 | 0.5533 |
+
+三个反直觉发现（详见 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md) 第十一节）：
+
+1. **BM25 + RRF 是 ROI 最高的组件**：V1→V2 三项指标全升，因为评测题里大量字面命中型查询（人名 / 日期 / 项目代号）纯向量抓不住
+2. **LLM Reranker 在这个数据集上是负贡献**：V2→V3 / V4→V6 都印证 Reranker 让 precision 微升但 relevancy 反降——LLM 当 Reranker 是反模式，应该用 cross-encoder（如 bge-reranker-v2-m3）
+3. **Query Rewrite 是双刃剑**：rewrite 把"会议纪要"改成"会议总结记录"，召回更宽但 precision 反降；更稳的做法是原 query + 改写 query 双路取并集
+
+**实用结论**：在这个数据集上 **V2（仅 BM25+RRF）反而打赢了 V4（全开）**，组件越多不一定越好。
 
 ## 一些值得记一笔的工程问题
 
