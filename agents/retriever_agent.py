@@ -16,6 +16,13 @@ import config.settings as cfg
 
 logger = logging.getLogger(__name__)
 
+_REWRITE_SYSTEM = """你是一个搜索查询优化专家。请将用户的口语化问题改写为更适合语义搜索的查询语句。
+要求：
+1. 展开缩写和指代词（如"它""这个项目"→具体名称）
+2. 补充隐含的关键词（如"最近的问题"→"最近发生的技术问题或业务问题"）
+3. 保持核心意图不变
+4. 只返回改写后的查询语句，不要解释。"""
+
 _FILTER_SYSTEM = """从用户问题中提取邮件检索的过滤条件，以JSON格式返回：
 {
   "query": "用于语义搜索的核心查询语句",
@@ -29,6 +36,27 @@ _FILTER_SYSTEM = """从用户问题中提取邮件检索的过滤条件，以JSO
 class RetrieverAgent:
     def __init__(self):
         self._client = OpenAI(api_key=cfg.DEEPSEEK_API_KEY, base_url=cfg.DEEPSEEK_BASE_URL)
+
+    def _rewrite_query(self, query: str) -> str:
+        if not cfg.ENABLE_QUERY_REWRITE:
+            return query
+        try:
+            resp = self._client.chat.completions.create(
+                model=cfg.DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": _REWRITE_SYSTEM},
+                    {"role": "user", "content": query},
+                ],
+                temperature=0,
+                max_tokens=128,
+            )
+            rewritten = resp.choices[0].message.content.strip()
+            if rewritten:
+                logger.debug(f"Query rewritten: {query!r} → {rewritten!r}")
+                return rewritten
+        except Exception as exc:
+            logger.warning(f"Query rewrite failed: {exc}")
+        return query
 
     def _extract_filters(self, query: str) -> dict:
         try:
@@ -49,9 +77,10 @@ class RetrieverAgent:
             logger.warning(f"Filter extraction failed: {exc}")
             return {"query": query, "sender": "", "date_hint": "", "labels": []}
 
-    def run(self, request: AgentRequest) -> AgentResponse:
-        filters = self._extract_filters(request.query)
-        search_query = filters.get("query") or request.query
+    def run(self, request: AgentRequest, memory=None) -> AgentResponse:
+        rewritten = self._rewrite_query(request.query)
+        filters = self._extract_filters(rewritten)
+        search_query = filters.get("query") or rewritten
 
         # Fetch extra candidates so reranker (and post-filters) have room to work
         results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
@@ -61,7 +90,8 @@ class RetrieverAgent:
         results = _apply_date_filter(results, filters.get("date_hint", ""))
 
         reranked = rerank(request.query, results, top_n=cfg.RERANK_TOP_N)
-        answer = generate_answer(request.query, reranked)
+        history = memory.to_messages() if memory else None
+        answer = generate_answer(request.query, reranked, history=history)
         return AgentResponse(answer=answer, sources=reranked)
 
 

@@ -127,3 +127,15 @@ def clear_collection():
     client.delete_collection(cfg.CHROMA_COLLECTION)
     _collection = None
     logger.info("ChromaDB collection cleared")
+
+
+def _get_embedding_fn():
+    """Return a LangChain-compatible embedding function wrapping our local model."""
+    class _EmbeddingFn:
+        def embed_documents(self, texts):
+            return embed_texts(texts)
+
+        def embed_query(self, text):
+            return embed_texts([text])[0]
+
+    return _EmbeddingFn()

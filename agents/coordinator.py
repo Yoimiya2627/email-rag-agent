@@ -54,7 +54,7 @@ def classify_intent(query: str) -> IntentType:
         return IntentType.GENERAL
 
 
-def route(request: AgentRequest) -> AgentResponse:
+def route(request: AgentRequest, memory=None) -> AgentResponse:
     from agents.retriever_agent import RetrieverAgent
     from agents.summarizer_agent import SummarizerAgent
     from agents.writer_agent import WriterAgent
@@ -71,6 +71,6 @@ def route(request: AgentRequest) -> AgentResponse:
         IntentType.GENERAL: RetrieverAgent,
     }
     agent = agent_map[intent]()
-    response = agent.run(request)
+    response = agent.run(request, memory=memory)
     response.intent = intent
     return response

@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: email-rag-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist ChromaDB and model cache outside the container
+      - ./chroma_db:/app/chroma_db
+      - ./data:/app/data
+      - hf_cache:/root/.cache/huggingface
+    env_file:
+      - .env
+    environment:
+      - CHROMA_PERSIST_DIR=/app/chroma_db
+      - EMAIL_DATA_PATH=/app/data/emails.json
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    image: python:3.11-slim
+    container_name: email-rag-frontend
+    working_dir: /app
+    command: >
+      sh -c "pip install streamlit requests --quiet &&
+             streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0"
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - API_URL=http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hf_cache:

@@ -111,8 +111,18 @@ with st.sidebar:
             st.session_state["pending_query"] = q
 
     st.divider()
+    st.subheader("⚙️ 选项")
+    use_graph = st.toggle("Self-RAG 工作流", value=False, help="启用 LangGraph Self-RAG（更慢但更准）")
+    use_stream = st.toggle("流式输出", value=False, help="SSE 流式返回 token（仅普通模式）")
+
+    st.divider()
     if st.button("🗑️ 清空对话", use_container_width=True):
         st.session_state["messages"] = []
+        sid = st.session_state.get("session_id", "default")
+        try:
+            requests.delete(f"{API_URL}/chat/history", params={"session_id": sid}, timeout=5)
+        except Exception:
+            pass
 
 # ── main chat area ────────────────────────────────────────────────────────────
 
@@ -121,6 +131,9 @@ st.caption("支持检索、摘要、回复撰写、统计分析")
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
+if "session_id" not in st.session_state:
+    import uuid
+    st.session_state["session_id"] = str(uuid.uuid4())
 
 # Render history
 for msg in st.session_state["messages"]:
@@ -175,15 +188,45 @@ pending = st.session_state.pop("pending_query", None)
 user_input = st.chat_input("输入你的问题，例如：最近有哪些重要邮件？") or pending
 
 if user_input:
+    session_id = st.session_state["session_id"]
     # Show user bubble
     with st.chat_message("user"):
         st.markdown(user_input)
     st.session_state["messages"].append({"role": "user", "content": user_input})
 
     # Call API and show assistant bubble
+    payload = {"query": user_input, "session_id": session_id}
+    endpoint = "/chat/graph" if use_graph else "/chat"
+
     with st.chat_message("assistant"):
-        with st.spinner("思考中…"):
-            result = _post("/chat", {"query": user_input})
+        if use_stream and not use_graph:
+            # SSE streaming
+            import sseclient
+            answer_placeholder = st.empty()
+            full_answer = ""
+            try:
+                with requests.post(
+                    f"{API_URL}/chat/stream",
+                    json=payload,
+                    stream=True,
+                    timeout=120,
+                ) as resp:
+                    client_sse = sseclient.SSEClient(resp)
+                    for event in client_sse.events():
+                        if event.data == "[DONE]":
+                            break
+                        import json as _json
+                        token_data = _json.loads(event.data)
+                        if "token" in token_data:
+                            full_answer += token_data["token"]
+                            answer_placeholder.markdown(full_answer + "▌")
+                answer_placeholder.markdown(full_answer)
+                result = {"answer": full_answer, "sources": [], "intent": ""}
+            except Exception as exc:
+                result = {"error": str(exc)}
+        else:
+            with st.spinner("思考中…"):
+                result = _post(endpoint, payload)
 
         if result.get("error"):
             st.error(result["error"])

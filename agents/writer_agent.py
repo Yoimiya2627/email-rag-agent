@@ -26,7 +26,7 @@ class WriterAgent:
     def __init__(self):
         self._client = OpenAI(api_key=cfg.DEEPSEEK_API_KEY, base_url=cfg.DEEPSEEK_BASE_URL)
 
-    def run(self, request: AgentRequest) -> AgentResponse:
+    def run(self, request: AgentRequest, memory=None) -> AgentResponse:
         results = hybrid_search(request.query, top_k=cfg.TOP_K)
         reranked = rerank(request.query, results, top_n=3)
 

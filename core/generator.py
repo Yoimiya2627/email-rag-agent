@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Generator, Iterator, List, Optional
 
 from openai import OpenAI
 
@@ -43,6 +43,7 @@ def generate_answer(
     query: str,
     results: List[SearchResult],
     system_prompt: Optional[str] = None,
+    history: Optional[List[dict]] = None,
 ) -> str:
     if not results:
         return "未找到相关邮件内容，无法回答该问题。"
@@ -50,14 +51,62 @@ def generate_answer(
     context = build_context(results)
     user_msg = f"参考邮件内容：\n{context}\n\n用户问题：{query}"
 
+    messages = [{"role": "system", "content": system_prompt or _DEFAULT_SYSTEM}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": user_msg})
+
     client = _get_client()
-    resp = client.chat.completions.create(
+    try:
+        resp = client.chat.completions.create(
+            model=cfg.DEEPSEEK_MODEL,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=1500,
+            timeout=cfg.LLM_TIMEOUT,
+        )
+        return resp.choices[0].message.content
+    except Exception as exc:
+        # Degradation level 2: return a summary built directly from context (no LLM)
+        logger.warning(f"LLM generate_answer failed ({exc}), falling back to context summary")
+        if results:
+            snippets = "\n".join(
+                f"[{r.metadata.get('date','?')}] {r.metadata.get('subject','?')}: {r.content[:150]}"
+                for r in results[:3]
+            )
+            return f"（LLM暂时不可用，以下是原始检索结果）\n\n{snippets}"
+        return "服务暂时不可用，请稍后重试。"
+
+
+def stream_generate(
+    query: str,
+    results: List[SearchResult],
+    system_prompt: Optional[str] = None,
+    history: Optional[List[dict]] = None,
+) -> Iterator[str]:
+    """Yields answer tokens one by one for SSE streaming."""
+    if not results:
+        yield "未找到相关邮件内容，无法回答该问题。"
+        return
+
+    context = build_context(results)
+    user_msg = f"参考邮件内容：\n{context}\n\n用户问题：{query}"
+
+    messages = [{"role": "system", "content": system_prompt or _DEFAULT_SYSTEM}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": user_msg})
+
+    client = _get_client()
+    stream = client.chat.completions.create(
         model=cfg.DEEPSEEK_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt or _DEFAULT_SYSTEM},
-            {"role": "user", "content": user_msg},
-        ],
+        messages=messages,
         temperature=0.3,
         max_tokens=1500,
+        stream=True,
+        timeout=cfg.LLM_TIMEOUT,
     )
-    return resp.choices[0].message.content
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta

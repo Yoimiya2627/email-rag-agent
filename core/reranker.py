@@ -11,6 +11,10 @@ logger = logging.getLogger(__name__)
 
 _client = None
 
+# Degradation level tracking (module-level, reset on process start)
+_consecutive_failures = 0
+_FAILURE_THRESHOLD = 3  # disable reranker after this many consecutive failures
+
 
 def _get_client() -> OpenAI:
     global _client
@@ -34,6 +38,8 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
     top_n = top_n or cfg.RERANK_TOP_N
     if not results:
         return []
+    if not cfg.ENABLE_RERANKER:
+        return results[:top_n]
     if len(results) <= 1:
         return results[:top_n]
 
@@ -42,6 +48,12 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
     )
     prompt = _RERANK_PROMPT.format(query=query, n=len(results), docs=docs_text)
 
+    global _consecutive_failures
+    # Circuit breaker: if too many consecutive failures, skip reranking
+    if _consecutive_failures >= _FAILURE_THRESHOLD:
+        logger.warning("Reranker circuit breaker open, skipping LLM rerank")
+        return results[:top_n]
+
     try:
         client = _get_client()
         resp = client.chat.completions.create(
@@ -49,9 +61,9 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=256,
+            timeout=cfg.LLM_TIMEOUT,
         )
         raw = resp.choices[0].message.content.strip()
-        # strip markdown code fences if present
         if "```" in raw:
             raw = raw.split("```")[1].lstrip("json").strip()
         data = json.loads(raw)
@@ -60,6 +72,7 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
         if len(scores) != len(results):
             raise ValueError(f"Score count mismatch: {len(scores)} vs {len(results)}")
 
+        _consecutive_failures = 0  # reset on success
         scored = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
         return [
             SearchResult(
@@ -72,5 +85,6 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
             for r, s in scored[:top_n]
         ]
     except Exception as exc:
-        logger.warning(f"Reranker failed ({exc}), returning original order")
+        _consecutive_failures += 1
+        logger.warning(f"Reranker failed ({exc}), consecutive={_consecutive_failures}, returning original order")
         return results[:top_n]

@@ -43,6 +43,7 @@ class AgentRequest(BaseModel):
     query: str
     user_email: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
+    session_id: Optional[str] = None
 
 
 class AgentResponse(BaseModel):

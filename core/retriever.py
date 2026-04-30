@@ -60,33 +60,44 @@ def bm25_search(query: str, top_k: int = None) -> List[SearchResult]:
 
 
 def hybrid_search(query: str, top_k: int = None) -> List[SearchResult]:
-    """Reciprocal Rank Fusion of vector + BM25 results."""
+    """Reciprocal Rank Fusion of vector + BM25 results. Respects ENABLE_BM25 / ENABLE_RRF flags."""
     top_k = top_k or cfg.TOP_K
     vec_results = vector_search(query, top_k=top_k)
+
+    if not cfg.ENABLE_BM25:
+        return vec_results[:top_k]
+
     bm25_results = bm25_search(query, top_k=top_k)
+
+    if not cfg.ENABLE_RRF:
+        # Simple score merge without RRF weights
+        result_map: dict[str, SearchResult] = {r.chunk_id: r for r in bm25_results}
+        result_map.update({r.chunk_id: r for r in vec_results})
+        merged = sorted(result_map.values(), key=lambda r: r.score, reverse=True)
+        return merged[:top_k]
 
     RRF_K = 60
     fused_scores: dict[str, float] = {}
-    result_map: dict[str, SearchResult] = {}
+    rrf_map: dict[str, SearchResult] = {}
 
     for rank, r in enumerate(vec_results):
         key = r.chunk_id
         fused_scores[key] = fused_scores.get(key, 0.0) + cfg.VECTOR_WEIGHT / (rank + RRF_K)
-        result_map[key] = r
+        rrf_map[key] = r
 
     for rank, r in enumerate(bm25_results):
         key = r.chunk_id
         fused_scores[key] = fused_scores.get(key, 0.0) + cfg.BM25_WEIGHT / (rank + RRF_K)
-        result_map.setdefault(key, r)
+        rrf_map.setdefault(key, r)
 
     sorted_keys = sorted(fused_scores, key=lambda x: fused_scores[x], reverse=True)[:top_k]
     return [
         SearchResult(
-            chunk_id=result_map[k].chunk_id,
-            email_id=result_map[k].email_id,
-            content=result_map[k].content,
+            chunk_id=rrf_map[k].chunk_id,
+            email_id=rrf_map[k].email_id,
+            content=rrf_map[k].content,
             score=fused_scores[k],
-            metadata=result_map[k].metadata,
+            metadata=rrf_map[k].metadata,
         )
         for k in sorted_keys
     ]

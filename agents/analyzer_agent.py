@@ -62,7 +62,7 @@ class AnalyzerAgent:
             ],
         }
 
-    def run(self, request: AgentRequest) -> AgentResponse:
+    def run(self, request: AgentRequest, memory=None) -> AgentResponse:
         stats = self._compute_stats()
         stats_json = json.dumps(stats, ensure_ascii=False, indent=2)
 
