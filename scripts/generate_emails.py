@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 TARGET_COUNT = 5000
-BATCH_SIZE = 25
+BATCH_SIZE = 10
 OUTPUT_PATH = Path(__file__).parent.parent / "data" / "emails.json"
 
 # ── Diversity pools ────────────────────────────────────────────────────────────
@@ -136,6 +136,7 @@ def make_prompt(batch_id: int, count: int, used_ids: set) -> str:
 3. 部分邮件应该是同一话题的回复链（使用相同thread_id）
 4. 日期范围：{year}-{month}-01 到 {year}-{month}-{date_base:02d}
 5. id格式：email_{start_num:04d} 到 email_{start_num + count - 1:04d}
+6. body字段每封控制在150字以内，简洁表达核心内容
 
 严格按以下JSON格式，只返回JSON数组，不要任何解释：
 [
@@ -162,7 +163,7 @@ def generate_batch(client: OpenAI, batch_id: int, count: int, used_ids: set) -> 
                 model=cfg.DEEPSEEK_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.9,
-                max_tokens=4000,
+                max_tokens=6000,
             )
             raw = resp.choices[0].message.content.strip()
             # Strip markdown fences
