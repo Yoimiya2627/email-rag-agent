@@ -98,19 +98,27 @@ class RetrieverAgent:
             logger.warning(f"Filter extraction failed: {exc}")
             return {"query": query, "sender": "", "date_hint": "", "labels": []}
 
-    def run(self, request: AgentRequest, memory=None) -> AgentResponse:
-        rewritten = self._rewrite_query(request.query)
+    def prepare_contexts(self, query: str):
+        """Public: full retrieval pipeline (rewrite → filter → hybrid → rerank).
+
+        Returns the reranked SearchResult list so callers (e.g. the streaming
+        endpoint) can plug it into a streaming generator without going through
+        run() and without reaching past the agent abstraction into private
+        helpers.
+        """
+        rewritten = self._rewrite_query(query)
         filters = self._extract_filters(rewritten)
         search_query = filters.get("query") or rewritten
 
         # Fetch extra candidates so reranker (and post-filters) have room to work
         results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
-
         results = _apply_sender_filter(results, filters.get("sender", ""))
         results = _apply_label_filter(results, filters.get("labels", []))
         results = _apply_date_filter(results, filters.get("date_hint", ""))
+        return rerank(query, results, top_n=cfg.RERANK_TOP_N)
 
-        reranked = rerank(request.query, results, top_n=cfg.RERANK_TOP_N)
+    def run(self, request: AgentRequest, memory=None) -> AgentResponse:
+        reranked = self.prepare_contexts(request.query)
         history = memory.to_messages() if memory else None
         answer = generate_answer(request.query, reranked, history=history)
         return AgentResponse(answer=answer, sources=reranked)

@@ -144,38 +144,51 @@ async def chat(request: AgentRequest):
 
 @app.post("/chat/stream")
 async def chat_stream(request: AgentRequest):
-    """SSE streaming chat — yields tokens as `data: <token>\\n\\n` events."""
-    from core.retriever import hybrid_search
-    from core.reranker import rerank
+    """SSE streaming chat — yields tokens as `data: <token>\\n\\n` events.
+
+    Routes through the Coordinator's intent classifier so summarize/write/
+    analyze queries land on the right agent instead of being forced through
+    the retriever pipeline. Token-level streaming applies to retrieve/general
+    intents; other agents emit their final answer as a single event because
+    they don't expose a streaming generator.
+    """
     from core.generator import stream_generate
     from agents.retriever_agent import RetrieverAgent
+    from agents.coordinator import classify_intent, route
+    from models.schemas import IntentType
 
     session_id = request.session_id or "default"
     memory = _get_session(session_id)
     history = memory.to_messages()
 
     async def event_generator():
-        # Bridge the blocking SDK iterator into asyncio via a queue so each
-        # token is yielded the moment it arrives — instead of being collected
-        # into a list and replayed at the end (which is not real streaming).
         queue: asyncio.Queue = asyncio.Queue()
         SENTINEL = object()
         loop = asyncio.get_running_loop()
 
         def producer():
             try:
-                # Retrieval is blocking; run it inside the producer thread so
-                # we don't stall the event loop.
-                agent = RetrieverAgent()
-                rewritten = agent._rewrite_query(request.query)
-                filters = agent._extract_filters(rewritten)
-                search_query = filters.get("query") or rewritten
+                intent = classify_intent(request.query)
+                # Tell the client which agent picked this up so the UI can
+                # render an appropriate header / spinner.
+                loop.call_soon_threadsafe(
+                    queue.put_nowait, ("__intent__", intent.value)
+                )
 
-                results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
-                reranked = rerank(request.query, results, top_n=cfg.RERANK_TOP_N)
-
-                for token in stream_generate(request.query, reranked, history=history):
-                    loop.call_soon_threadsafe(queue.put_nowait, token)
+                if intent in (IntentType.RETRIEVE, IntentType.GENERAL):
+                    # Token-level streaming via the retriever pipeline.
+                    agent = RetrieverAgent()
+                    contexts = agent.prepare_contexts(request.query)
+                    for token in stream_generate(
+                        request.query, contexts, history=history
+                    ):
+                        loop.call_soon_threadsafe(queue.put_nowait, token)
+                else:
+                    # Non-retrieve intents (summarize/write/analyze) don't
+                    # expose a streaming generator — run the agent and emit
+                    # its full answer as one event.
+                    response = route(request, memory=None)
+                    loop.call_soon_threadsafe(queue.put_nowait, response.answer)
             except Exception as exc:
                 logger.exception("Stream producer failed")
                 loop.call_soon_threadsafe(queue.put_nowait, ("__error__", str(exc)))
@@ -189,9 +202,14 @@ async def chat_stream(request: AgentRequest):
             item = await queue.get()
             if item is SENTINEL:
                 break
-            if isinstance(item, tuple) and item and item[0] == "__error__":
-                yield f"data: {json.dumps({'error': item[1]})}\n\n"
-                return
+            if isinstance(item, tuple) and item:
+                tag = item[0]
+                if tag == "__error__":
+                    yield f"data: {json.dumps({'error': item[1]})}\n\n"
+                    return
+                if tag == "__intent__":
+                    yield f"data: {json.dumps({'intent': item[1]})}\n\n"
+                    continue
             full_answer += item
             yield f"data: {json.dumps({'token': item}, ensure_ascii=False)}\n\n"
 
