@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import os
+import threading
 from collections import defaultdict
 
 # Ensure project root is on path when running as `python api/main.py`
@@ -38,8 +39,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# In-memory session store: session_id → ConversationMemory
-_sessions: dict[str, ConversationMemory] = defaultdict(ConversationMemory)
+# In-memory session store: session_id → ConversationMemory.
+# defaultdict.__getitem__ creates entries non-atomically across threads, so
+# requests for an unseen session_id can race and clobber each other's memory.
+# Wrap with a lock for the lookup-or-create path.
+_sessions: dict[str, ConversationMemory] = {}
+_sessions_lock = threading.Lock()
+
+
+def _get_session(session_id: str) -> ConversationMemory:
+    with _sessions_lock:
+        memory = _sessions.get(session_id)
+        if memory is None:
+            memory = ConversationMemory()
+            _sessions[session_id] = memory
+        return memory
 
 
 @asynccontextmanager
@@ -113,7 +127,7 @@ async def index_status():
 async def chat(request: AgentRequest):
     try:
         session_id = request.session_id or "default"
-        memory = _sessions[session_id]
+        memory = _get_session(session_id)
         response = route(request, memory=memory)
         memory.add("user", request.query)
         memory.add("assistant", response.answer)
@@ -132,43 +146,63 @@ async def chat_stream(request: AgentRequest):
     from agents.retriever_agent import RetrieverAgent
 
     session_id = request.session_id or "default"
-    memory = _sessions[session_id]
+    memory = _get_session(session_id)
     history = memory.to_messages()
 
     async def event_generator():
-        try:
-            agent = RetrieverAgent()
-            rewritten = agent._rewrite_query(request.query)
-            filters = agent._extract_filters(rewritten)
-            search_query = filters.get("query") or rewritten
+        # Bridge the blocking SDK iterator into asyncio via a queue so each
+        # token is yielded the moment it arrives — instead of being collected
+        # into a list and replayed at the end (which is not real streaming).
+        queue: asyncio.Queue = asyncio.Queue()
+        SENTINEL = object()
+        loop = asyncio.get_running_loop()
 
-            results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
-            reranked = rerank(request.query, results, top_n=cfg.RERANK_TOP_N)
+        def producer():
+            try:
+                # Retrieval is blocking; run it inside the producer thread so
+                # we don't stall the event loop.
+                agent = RetrieverAgent()
+                rewritten = agent._rewrite_query(request.query)
+                filters = agent._extract_filters(rewritten)
+                search_query = filters.get("query") or rewritten
 
-            full_answer = ""
-            loop = asyncio.get_event_loop()
-            tokens = await loop.run_in_executor(
-                None,
-                lambda: list(stream_generate(request.query, reranked, history=history)),
-            )
-            for token in tokens:
-                full_answer += token
-                yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+                results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
+                reranked = rerank(request.query, results, top_n=cfg.RERANK_TOP_N)
 
-            memory.add("user", request.query)
-            memory.add("assistant", full_answer)
-            yield "data: [DONE]\n\n"
-        except Exception as exc:
-            logger.exception("Stream chat failed")
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+                for token in stream_generate(request.query, reranked, history=history):
+                    loop.call_soon_threadsafe(queue.put_nowait, token)
+            except Exception as exc:
+                logger.exception("Stream producer failed")
+                loop.call_soon_threadsafe(queue.put_nowait, ("__error__", str(exc)))
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, SENTINEL)
+
+        loop.run_in_executor(None, producer)
+
+        full_answer = ""
+        while True:
+            item = await queue.get()
+            if item is SENTINEL:
+                break
+            if isinstance(item, tuple) and item and item[0] == "__error__":
+                yield f"data: {json.dumps({'error': item[1]})}\n\n"
+                return
+            full_answer += item
+            yield f"data: {json.dumps({'token': item}, ensure_ascii=False)}\n\n"
+
+        memory.add("user", request.query)
+        memory.add("assistant", full_answer)
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.delete("/chat/history")
 async def clear_history(session_id: str = "default"):
-    if session_id in _sessions:
-        _sessions[session_id].clear()
+    with _sessions_lock:
+        memory = _sessions.get(session_id)
+    if memory is not None:
+        memory.clear()
     return {"success": True, "session_id": session_id}
 
 
@@ -178,7 +212,7 @@ async def chat_graph(request: AgentRequest):
     from agents.graph_workflow import run_graph
     try:
         session_id = request.session_id or "default"
-        memory = _sessions[session_id]
+        memory = _get_session(session_id)
         response = run_graph(request, memory=memory)
         memory.add("user", request.query)
         memory.add("assistant", response.answer)
