@@ -68,8 +68,9 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             # DEEPSEEK_MODEL=deepseek-v4-flash 是推理模型，先输出 reasoning_content
-            # 再输出 content。max_tokens 太小会让推理过程吃光预算，content 为空。
-            max_tokens=1500,
+            # 再输出 content。reranker 同时给多个候选打分，推理量大（实测 2000+），
+            # 1500 偶发不够；3000 留充足余量。
+            max_tokens=3000,
             timeout=cfg.LLM_TIMEOUT,
         )
         choice = resp.choices[0]

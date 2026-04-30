@@ -143,7 +143,8 @@ def score_response(client: OpenAI, question: str, answer: str, contexts: List[st
                 model=cfg.DEEPSEEK_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=1500,
+                # 三维度评分推理量大（实测 reasoning_len 可达 2700），1500 偶发不够
+                max_tokens=3000,
             )
             choice = resp.choices[0]
             raw = choice.message.content or ""
