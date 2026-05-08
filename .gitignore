@@ -37,8 +37,7 @@ Thumbs.db
 .claude/
 
 # Interview prep — local only, never push
-docs/interview_qa_walkthrough*.md
-docs/interview_questions.md
+docs/interview_*.md
 
 # Private workspace — job hunting plans, drafts, anything not for public repo
 _private/
