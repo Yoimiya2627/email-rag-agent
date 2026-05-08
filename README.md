@@ -10,7 +10,7 @@
 - **批量摘要**："这周项目进展整理一下" → 多封相关邮件综合摘要
 - **回信草稿**："帮我回 Bob 那封询价邮件" → 起草回复
 - **统计分析**："本月每个发件人发了多少封？" → 聚合元数据回答
-- **多轮对话**：每个 session 独立记忆，5 轮滑窗
+- **多轮对话**：每个 session 独立记忆，5 轮滑窗（10 条消息）
 - **流式输出**：SSE 真流式（不是攒齐再放）
 
 ## 快速开始
@@ -27,7 +27,7 @@ docker-compose up --build
 - API：http://localhost:8000（Swagger UI: `/docs`）
 - 前端：http://localhost:8501
 
-首次启动会在镜像构建时预下载 bge-m3 嵌入模型（~570MB），之后冷启动 ~10 秒。
+首次启动需要下载 bge-m3 嵌入模型（~570MB），耗时取决于网络环境；模型缓存后后续启动会明显加快。
 
 ### 本地开发
 
@@ -46,7 +46,7 @@ streamlit run frontend/app.py      # 前端 :8501
 
 ## 系统架构
 
-完整的架构图、时序图、状态机详见 [`docs/architecture.md`](docs/architecture.md)（10 张 Mermaid 图，覆盖离线索引、在线问答、混合检索 + RRF、Self-RAG 状态机、SSE 线程桥接、降级策略等）。
+完整的架构图、时序图、状态机详见 [`docs/architecture.md`](docs/architecture.md)，覆盖离线索引、在线问答、混合检索 + RRF、Self-RAG 状态机、SSE 线程桥接、降级策略等。
 
 简化版本：
 
@@ -127,17 +127,17 @@ python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 
 三个反直觉发现（详见 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md) 第十一节）：
 
-1. **BM25 + RRF 是 ROI 最高的组件**：V1→V2 三项指标全升，因为评测题里大量字面命中型查询（人名 / 日期 / 项目代号）纯向量抓不住
-2. **LLM Reranker 在这个数据集上是负贡献**：V2→V3 / V4→V6 都印证 Reranker 让 precision 微升但 relevancy 反降——LLM 当 Reranker 是反模式，应该用 cross-encoder（如 bge-reranker-v2-m3）
-3. **Query Rewrite 是双刃剑**：rewrite 把"会议纪要"改成"会议总结记录"，召回更宽但 precision 反降；更稳的做法是原 query + 改写 query 双路取并集
+1. **三维赢家分散在三个版本**：answer_relevancy 最优是 V2（向量+BM25+RRF），faithfulness 最优是 V4（全开），context_precision 最优是 V5（V4-RRF）——单维归因都对，叠加在一起就互相抵消，没有"全场最优"的配置
+2. **LLM Reranker 是 trade-off 不是单边负贡献**：V2→V3 让 context_precision +0.025（在做它该做的事——剔噪声），代价是 relevancy -0.029；要进一步优化建议替换为 cross-encoder（如 bge-reranker-v2-m3），LLM 当 reranker 在该数据集下收益不稳定且引入 30~50s 延迟
+3. **Query Rewrite 是双刃剑**：V3→V4 加 rewrite 让 faithfulness +0.018（升到全场最高），但 relevancy 和 precision 都微降——合成数据本身规整，rewrite 改宽泛反而召回更多边缘 chunk；真实数据上口语化更严重，ROI 应反过来
 
-**实用结论**：在这个数据集上 **V2（仅 BM25+RRF）反而打赢了 V4（全开）**，组件越多不一定越好。
+**业务选型**：在邮件查询场景（关心 relevancy + 低延迟）最终选 V2 方案——在该数据集上 answer_relevancy 优于全开 V4 配置，端到端延迟约低 10×（~3s vs ~38s）。组件不是越多越好，按业务目标和延迟要求选方案。
 
-## 一些值得记一笔的工程问题
+## 工程问题复盘
 
-完整的"踩坑 + 修复 + 反思"放在 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md)。这里只列最有意思的几个：
+完整的问题定位、修复过程和工程反思见 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md)。这里列出最有代表性的几个：
 
-1. **推理模型 `max_tokens` 陷阱**：`deepseek-v4-flash` 的 `max_tokens` 同时覆盖 `reasoning_content` 和 `content`。原代码各处写的是 128~256，结果推理过程吃光预算后 `content` 永远是空字符串——RAGAS 全 0 分、query rewrite 失效、reranker 熔断、意图分类永远走兜底分支……一个看似简单的参数，把整个评测体系都污染了。修复后 bump 到 1500/3000 并加 `reasoning_content` 兜底解析。
+1. **推理模型 `max_tokens` 陷阱**：`deepseek-v4-flash` 的 `max_tokens` 同时覆盖 `reasoning_content` 和 `content`。原代码各处写的是 128~256，结果推理过程吃光预算后 `content` 永远是空字符串——5 处 LLM 调用（RAGAS 打分 / query rewrite / reranker / 意图分类 / Self-RAG grade）全部受影响。修复后普通调用 bump 到 1500、高推理量调用 3000，并加 `reasoning_content` 兜底解析。
 
 2. **SSE 假流式**：`/chat/stream` 端点用 `list(stream_generate(...))` 把所有 token 收完才 yield，等于伪装的非流式。改成 `asyncio.Queue` + 工作线程 `call_soon_threadsafe` 桥接才是真流式。
 
@@ -153,6 +153,10 @@ python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 - 推理模型流式 UX：当前只转发 `delta.content`，长推理任务用户感知是"等 30s + 突然刷出来"——理想方案是同时转发 `delta.reasoning_content` 让前端展示思考过程
 - 检索 pipeline 在三处重复实现（RetrieverAgent / graph_workflow / run_ragas_eval），值得抽到 `core/pipeline.py`
 - 5000 邮件下 in-memory BM25 仍可接受，到 100 万级别需要换 Elasticsearch
+
+## 后续扩展方向
+
+在邮件场景基础上，逐步抽象可复用的 RAG / Agent / SSE / Memory / Evaluation 能力，计划扩展到客服 FAQ 检索、工单摘要、意图分流等场景。
 
 ## API 端点
 
@@ -190,10 +194,10 @@ python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 ├── scripts/                   # 数据生成 + RAGAS 评测 + 调试 probe
 ├── langchain_version/         # LangChain 平行实现
 ├── data/                      # emails.json + ragas_testset.json + eval_results/
-├── chroma_db/                 # ChromaDB 持久化（runtime 生成）
+├── chroma_db/                 # runtime 生成，已 gitignore
 ├── docs/
 │   ├── architecture.md        # 架构图与流程详解
-│   ├── engineering_pitfalls.md  # 真实踩坑记录
+│   ├── engineering_pitfalls.md  # 工程问题与修复记录
 │   └── project_roadmap.md     # 任务路线图
 ├── Dockerfile + docker-compose.yml
 └── requirements.txt
