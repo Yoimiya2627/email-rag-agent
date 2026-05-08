@@ -1,9 +1,14 @@
 """Verify /chat/stream emits tokens incrementally (real SSE), not in one burst."""
 import json
+import sys
 import time
 import urllib.request
+from pathlib import Path
 
-URL = "http://127.0.0.1:8765/chat/stream"
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from config import settings as cfg
+
+URL = f"{cfg.API_URL}/chat/stream"
 payload = json.dumps({"query": "Q3预算评审会议的发件人是谁？", "session_id": "stream-test"}).encode("utf-8")
 
 req = urllib.request.Request(URL, data=payload, headers={"Content-Type": "application/json"})

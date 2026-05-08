@@ -53,6 +53,32 @@ streamlit run frontend/app.py      # 前端 :8501
 
 第一次访问前端时点侧边栏的"索引邮件"按钮，会把 `data/emails.json` 里的 5000 封邮件向量化并写入 ChromaDB。
 
+## 配置说明
+
+唯一**必填**的环境变量是 `DEEPSEEK_API_KEY`，其它都有合理默认值。完整字段见 [`.env.example`](.env.example)。
+
+**核心可选配置**：
+
+| 配置 | 默认 | 说明 |
+|------|------|------|
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 推理模型，重排和打分质量更稳；改成 `deepseek-chat` 可换非推理模型省 token |
+| `EMBEDDING_MODEL` | `BAAI/bge-m3` | 本地嵌入模型，首次运行自动下载约 570MB |
+| `EMBEDDING_DEVICE` | `cpu` | 有 GPU 改 `cuda` 提速 |
+| `CHROMA_PERSIST_DIR` | `./chroma_db` | 向量库本地目录 |
+| `TOP_K` / `RERANK_TOP_N` | `5` / `3` | 检索召回数 / 重排后保留数 |
+| `LLM_TIMEOUT` | `15` | LLM 单次调用超时（秒） |
+
+**Feature flags**（消融实验用，默认全开；4 个 flag 全关即等价 V1 纯向量基线）：
+
+| Flag | 关闭后效果 |
+|------|------------|
+| `ENABLE_BM25` | 退回纯向量检索 |
+| `ENABLE_RRF` | BM25 仍跑但用简单加权融合（不再用 RRF） |
+| `ENABLE_RERANKER` | 跳过 LLM 重排，省 30+ 秒延迟 |
+| `ENABLE_QUERY_REWRITE` | 跳过 query 改写 |
+
+各 flag 对三维度指标和延迟的具体影响见 [`docs/evaluation.md`](docs/evaluation.md)。
+
 ## 系统架构
 
 完整的架构图、时序图、状态机详见 [`docs/architecture.md`](docs/architecture.md)，覆盖离线索引、在线问答、混合检索 + RRF、Self-RAG 状态机、SSE 线程桥接、降级策略等。
