@@ -2,7 +2,7 @@
 
 > 这份文档记录项目从"能跑"到"跑稳并能解释"过程中遇到的 5 个工程问题。每条按 **现象 → 排查 → 根因 → 修复 → 教训** 展开，对应到具体 commit。
 >
-> 完整版（含其他次要问题、调试方法论沉淀、待办识别）见 [`engineering_pitfalls.md`](engineering_pitfalls.md)。
+> 更多调试记录见 [`engineering_pitfalls.md`](engineering_pitfalls.md)。
 
 ---
 
@@ -50,7 +50,7 @@
 
 ---
 
-## 4. 熔断器跨版本污染（被低估的工程教训）
+## 4. 熔断器跨版本污染
 
 **现象**：跑 V1→V6 ablation 时，V3 的 reranker 偶发失败会**永久关闭** V4/V5/V6 的 reranker——即使 LLM 已经恢复正常。日志里看到的是 `ENABLE_RERANKER=True`，实际跑的是 `circuit breaker open` 分支返回原始排序。结果是 V4-V6 三版本拿到的对比数据完全失真。
 
@@ -60,7 +60,7 @@
 
 **修复**（commit `4d27325`）：加 `reset_circuit_breaker()` 公开函数，在 `evaluate_version` 每个版本开始前调用一次。考虑过用进程级隔离（每版起新进程），但 bge-m3 加载 5~10 秒 × 6 版 = 多 60 秒；最终选了进程内 reset 的轻量方案。
 
-**教训**：**module-level 全局可变状态 + 长生命周期进程**这个组合天然反消融测试。任何带状态的模块（缓存、计数器、连接池、熔断器、重试预算）在跨条件实验里都需要显式 reset 钩子。这次靠运气只有一处，未来加新状态需要纪律——清单维护比"事后发现污染再补"代价低得多。同样的问题在生产里也会咬人：长跑进程的熔断器从早高峰带到晚高峰、从 staging 带到 prod，都是同一类。
+**教训**：**module-level 全局可变状态 + 长生命周期进程**这个组合天然反消融测试。任何带状态的模块（缓存、计数器、连接池、熔断器、重试预算）在跨条件实验里都需要显式 reset 钩子。这次影响范围只暴露在 reranker 一处，未来新增状态需要维护 reset 清单。清单维护比"事后发现污染再补"代价低得多。同样的问题在生产环境也容易放大：长跑进程的熔断器从早高峰带到晚高峰、从 staging 带到 prod，都是同一类。
 
 ---
 
@@ -70,7 +70,7 @@
 
 **排查**：把每条单维度归因列出来——加 BM25+RRF（V1→V2）三维全涨；加 reranker（V2→V3）只涨 precision、降 relevancy；加 rewrite（V3→V4）涨 faithfulness、降 relevancy；关 RRF 改简单合并（V4→V5）反而 precision 最高。每条单看都讲得通、组合起来就互相抵消。
 
-**根因**：三个维度衡量 RAG 流水线的不同部位（生成是否切题 / 是否有据 / 检索是否干净），互相不存在"一个赢则其他都赢"的关系。具体到本数据集：（a）LLM-based reranker（用 DeepSeek 当打分器，**反模式**——正解是 cross-encoder `bge-reranker-v2-m3`）方差大，挤掉 V2 已经排前的边相关 chunk，损伤 relevancy；（b）rewrite 把 query 改"文档化"，召回与 answer 更对齐（faithfulness 涨）但离原始意图更远（relevancy 跌）；（c）RRF 用 rank 平均化，对"两路都中等"友好；本数据集"术语精准题"占多数，BM25 单独发挥更准。
+**根因**：三个维度衡量 RAG 流水线的不同部位（生成是否切题 / 是否有据 / 检索是否干净），互相不存在"一个赢则其他都赢"的关系。具体到本数据集：（a）LLM-based reranker（用 DeepSeek 当打分器）方差和延迟都偏高，更适合替换为 cross-encoder `bge-reranker-v2-m3`——当前实现挤掉了 V2 已经排前的边相关 chunk，损伤 relevancy；（b）rewrite 把 query 改"文档化"，召回与 answer 更对齐（faithfulness 涨）但离原始意图更远（relevancy 跌）；（c）RRF 用 rank 平均化，对"两路都中等"友好；本数据集"术语精准题"占多数，BM25 单独发挥更准。
 
 **修复 / 业务取舍**：不存在"修"——这是评测告诉我"全开不是最优"。把"赢家分散"翻译成业务取舍写进了 [`evaluation.md`](evaluation.md)：默认上线选 V2（BM25+RRF），延迟 ~3s、relevancy 0.952 最高；V4 比 V2 慢 10×、faithfulness 仅高 0.011，**只有强合规场景**值得付这个代价。换数据集（语义模糊题占多数）这个结论会反转，需要重测。
 
