@@ -435,9 +435,10 @@ E:/智能邮件agent/
 │   ├── ragas_testset.json
 │   └── eval_results/
 ├── docs/
-│   ├── project_roadmap.md        # 9 个交付任务
-│   ├── architecture.md           # 本文
-│   └── engineering_pitfalls.md   # 真实踩坑记录
+│   ├── architecture.md             # 本文
+│   ├── evaluation.md               # RAGAS 6 版评测 + 业务选型
+│   ├── technical_retrospective.md  # 5 个工程问题复盘
+│   └── engineering_pitfalls.md     # 完整问题清单 + 调试方法论
 ├── Dockerfile + docker-compose.yml
 └── .env (gitignored)
 ```

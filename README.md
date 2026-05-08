@@ -4,6 +4,15 @@
 
 做这个项目的初衷是想把"RAG 链路里每一层（向量检索 / BM25 / RRF 融合 / LLM 重排 / Query Rewrite）到底各自贡献多少"这件事真正搞清楚——所以从一开始就把所有组件做成可开关的特性，配套写了消融评测脚本去量化它们。
 
+## 30 秒速览
+
+- **多 Agent 路由**：5 种意图（查 / 汇总 / 写信 / 统计 / 兜底），LLM 分类 + 异常降级
+- **混合检索 + RRF 融合**：向量（bge-m3）+ BM25 双路并行，绕开分数量纲冲突
+- **Self-RAG 反思**：LangGraph 状态机，全不相关时改写 query 重试（最多 2 次）
+- **SSE 真流式**：worker 线程 + asyncio.Queue 桥接同步 SDK 与异步框架
+- **6 版 RAGAS 消融**：三维度赢家分散在 V2/V4/V5，按业务目标选 BM25+RRF 方案 → [`docs/evaluation.md`](docs/evaluation.md)
+- **5 个工程问题复盘**：max_tokens / SSE 假流式 / BM25 缓存 / 熔断器跨版本污染 / RAGAS 反直觉 → [`docs/technical_retrospective.md`](docs/technical_retrospective.md)
+
 ## 它能做什么
 
 - **检索式问答**："Q3 预算评审会议是谁发的？" → 从 5000 封邮件里找出相关邮件回答
@@ -109,12 +118,13 @@ streamlit run frontend/app.py      # 前端 :8501
 跑法：
 
 ```bash
-python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
+python scripts/run_ragas_eval.py                                # 默认每版抽 30 题
+python scripts/run_ragas_eval.py --versions V2,V4 --limit 100   # 完整测试集
 ```
 
 输出 `data/eval_results/comparison.json` + 终端对比表。
 
-### 实测结果（5000 封语料 / 100 题测试集）
+### 实测结果（5000 封语料 / 100 题测试集，每版抽 30 题）
 
 | Version | BM25 | RRF | Rerank | Rewrite | Relevancy | Faithful | Precision |
 |---------|:----:|:---:|:------:|:-------:|----------:|---------:|----------:|
@@ -125,7 +135,7 @@ python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 | V5 V4-RRF | ✅ | ❌ | ✅ | ✅ | 0.8700 | 0.8517 | **0.6383** |
 | V6 V4-Reranker | ✅ | ✅ | ❌ | ✅ | 0.9400 | 0.9117 | 0.5533 |
 
-三个反直觉发现（详见 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md) 第十一节）：
+三个反直觉发现（完整方法、版本配置、业务选型见 [`docs/evaluation.md`](docs/evaluation.md) §4）：
 
 1. **三维赢家分散在三个版本**：answer_relevancy 最优是 V2（向量+BM25+RRF），faithfulness 最优是 V4（全开），context_precision 最优是 V5（V4-RRF）——单维归因都对，叠加在一起就互相抵消，没有"全场最优"的配置
 2. **LLM Reranker 是 trade-off 不是单边负贡献**：V2→V3 让 context_precision +0.025（在做它该做的事——剔噪声），代价是 relevancy -0.029；要进一步优化建议替换为 cross-encoder（如 bge-reranker-v2-m3），LLM 当 reranker 在该数据集下收益不稳定且引入 30~50s 延迟
@@ -135,7 +145,7 @@ python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 
 ## 工程问题复盘
 
-完整的问题定位、修复过程和工程反思见 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md)。这里列出最有代表性的几个：
+5 个工程问题完整复盘（按 现象 → 排查 → 根因 → 修复 → 教训 结构）见 [`docs/technical_retrospective.md`](docs/technical_retrospective.md)；更多调试记录与待办识别见 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md)。这里列出最有代表性的几个：
 
 1. **推理模型 `max_tokens` 陷阱**：`deepseek-v4-flash` 的 `max_tokens` 同时覆盖 `reasoning_content` 和 `content`。原代码各处写的是 128~256，结果推理过程吃光预算后 `content` 永远是空字符串——5 处 LLM 调用（RAGAS 打分 / query rewrite / reranker / 意图分类 / Self-RAG grade）全部受影响。修复后普通调用 bump 到 1500、高推理量调用 3000，并加 `reasoning_content` 兜底解析。
 
@@ -195,9 +205,10 @@ python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 ├── data/                      # emails.json + ragas_testset.json + eval_results/
 ├── chroma_db/                 # runtime 生成，已 gitignore
 ├── docs/
-│   ├── architecture.md        # 架构图与流程详解
-│   ├── engineering_pitfalls.md  # 工程问题与修复记录
-│   └── project_roadmap.md     # 任务路线图
+│   ├── architecture.md             # 架构图与流程详解
+│   ├── evaluation.md               # RAGAS 6 版评测 + 业务选型
+│   ├── technical_retrospective.md  # 5 个工程问题复盘
+│   └── engineering_pitfalls.md     # 完整问题清单 + 调试方法论
 ├── Dockerfile + docker-compose.yml
 └── requirements.txt
 ```
