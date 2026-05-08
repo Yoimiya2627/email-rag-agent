@@ -15,6 +15,7 @@
 import argparse
 import json
 import logging
+import math
 import statistics
 import sys
 import time
@@ -71,6 +72,8 @@ def measure_version(version: str, questions: list) -> dict:
         return {"version": version, "flags": flags, "n": 0}
 
     trimmed = sorted(timings)[1:-1] if len(timings) >= 4 else timings
+    sorted_t = sorted(timings)
+    p95_idx = min(len(sorted_t) - 1, math.ceil(len(sorted_t) * 0.95) - 1)
     return {
         "version": version,
         "flags": flags,
@@ -78,7 +81,7 @@ def measure_version(version: str, questions: list) -> dict:
         "raw_seconds": [round(t, 2) for t in timings],
         "mean_trimmed": round(statistics.mean(trimmed), 2),
         "median": round(statistics.median(timings), 2),
-        "p95": round(sorted(timings)[max(0, int(len(timings) * 0.95) - 1)], 2),
+        "p95": round(sorted_t[max(0, p95_idx)], 2),
     }
 
 
