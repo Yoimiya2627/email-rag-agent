@@ -202,8 +202,10 @@ if user_input:
         if use_stream and not use_graph:
             # SSE streaming
             import sseclient
+            intent_caption = st.empty()
             answer_placeholder = st.empty()
             full_answer = ""
+            intent_value = ""
             try:
                 with requests.post(
                     f"{API_URL}/chat/stream",
@@ -217,11 +219,16 @@ if user_input:
                             break
                         import json as _json
                         token_data = _json.loads(event.data)
-                        if "token" in token_data:
+                        if "intent" in token_data:
+                            intent_value = token_data["intent"]
+                            label = INTENT_LABELS.get(intent_value, intent_value)
+                            intent_caption.caption(f"意图识别：{label}")
+                        elif "token" in token_data:
                             full_answer += token_data["token"]
                             answer_placeholder.markdown(full_answer + "▌")
                 answer_placeholder.markdown(full_answer)
-                result = {"answer": full_answer, "sources": [], "intent": ""}
+                # 标记 _streamed，让下方通用渲染分支跳过重复渲染
+                result = {"answer": full_answer, "sources": [], "intent": intent_value, "_streamed": True}
             except Exception as exc:
                 result = {"error": str(exc)}
         else:
@@ -235,11 +242,14 @@ if user_input:
             )
         else:
             intent = result.get("intent", "")
-            if intent:
-                st.caption(f"意图识别：{INTENT_LABELS.get(intent, intent)}")
-
             answer = result.get("answer", "抱歉，未能生成回答。")
-            st.markdown(answer)
+
+            # 流式模式：placeholder 已渲染答案 + intent caption，跳过下面的重复渲染；
+            # 非流式模式：在这里渲染 caption 和答案。
+            if not result.get("_streamed"):
+                if intent:
+                    st.caption(f"意图识别：{INTENT_LABELS.get(intent, intent)}")
+                st.markdown(answer)
 
             sources = result.get("sources", [])
             if sources:

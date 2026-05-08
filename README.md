@@ -150,7 +150,6 @@ python scripts/run_ragas_eval.py --versions V1,V2,V3,V4,V5,V6 --limit 100
 ## 已知限制
 
 - 单进程方案：`_sessions` 是进程内 dict，多 worker 部署需要换 Redis
-- 推理模型流式 UX：当前只转发 `delta.content`，长推理任务用户感知是"等 30s + 突然刷出来"——理想方案是同时转发 `delta.reasoning_content` 让前端展示思考过程
 - 检索 pipeline 在三处重复实现（RetrieverAgent / graph_workflow / run_ragas_eval），值得抽到 `core/pipeline.py`
 - 5000 邮件下 in-memory BM25 仍可接受，到 100 万级别需要换 Elasticsearch
 
