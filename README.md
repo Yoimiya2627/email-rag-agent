@@ -13,6 +13,12 @@
 - **6 版 RAGAS 消融**：三维度赢家分散在 V2/V4/V5，按业务目标选 BM25+RRF 方案 → [`docs/evaluation.md`](docs/evaluation.md)
 - **5 个工程问题复盘**：max_tokens / SSE 假流式 / BM25 缓存 / 熔断器跨版本污染 / RAGAS 反直觉 → [`docs/technical_retrospective.md`](docs/technical_retrospective.md)
 
+## Demo
+
+[![Demo preview](docs/demo.png)](docs/demo.mp4)
+
+> 约 1 分 40 秒：邮件检索 / 预算相关查询 / 统计分析 / 切到 evaluation 表格。点击预览图打开 MP4（约 17 MB）。
+
 ## 它能做什么
 
 - **检索式问答**："Q3 预算评审会议是谁发的？" → 从 5000 封邮件里找出相关邮件回答
