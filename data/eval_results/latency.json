@@ -1,0 +1,154 @@
+{
+  "results": [
+    {
+      "version": "V1",
+      "flags": {
+        "ENABLE_BM25": false,
+        "ENABLE_RRF": false,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": false
+      },
+      "n": 10,
+      "raw_seconds": [
+        33.28,
+        5.74,
+        6.84,
+        5.49,
+        8.42,
+        11.04,
+        7.63,
+        7.65,
+        6.61,
+        7.12
+      ],
+      "mean_trimmed": 7.63,
+      "median": 7.37,
+      "p95": 33.28
+    },
+    {
+      "version": "V2",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": false
+      },
+      "n": 10,
+      "raw_seconds": [
+        9.24,
+        6.12,
+        10.1,
+        6.74,
+        11.43,
+        14.41,
+        5.25,
+        8.67,
+        9.97,
+        7.02
+      ],
+      "mean_trimmed": 8.66,
+      "median": 8.95,
+      "p95": 14.41
+    },
+    {
+      "version": "V3",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": false
+      },
+      "n": 10,
+      "raw_seconds": [
+        22.08,
+        10.99,
+        26.44,
+        20.29,
+        16.79,
+        30.46,
+        19.09,
+        23.63,
+        12.58,
+        21.72
+      ],
+      "mean_trimmed": 20.33,
+      "median": 21.01,
+      "p95": 30.46
+    },
+    {
+      "version": "V4",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": true
+      },
+      "n": 10,
+      "raw_seconds": [
+        23.59,
+        15.66,
+        38.0,
+        14.3,
+        24.96,
+        31.96,
+        28.0,
+        26.41,
+        26.81,
+        16.13
+      ],
+      "mean_trimmed": 24.19,
+      "median": 25.69,
+      "p95": 38.0
+    },
+    {
+      "version": "V5",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": false,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": true
+      },
+      "n": 10,
+      "raw_seconds": [
+        34.75,
+        12.37,
+        30.39,
+        15.91,
+        22.97,
+        30.03,
+        17.86,
+        25.62,
+        28.75,
+        23.46
+      ],
+      "mean_trimmed": 24.37,
+      "median": 24.54,
+      "p95": 34.75
+    },
+    {
+      "version": "V6",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": true
+      },
+      "n": 10,
+      "raw_seconds": [
+        11.2,
+        8.1,
+        11.84,
+        7.34,
+        12.46,
+        14.54,
+        9.82,
+        14.83,
+        10.45,
+        9.83
+      ],
+      "mean_trimmed": 11.03,
+      "median": 10.82,
+      "p95": 14.83
+    }
+  ]
+}
