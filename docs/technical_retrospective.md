@@ -12,7 +12,7 @@
 
 **排查**：先怀疑 prompt，调 system message / temperature / `max_tokens=256` 都无效。后写独立 probe `scripts/debug_deepseek_score.py`，绕过业务代码、直接打印 raw response：`finish_reason='length'`、`completion_tokens=256` 顶到上限、`reasoning_content` 里却有完整推理过程。
 
-**根因**：DeepSeek `deepseek-v4-flash` 是推理模型，返回 `content` + `reasoning_content` 两个字段，**`max_tokens` 同时覆盖两者**。原代码 5 处调用都按 GPT-3.5 的习惯写了 `128~256`，推理模型的几百 token 推理过程吃光预算，content 永远输出不出来。
+**根因**：DeepSeek `deepseek-v4-flash` 是推理模型，返回 `content` + `reasoning_content` 两个字段，**`max_tokens` 同时覆盖两者**。原代码 6 处调用都按 GPT-3.5 的习惯写了 `128~256`，推理模型的几百 token 推理过程吃光预算，content 永远输出不出来。
 
 **修复**：普通调用 `max_tokens=1500`、高推理量（rerank / 三维度评分）`3000`；content 仍空时从 `reasoning_content` 抽取最后一个 JSON 对象兜底。涉及 `score_response / _rewrite_query / _extract_filters / classify_intent / grade_contexts / rerank` 共 6 个调用点（commit `4d27325` → `b0fc749`）。
 
@@ -82,7 +82,7 @@
 
 | Commit | 故事 | 主题 |
 |--------|---|------|
-| `4d27325` | 1, 4 | 5 处 LLM 调用 max_tokens 修复 + 熔断器 reset_circuit_breaker |
+| `4d27325` | 1, 4 | 6 处 LLM 调用 max_tokens 修复 + 熔断器 reset_circuit_breaker |
 | `b0fc749` | 1 | reranker / scoring max_tokens 提到 3000 |
 | `59f9898` | 2 | 真 SSE 流式（asyncio.Queue + call_soon_threadsafe） |
 | `8cc5b6e` | 3 | BM25 索引缓存 + 锁防 stampede（40× 提速） |
