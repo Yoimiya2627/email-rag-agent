@@ -16,9 +16,10 @@ def _split_paragraphs(text: str) -> List[str]:
 def _force_split(text: str, size: int, overlap: int) -> List[str]:
     chunks = []
     start = 0
+    step = max(1, size - overlap)
     while start < len(text):
         chunks.append(text[start : start + size])
-        start += size - overlap
+        start += step
     return chunks
 
 
@@ -28,9 +29,9 @@ def chunk_text(
     chunk_overlap: int = None,
     min_chunk_size: int = None,
 ) -> List[str]:
-    size = chunk_size or cfg.CHUNK_SIZE
-    overlap = chunk_overlap or cfg.CHUNK_OVERLAP
-    min_size = min_chunk_size or cfg.MIN_CHUNK_SIZE
+    size = cfg.CHUNK_SIZE if chunk_size is None else chunk_size
+    overlap = cfg.CHUNK_OVERLAP if chunk_overlap is None else chunk_overlap
+    min_size = cfg.MIN_CHUNK_SIZE if min_chunk_size is None else min_chunk_size
 
     paragraphs = _split_paragraphs(text)
     raw_chunks: List[str] = []
