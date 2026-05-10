@@ -38,6 +38,7 @@ Thumbs.db
 
 # Interview prep — local only, never push
 docs/interview_*.md
+docs/*_private.md
 
 # Private workspace — job hunting plans, drafts, anything not for public repo
 _private/

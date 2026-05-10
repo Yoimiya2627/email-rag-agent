@@ -45,8 +45,8 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 # Feature flags for ablation study
 ENABLE_BM25 = os.getenv("ENABLE_BM25", "true").lower() == "true"
 ENABLE_RRF = os.getenv("ENABLE_RRF", "true").lower() == "true"
-ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "true").lower() == "true"
-ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "true").lower() == "true"
+ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "false").lower() == "true"
+ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "false").lower() == "true"
 
 # Timeout and degradation
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "15"))
