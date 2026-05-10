@@ -1,6 +1,6 @@
 # Email RAG Agent
 
-> **Author**: 赵伟鑫 (Yoimiya2627) — AI 应用工程师 / 大模型应用开发工程师
+> **Author**: 赵伟鑫 (Yoimiya2627)
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
 一个基于检索增强生成（RAG）和多 Agent 架构的邮件智能问答系统。
