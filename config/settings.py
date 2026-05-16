@@ -56,3 +56,7 @@ LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "15"))
 # function calling verified (see docs/agent_loop_decisions.md, Step 0).
 AGENT_PLANNER_MODEL = os.getenv("AGENT_PLANNER_MODEL", "deepseek-chat")
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))
+# Loop-safety: block a tool re-called with identical args beyond this count.
+AGENT_MAX_REPEAT = int(os.getenv("AGENT_MAX_REPEAT", "2"))
+# Truncate any single tool result longer than this (chars) to bound context growth.
+AGENT_TOOL_OUTPUT_LIMIT = int(os.getenv("AGENT_TOOL_OUTPUT_LIMIT", "4000"))

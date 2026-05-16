@@ -11,6 +11,7 @@ detection, argument validation and tool-error feedback are added in Step 5.
 """
 import json
 import logging
+from collections import Counter
 from typing import List
 
 from openai import OpenAI
@@ -67,6 +68,7 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
     messages.append({"role": "user", "content": request.query})
 
     steps: List[dict] = []
+    call_counts: Counter = Counter()  # (tool, args) signature → times invoked
     client = _get_client()
 
     for step in range(cfg.AGENT_MAX_STEPS):
@@ -97,17 +99,36 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
             try:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
-                # Malformed arguments degrade to an empty call rather than crash;
-                # Step 5 will feed the error back to the model explicitly.
+                # Malformed arguments degrade to an empty call; call_tool's
+                # argument validation then feeds a clear error back to the model.
                 logger.warning(f"[agent] malformed arguments for {name}: {tc.function.arguments!r}")
                 args = {}
-            logger.info(f"[agent step {step + 1}] tool={name} args={args}")
-            result = call_tool(name, args)
-            steps.append({"tool": name, "arguments": args})
+
+            # Loop guard: block a tool re-called with identical args too often.
+            sig = (name, json.dumps(args, sort_keys=True, ensure_ascii=False, default=str))
+            call_counts[sig] += 1
+            if call_counts[sig] > cfg.AGENT_MAX_REPEAT:
+                logger.warning(f"[agent] loop guard tripped: {name} repeated with same args")
+                result = {
+                    "error": (
+                        f"你已用相同参数重复调用 {name} {call_counts[sig]} 次。"
+                        "请基于已有的工具结果直接作答，不要再重复调用同一工具。"
+                    )
+                }
+                steps.append({"tool": name, "arguments": args, "blocked": "repeat"})
+            else:
+                logger.info(f"[agent step {step + 1}] tool={name} args={args}")
+                result = call_tool(name, args)
+                steps.append({"tool": name, "arguments": args})
+
+            # Truncate oversized tool output to bound context growth.
+            content = json.dumps(result, ensure_ascii=False, default=str)
+            if len(content) > cfg.AGENT_TOOL_OUTPUT_LIMIT:
+                content = content[: cfg.AGENT_TOOL_OUTPUT_LIMIT] + "…(tool output truncated)"
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": json.dumps(result, ensure_ascii=False, default=str),
+                "content": content,
             })
 
     # AGENT_MAX_STEPS exhausted — force a final answer with tools disabled so

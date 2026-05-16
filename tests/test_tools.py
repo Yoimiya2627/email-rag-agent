@@ -126,6 +126,31 @@ def test_call_tool_handles_none_arguments(monkeypatch):
     assert call_tool("email_stats", None) == {"ok": True}
 
 
+def test_call_tool_drops_hallucinated_kwargs(monkeypatch):
+    """An argument the tool does not accept is dropped, not raised as TypeError."""
+    monkeypatch.setitem(tools_mod.TOOL_DISPATCH, "search_emails", lambda query: {"q": query})
+    out = call_tool("search_emails", {"query": "预算", "bogus_param": 123})
+    assert out == {"q": "预算"}
+
+
+def test_call_tool_missing_required_argument_returns_error(monkeypatch):
+    monkeypatch.setitem(tools_mod.TOOL_DISPATCH, "get_email", lambda email_id: {"id": email_id})
+    out = call_tool("get_email", {})
+    assert isinstance(out, dict) and "error" in out
+    assert "email_id" in out["error"]
+
+
+def test_call_tool_captures_tool_exception(monkeypatch):
+    """An exception inside a tool becomes an error result, not a crash."""
+    def boom(**kw):
+        raise RuntimeError("db down")
+
+    monkeypatch.setitem(tools_mod.TOOL_DISPATCH, "email_stats", boom)
+    out = call_tool("email_stats", {})
+    assert isinstance(out, dict) and "error" in out
+    assert "db down" in out["error"]
+
+
 def test_tool_schemas_match_dispatch_table():
     schema_names = {s["function"]["name"] for s in tools_mod.TOOL_SCHEMAS}
     assert schema_names == set(tools_mod.TOOL_DISPATCH.keys())

@@ -14,6 +14,7 @@ the agent and the legacy /chat agents stay behind one implementation.
 call_tool() here is intentionally minimal; argument validation, error-feedback
 and loop-safety guardrails are added in Step 5.
 """
+import inspect
 import logging
 from typing import Any, List
 
@@ -197,12 +198,42 @@ TOOL_DISPATCH = {
 
 
 def call_tool(name: str, arguments: dict) -> Any:
-    """Dispatch a tool call by name. Returns the tool result (JSON-serializable).
+    """Dispatch a tool call by name, with argument validation and error capture.
 
-    Minimal for now — Step 5 adds argument validation and error-feedback so a
-    bad call is fed back to the model instead of crashing the loop.
+    Always returns a JSON-serializable result.  Failures — unknown tool,
+    hallucinated/missing arguments, or an exception inside the tool — come back
+    as ``{"error": ...}`` dicts so the agent loop can feed them to the model
+    instead of crashing the whole request.
     """
     fn = TOOL_DISPATCH.get(name)
     if fn is None:
-        return {"error": f"unknown tool: {name!r}"}
-    return fn(**(arguments or {}))
+        return {"error": f"unknown tool: {name!r}; available: {sorted(TOOL_DISPATCH)}"}
+
+    arguments = dict(arguments or {})
+    params = inspect.signature(fn).parameters
+    has_var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+    # Drop hallucinated kwargs the function does not accept (unless it takes **kwargs).
+    if not has_var_kw:
+        unknown = set(arguments) - set(params)
+        for k in unknown:
+            arguments.pop(k, None)
+        if unknown:
+            logger.warning(f"tool {name!r}: dropped unknown args {sorted(unknown)}")
+
+    # Required = positional-or-keyword / keyword-only params with no default.
+    missing = [
+        p
+        for p, param in params.items()
+        if param.default is inspect.Parameter.empty
+        and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        and p not in arguments
+    ]
+    if missing:
+        return {"error": f"tool {name!r} missing required argument(s): {missing}"}
+
+    try:
+        return fn(**arguments)
+    except Exception as exc:
+        logger.warning(f"tool {name!r} raised: {exc}")
+        return {"error": f"tool {name!r} failed: {exc}"}

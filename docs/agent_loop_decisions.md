@@ -96,3 +96,20 @@ agent loop 步骤（Step 3-4 重做 Self-RAG 路径时）一并处理。
   回复，确认我会参加会议」→ agent 自主走 3 步链
   `search_emails → get_email → draft_reply(email_id=...)`，email_id 在工具间传递，
   6 次 LLM 调用自然收尾，产出完整、有依据的回信草稿。
+
+## Step 5 — agent 护栏加固（已完成）
+
+agent loop 的失败模式护栏：
+- **死循环检测**：同一 (工具, 参数) 调用超过 `AGENT_MAX_REPEAT`（默认 2）次即拦截，
+  回灌提示让模型基于已有结果作答，不再执行该工具。
+- **参数校验**：`call_tool` 用 `inspect.signature` 丢弃模型幻觉出来的多余 kwarg、
+  对缺失必填参数返回错误（而非 TypeError）。
+- **工具报错回灌**：工具内部抛异常被 `call_tool` 捕获，转成 `{"error": ...}` 回灌，
+  不再让整个 loop 崩。
+- **输出截断**：单次工具结果超过 `AGENT_TOOL_OUTPUT_LIMIT`（默认 4000 字符）截断，
+  防多步任务上下文膨胀。
+
+### 验证
+- 76 单测全绿（71 + 5 新增失败模式测试）。
+- 护栏靠确定性单测验证（mock 一个永远循环的 LLM、坏参数、抛异常的工具）——这类
+  失败模式无法靠真实 LLM 稳定复现，单测才是正确的验证手段。

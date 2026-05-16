@@ -139,3 +139,41 @@ def test_loop_handles_multi_step_task(monkeypatch):
     assert tools_used == ["search_emails", "draft_reply", "draft_reply"]
     assert "2 封" in out.answer
     assert len(client.calls) == 3
+
+
+def test_loop_blocks_repeated_identical_tool_calls(monkeypatch):
+    """Same tool + identical args beyond AGENT_MAX_REPEAT is blocked, not re-run."""
+    same_call = [
+        _response(tool_calls=[_tool_call(f"c{i}", "search_emails", {"query": "q"})])
+        for i in range(10)
+    ]
+    client = _ScriptedClient(same_call)
+    _use_client(monkeypatch, client)
+    exec_count = {"n": 0}
+    monkeypatch.setattr(
+        loop_mod, "call_tool",
+        lambda name, args: exec_count.__setitem__("n", exec_count["n"] + 1) or {"ok": 1},
+    )
+    monkeypatch.setattr(loop_mod.cfg, "AGENT_MAX_REPEAT", 2)
+    monkeypatch.setattr(loop_mod.cfg, "AGENT_MAX_STEPS", 6)
+
+    out = run_agent_loop(AgentRequest(query="loopy"))
+    assert exec_count["n"] == 2  # the tool actually runs only AGENT_MAX_REPEAT times
+    assert any(s.get("blocked") == "repeat" for s in out.metadata["steps"])
+
+
+def test_loop_truncates_oversized_tool_output(monkeypatch):
+    """A huge tool result is truncated before being fed back into the context."""
+    huge = "x" * 50000
+    client = _ScriptedClient([
+        _response(tool_calls=[_tool_call("c1", "get_email", {"email_id": "e1"})]),
+        _response(content="done"),
+    ])
+    _use_client(monkeypatch, client)
+    monkeypatch.setattr(loop_mod, "call_tool", lambda name, args: {"body": huge})
+    monkeypatch.setattr(loop_mod.cfg, "AGENT_TOOL_OUTPUT_LIMIT", 1000)
+
+    run_agent_loop(AgentRequest(query="读邮件"))
+    tool_msg = next(m for m in client.calls[1]["messages"] if m.get("role") == "tool")
+    assert len(tool_msg["content"]) <= 1000 + 40
+    assert "truncated" in tool_msg["content"]
