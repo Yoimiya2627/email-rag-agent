@@ -113,3 +113,15 @@ agent loop 的失败模式护栏：
 - 76 单测全绿（71 + 5 新增失败模式测试）。
 - 护栏靠确定性单测验证（mock 一个永远循环的 LLM、坏参数、抛异常的工具）——这类
   失败模式无法靠真实 LLM 稳定复现，单测才是正确的验证手段。
+
+## Step 6 — agent 级评测（已完成）
+
+`scripts/run_agent_eval.py` + `data/agent_testset.json`（8 个任务）。
+指标：任务成功率（LLM-as-judge，沿用项目 RAGAS 的评判范式）、工具调用准确率
+（`expected_tools ⊆ actual_tools`）、平均步数、撞 `max_steps` 比例。
+
+### 实测结果（8 任务，`data/eval_results/agent_eval.json`）
+- 任务成功率 100%、工具调用准确率 100%、平均 2.0 步、0% 撞 max_steps。
+- 人工抽查 transcript：答案均有语料依据、多步链合理（如"列招聘要点"自主走
+  `search_emails + 3× get_email`；"起草回复"走 `search → get_email → draft_reply`）。
+- 注：8 任务是初始小测试集，数字真实但样本小，后续应扩充任务量再下结论。

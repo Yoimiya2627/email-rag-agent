@@ -1,0 +1,10 @@
+[
+  {"task": "Q3 预算评审会议是谁发的？", "expected_tools": ["search_emails"]},
+  {"task": "帮我把最近关于项目进展的邮件总结一下", "expected_tools": ["summarize_emails"]},
+  {"task": "邮件库里一共有多少封邮件？发件人里谁发得最多？", "expected_tools": ["email_stats"]},
+  {"task": "找一封关于报销的邮件，帮我起草一封回复，确认我已收到并会尽快处理", "expected_tools": ["search_emails", "draft_reply"]},
+  {"task": "关于招聘的邮件都有哪些？列一下要点", "expected_tools": ["search_emails"]},
+  {"task": "邮件的标签分布是怎样的？", "expected_tools": ["email_stats"]},
+  {"task": "把和预算相关的邮件整理一个摘要", "expected_tools": ["summarize_emails"]},
+  {"task": "找出一封关于会议安排的邮件，帮我起草一封确认参加的回复", "expected_tools": ["search_emails", "draft_reply"]}
+]
