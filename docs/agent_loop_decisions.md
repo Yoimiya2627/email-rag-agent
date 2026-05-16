@@ -53,3 +53,16 @@ agent loop 步骤（Step 3-4 重做 Self-RAG 路径时）一并处理。
 - `core/retriever.py` `core/reranker.py` `core/generator.py` 未改动。
 - 未重跑完整 RAGAS 评测：`run_ragas_eval` 会覆写已提交的 `data/eval_results/*.json`
   （README 公开数字的来源）。若要实测后过滤对指标的影响，需单独跑并用临时输出目录。
+
+## Step 2 — 工具层 agents/tools.py（已完成）
+
+5 个工具，每个 = 函数 + OpenAI function schema + 分发表项：
+- `search_emails(query, sender?, date_hint?, labels?, limit?)` — 混合检索 + 后过滤 + rerank
+- `get_email(email_id)` — 取整封邮件（按 chunk_index 拼接）
+- `summarize_emails(query)` — 复用 `SummarizerAgent`
+- `draft_reply(query)` — 复用 `WriterAgent`
+- `email_stats()` — 复用 `compute_email_stats()`（已从 AnalyzerAgent 提为模块级函数）
+
+`TOOL_SCHEMAS` / `TOOL_DISPATCH` / `call_tool()` 供 Step 3 的 agent loop 使用。
+`call_tool` 暂为最小实现，参数校验 / 错误回灌留到 Step 5。
+验证：63 单测全绿（52 + 11 新增 `test_tools.py`）。

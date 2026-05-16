@@ -1,6 +1,10 @@
 """
 AnalyzerAgent: computes statistical summaries (top senders, label distribution,
 daily volume) and uses LLM to interpret results in natural language.
+
+`compute_email_stats()` is a module-level function so the agent tool layer
+(agents/tools.py) can reuse the exact same stats computation without reaching
+into the agent.
 """
 import json
 import logging
@@ -16,54 +20,56 @@ import config.settings as cfg
 logger = logging.getLogger(__name__)
 
 
+def compute_email_stats() -> Dict[str, Any]:
+    """Aggregate metadata stats over the indexed corpus (pure, no LLM call)."""
+    chunks = get_all_chunks()
+    # Deduplicate by email_id to avoid counting chunks multiple times
+    seen: Dict[str, dict] = {}
+    for chunk in chunks:
+        meta = chunk["metadata"]
+        eid = meta.get("email_id", "")
+        if eid and eid not in seen:
+            seen[eid] = meta
+
+    emails = list(seen.values())
+    total = len(emails)
+
+    sender_counts = Counter(m.get("sender", "unknown") for m in emails)
+    top5_senders = sender_counts.most_common(5)
+
+    label_counts: Counter = Counter()
+    for m in emails:
+        raw = m.get("labels", "[]")
+        try:
+            labels = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            labels = []
+        for label in labels:
+            label_counts[label] += 1
+
+    daily_counts: Counter = Counter()
+    for m in emails:
+        date_str = m.get("date", "")
+        if date_str and len(date_str) >= 10:
+            daily_counts[date_str[:10]] += 1
+
+    return {
+        "total_emails": total,
+        "top5_senders": [{"sender": s, "count": c} for s, c in top5_senders],
+        "label_distribution": dict(label_counts.most_common(10)),
+        "daily_counts": [
+            {"date": d, "count": c}
+            for d, c in sorted(daily_counts.items())[-30:]
+        ],
+    }
+
+
 class AnalyzerAgent:
     def __init__(self):
         self._client = OpenAI(api_key=cfg.DEEPSEEK_API_KEY, base_url=cfg.DEEPSEEK_BASE_URL)
 
-    def _compute_stats(self) -> Dict[str, Any]:
-        chunks = get_all_chunks()
-        # Deduplicate by email_id to avoid counting chunks multiple times
-        seen: Dict[str, dict] = {}
-        for chunk in chunks:
-            meta = chunk["metadata"]
-            eid = meta.get("email_id", "")
-            if eid and eid not in seen:
-                seen[eid] = meta
-
-        emails = list(seen.values())
-        total = len(emails)
-
-        sender_counts = Counter(m.get("sender", "unknown") for m in emails)
-        top5_senders = sender_counts.most_common(5)
-
-        label_counts: Counter = Counter()
-        for m in emails:
-            raw = m.get("labels", "[]")
-            try:
-                labels = json.loads(raw) if isinstance(raw, str) else raw
-            except Exception:
-                labels = []
-            for label in labels:
-                label_counts[label] += 1
-
-        daily_counts: Counter = Counter()
-        for m in emails:
-            date_str = m.get("date", "")
-            if date_str and len(date_str) >= 10:
-                daily_counts[date_str[:10]] += 1
-
-        return {
-            "total_emails": total,
-            "top5_senders": [{"sender": s, "count": c} for s, c in top5_senders],
-            "label_distribution": dict(label_counts.most_common(10)),
-            "daily_counts": [
-                {"date": d, "count": c}
-                for d, c in sorted(daily_counts.items())[-30:]
-            ],
-        }
-
     def run(self, request: AgentRequest, memory=None) -> AgentResponse:
-        stats = self._compute_stats()
+        stats = compute_email_stats()
         stats_json = json.dumps(stats, ensure_ascii=False, indent=2)
 
         resp = self._client.chat.completions.create(
