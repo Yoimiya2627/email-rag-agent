@@ -54,22 +54,19 @@ def apply_flags(flags: dict):
 
 
 def run_single(client: OpenAI, question: str, ground_truth: str) -> Dict[str, Any]:
-    """Run one question through current RAG pipeline, return answer + contexts."""
-    from core.retriever import hybrid_search
-    from core.reranker import rerank
+    """Run one question through the shared RAG pipeline, return answer + contexts.
+
+    Uses core.pipeline.retrieve so the evaluation measures the *same* pipeline
+    the product serves — including the sender/date/label post-filters this
+    script previously skipped.  `client` is unused but kept for signature
+    stability (evaluate_version and tests call it positionally).
+    """
+    from core.pipeline import retrieve
     from core.generator import generate_answer
-    from agents.retriever_agent import RetrieverAgent
 
-    agent = RetrieverAgent()
-    rewritten = agent._rewrite_query(question)
-    filters = agent._extract_filters(rewritten)
-    search_query = filters.get("query") or rewritten
-
-    results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
-    reranked = rerank(question, results, top_n=cfg.RERANK_TOP_N)
+    reranked = retrieve(question)
     answer = generate_answer(question, reranked)
-    contexts = [r.content for r in reranked]
-    return {"answer": answer, "contexts": contexts}
+    return {"answer": answer, "contexts": [r.content for r in reranked]}
 
 
 _EVAL_USER_TMPL = """你是RAG系统评测专家。请给下面的检索问答打分。

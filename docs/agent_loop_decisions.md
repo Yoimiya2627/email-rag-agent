@@ -29,3 +29,27 @@
 - `core/generator.py:110` 注释称推理模型 `reasoning_content` 要 30~70s——实测仅 ~105 字符 / 2.3s，注释已过时，需更正。
 - 三处 `LLM_TIMEOUT` 文档不一致：README 配置表写 15、architecture §9 写 60、settings 默认 15。统一为 60。
 - architecture.md §3 "链路总耗时 ~30~50秒" 与 README 评测 "V2 mean 8.7s" 不一致，需对齐。
+
+## Step 1 — 抽 core/pipeline.py（已完成）
+
+新增 `core/pipeline.py`，统一检索链路 `retrieve()`：rewrite → extract_filters →
+hybrid_search → apply_post_filters → rerank。
+
+### 改动
+- `agents/retriever_agent.py`、`scripts/run_ragas_eval.py`、`scripts/measure_latency.py`
+  三处不再各自实现检索链路，统一调 `core.pipeline.retrieve()`。
+- **Bug #2 已修**：run_ragas_eval / measure_latency 之前抽取了 filters 却没应用
+  sender/date/label 后过滤，评测链路与产品链路不一致。现在三处走同一个 `retrieve()`。
+
+### 决策：graph_workflow 不并入
+`agents/graph_workflow.py` 的检索是**故意更精简的**——只有 rewrite + hybrid +
+rerank，没有 filter 抽取和后过滤，因为 Self-RAG 用 `grade` 节点替代过滤。强行并入
+`retrieve()` 会改变 `/chat/graph` 行为，超出"纯重构"范围。graph_workflow 留到
+agent loop 步骤（Step 3-4 重做 Self-RAG 路径时）一并处理。
+
+### 验证
+- 52 个单测全绿（45 回归 + 7 个新增 `test_pipeline.py`）。
+- 全部模块导入冒烟通过（含 `api.main` 和两个脚本）。
+- `core/retriever.py` `core/reranker.py` `core/generator.py` 未改动。
+- 未重跑完整 RAGAS 评测：`run_ragas_eval` 会覆写已提交的 `data/eval_results/*.json`
+  （README 公开数字的来源）。若要实测后过滤对指标的影响，需单独跑并用临时输出目录。

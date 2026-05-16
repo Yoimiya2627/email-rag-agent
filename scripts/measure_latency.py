@@ -35,18 +35,11 @@ OUTPUT_PATH = Path(__file__).parent.parent / "data" / "eval_results" / "latency.
 
 
 def time_one(question: str) -> float:
-    from core.retriever import hybrid_search
-    from core.reranker import rerank
+    from core.pipeline import retrieve
     from core.generator import generate_answer
-    from agents.retriever_agent import RetrieverAgent
 
-    agent = RetrieverAgent()
     t0 = time.perf_counter()
-    rewritten = agent._rewrite_query(question)
-    filters = agent._extract_filters(rewritten)
-    search_query = filters.get("query") or rewritten
-    results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
-    reranked = rerank(question, results, top_n=cfg.RERANK_TOP_N)
+    reranked = retrieve(question)
     _ = generate_answer(question, reranked)
     return time.perf_counter() - t0
 
