@@ -77,6 +77,29 @@ def test_draft_reply_delegates_to_writer_agent(monkeypatch):
     assert tools_mod.draft_reply(query="回复 Bob") == "Dear Bob, ..."
 
 
+def test_draft_reply_with_email_id_targets_specific_email(monkeypatch):
+    """With email_id the tool drafts against that exact email (multi-step path)."""
+    monkeypatch.setattr(
+        tools_mod, "get_email",
+        lambda eid: {"email_id": eid, "subject": "询价", "sender": "bob@x.com", "body": "请尽快报价"},
+    )
+    captured = {}
+    monkeypatch.setattr(
+        tools_mod, "draft_reply_for_email",
+        lambda email, instruction: captured.update({"email": email, "instruction": instruction}) or "DRAFT",
+    )
+    out = tools_mod.draft_reply(instruction="礼貌报价", email_id="email_42")
+    assert out == "DRAFT"
+    assert captured["email"]["email_id"] == "email_42"
+    assert captured["instruction"] == "礼貌报价"
+
+
+def test_draft_reply_unknown_email_id_returns_error(monkeypatch):
+    monkeypatch.setattr(tools_mod, "get_email", lambda eid: {"error": "not found"})
+    out = tools_mod.draft_reply(instruction="x", email_id="missing")
+    assert isinstance(out, dict) and "error" in out
+
+
 def test_email_stats_delegates(monkeypatch):
     monkeypatch.setattr(tools_mod, "compute_email_stats", lambda: {"total_emails": 5000})
     assert tools_mod.email_stats() == {"total_emails": 5000}

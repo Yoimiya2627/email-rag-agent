@@ -79,3 +79,20 @@ agent loop 步骤（Step 3-4 重做 Self-RAG 路径时）一并处理。
 - 真实集成冒烟（throwaway 脚本，已删）：query「Q3 预算评审会议是谁发的？」
   → agent 自主走了 2 步工具链 `search_emails → get_email → 作答`，3 次 LLM 调用
   自然收尾，答案正确（识别出发件人）。验证了 DeepSeek 工具调用回灌协议端到端跑通。
+
+## Step 4 — 多步任务 + 工具补齐（已完成）
+
+- `draft_reply` 工具支持 `email_id` 参数：可对一封确定的邮件精确起草回复（多步
+  任务把 `search_emails` 结果里的 `email_id` 直接传进来，工具间传结构化数据）。
+  从 WriterAgent 提取 `draft_reply_for_email(email, instruction)` 模块级函数，
+  新旧路径共用。
+- agent system prompt 加多步指引：逐封任务先 search、再用 email_id 逐个处理。
+- 决策：不改 `coordinator.py`——agent loop 本身就是升级版 planner，旧的意图路由
+  作为 `/chat` 的降级路径保留（符合项目"旧实现留作降级"的约定）。
+
+### 验证
+- 71 单测全绿（68 + 3 新增）。
+- 真实多步冒烟（throwaway，已删）：query「找一封关于预算评审的邮件，帮我起草一封
+  回复，确认我会参加会议」→ agent 自主走 3 步链
+  `search_emails → get_email → draft_reply(email_id=...)`，email_id 在工具间传递，
+  6 次 LLM 调用自然收尾，产出完整、有依据的回信草稿。

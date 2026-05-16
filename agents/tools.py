@@ -22,7 +22,7 @@ from core.reranker import rerank
 from core.pipeline import apply_post_filters
 from core.embedder import get_all_chunks
 from agents.summarizer_agent import SummarizerAgent
-from agents.writer_agent import WriterAgent
+from agents.writer_agent import WriterAgent, draft_reply_for_email
 from agents.analyzer_agent import compute_email_stats
 from models.schemas import AgentRequest, SearchResult
 import config.settings as cfg
@@ -87,9 +87,19 @@ def summarize_emails(query: str) -> str:
     return resp.answer
 
 
-def draft_reply(query: str) -> str:
-    """Find the most relevant original email and draft a reply per `query`."""
-    resp = WriterAgent().run(AgentRequest(query=query))
+def draft_reply(instruction: str = "", email_id: str = "", query: str = "") -> Any:
+    """Draft a reply.
+
+    With `email_id` → draft against that exact email (precise; this is how a
+    multi-step task drafts a reply per email found by search_emails).
+    Otherwise → search by `query` (or `instruction`) for the target email.
+    """
+    if email_id:
+        email = get_email(email_id)
+        if isinstance(email, dict) and "error" in email:
+            return email
+        return draft_reply_for_email(email, instruction)
+    resp = WriterAgent().run(AgentRequest(query=query or instruction))
     return resp.answer
 
 
@@ -155,13 +165,15 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "draft_reply",
-            "description": "找到最相关的原始邮件并起草一封回信。",
+            "description": "起草一封回信。已知具体邮件时传 email_id（精确，多步任务推荐）；否则传 query 让系统检索目标邮件。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "回信要求，如 '帮我回复 Bob 的询价邮件，礼貌拒绝'"},
+                    "instruction": {"type": "string", "description": "回信要求，如 '礼貌拒绝' '确认参会'"},
+                    "email_id": {"type": "string", "description": "要回复的邮件 id（来自 search_emails 结果），可选"},
+                    "query": {"type": "string", "description": "不知道 email_id 时，用于检索目标邮件的描述，可选"},
                 },
-                "required": ["query"],
+                "required": ["instruction"],
             },
         },
     },

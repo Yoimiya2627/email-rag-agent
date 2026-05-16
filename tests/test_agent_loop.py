@@ -119,3 +119,23 @@ def test_loop_degrades_malformed_tool_arguments(monkeypatch):
     out = run_agent_loop(AgentRequest(query="统计"))
     assert out.answer == "done"
     assert seen["args"] == {}
+
+
+def test_loop_handles_multi_step_task(monkeypatch):
+    """A multi-step task: search once, then draft a reply per found email."""
+    client = _ScriptedClient([
+        _response(tool_calls=[_tool_call("c1", "search_emails", {"query": "询价"})]),
+        _response(tool_calls=[
+            _tool_call("c2", "draft_reply", {"email_id": "e1", "instruction": "报价"}),
+            _tool_call("c3", "draft_reply", {"email_id": "e2", "instruction": "报价"}),
+        ]),
+        _response(content="已为 2 封询价邮件起草回复。"),
+    ])
+    _use_client(monkeypatch, client)
+    monkeypatch.setattr(loop_mod, "call_tool", lambda name, args: {"tool": name, "args": args})
+
+    out = run_agent_loop(AgentRequest(query="找出询价邮件并逐封起草回复"))
+    tools_used = [s["tool"] for s in out.metadata["steps"]]
+    assert tools_used == ["search_emails", "draft_reply", "draft_reply"]
+    assert "2 封" in out.answer
+    assert len(client.calls) == 3
