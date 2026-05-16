@@ -66,3 +66,16 @@ agent loop 步骤（Step 3-4 重做 Self-RAG 路径时）一并处理。
 `TOOL_SCHEMAS` / `TOOL_DISPATCH` / `call_tool()` 供 Step 3 的 agent loop 使用。
 `call_tool` 暂为最小实现，参数校验 / 错误回灌留到 Step 5。
 验证：63 单测全绿（52 + 11 新增 `test_tools.py`）。
+
+## Step 3 — agent loop + /chat/agent（已完成）
+
+`agents/agent_loop.py`：function-calling 循环。规划模型 `AGENT_PLANNER_MODEL`
+（默认 `deepseek-chat`）。while 返回 `tool_calls` 就执行并把结果作为 tool 消息回灌，
+返回纯文本即最终答案。唯一护栏 = `AGENT_MAX_STEPS`（默认 6）硬上限，超限后强制
+无工具收尾。新增 `/chat/agent` 端点，旧端点不动。
+
+### 验证
+- 68 单测全绿（63 + 5 新增 `test_agent_loop.py`）。
+- 真实集成冒烟（throwaway 脚本，已删）：query「Q3 预算评审会议是谁发的？」
+  → agent 自主走了 2 步工具链 `search_emails → get_email → 作答`，3 次 LLM 调用
+  自然收尾，答案正确（识别出发件人）。验证了 DeepSeek 工具调用回灌协议端到端跑通。

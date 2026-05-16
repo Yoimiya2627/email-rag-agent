@@ -50,3 +50,9 @@ ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "false").lower() == "tr
 
 # Timeout and degradation
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "15"))
+
+# Agent loop
+# Planning / tool-selection calls use a non-reasoning model — faster and with
+# function calling verified (see docs/agent_loop_decisions.md, Step 0).
+AGENT_PLANNER_MODEL = os.getenv("AGENT_PLANNER_MODEL", "deepseek-chat")
+AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))

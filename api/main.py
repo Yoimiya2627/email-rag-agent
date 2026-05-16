@@ -245,6 +245,23 @@ async def chat_graph(request: AgentRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.post("/chat/agent", response_model=AgentResponse)
+async def chat_agent(request: AgentRequest):
+    """Function-calling agent loop — the planner LLM autonomously selects and
+    chains tools (search / get / summarize / draft / stats) to fulfil the query."""
+    from agents.agent_loop import run_agent_loop
+    try:
+        session_id = request.session_id or "default"
+        memory = _get_session(session_id)
+        response = run_agent_loop(request, memory=memory)
+        memory.add("user", request.query)
+        memory.add("assistant", response.answer)
+        return response
+    except Exception as exc:
+        logger.exception("Agent chat failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
     """Direct RAG query without multi-agent routing."""
