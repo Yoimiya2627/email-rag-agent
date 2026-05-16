@@ -49,7 +49,7 @@ ENABLE_RERANKER = os.getenv("ENABLE_RERANKER", "false").lower() == "true"
 ENABLE_QUERY_REWRITE = os.getenv("ENABLE_QUERY_REWRITE", "false").lower() == "true"
 
 # Timeout and degradation
-LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "15"))
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 
 # Agent loop
 # Planning / tool-selection calls use a non-reasoning model — faster and with

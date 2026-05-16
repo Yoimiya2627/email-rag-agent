@@ -38,6 +38,48 @@ def _get(endpoint: str, timeout: int = 5) -> dict | None:
         return None
 
 
+def _render_metadata(metadata: dict | None):
+    """Render assistant-message metadata — agent tool-call steps, or stats."""
+    if not metadata:
+        return
+    steps = metadata.get("steps")
+    if steps:
+        with st.expander(f"🛠️ Agent 工具调用（{len(steps)} 步）", expanded=False):
+            for i, s in enumerate(steps, 1):
+                blocked = "  ⚠️ 重复调用被拦截" if s.get("blocked") else ""
+                st.markdown(f"**{i}. `{s.get('tool', '?')}`**{blocked}")
+                if s.get("arguments"):
+                    st.json(s["arguments"])
+            if metadata.get("max_steps_reached"):
+                st.caption("⚠️ 已达到最大步数上限")
+        return
+    if not (metadata.get("top5_senders") or metadata.get("label_distribution")
+            or metadata.get("daily_counts")):
+        return
+    with st.expander("📊 统计数据", expanded=False):
+        top5 = metadata.get("top5_senders", [])
+        if top5:
+            st.subheader("发件人 Top 5")
+            max_count = max((i.get("count", 1) if isinstance(i, dict) else i[1]) for i in top5)
+            for item in top5:
+                sender = item.get("sender", "?") if isinstance(item, dict) else item[0]
+                count = item.get("count", 0) if isinstance(item, dict) else item[1]
+                st.progress(count / max_count, text=f"{sender}：{count} 封")
+        label_dist = metadata.get("label_distribution", {})
+        if label_dist:
+            st.subheader("标签分布")
+            st.bar_chart(label_dist)
+        daily = metadata.get("daily_counts", [])
+        if daily:
+            st.subheader("每日邮件量")
+            chart_data = {
+                (d["date"] if isinstance(d, dict) else d[0]):
+                (d["count"] if isinstance(d, dict) else d[1])
+                for d in daily
+            }
+            st.bar_chart(chart_data)
+
+
 INTENT_LABELS = {
     "retrieve": "🔍 检索",
     "summarize": "📝 摘要",
@@ -111,8 +153,16 @@ with st.sidebar:
             st.session_state["pending_query"] = q
 
     st.divider()
-    st.subheader("⚙️ 选项")
-    use_graph = st.toggle("Self-RAG 工作流", value=False, help="启用 LangGraph Self-RAG（更慢但更准）")
+    st.subheader("⚙️ 模式")
+    mode = st.radio(
+        "问答模式",
+        ["普通（多 Agent 路由）", "Self-RAG（反思工作流）", "Agent（自主工具调用）"],
+        help=(
+            "普通=意图路由到专家 agent；"
+            "Self-RAG=LangGraph 反思重试；"
+            "Agent=function-calling 自主规划并多轮调用工具"
+        ),
+    )
     use_stream = st.toggle("流式输出", value=False, help="SSE 流式返回 token（仅普通模式）")
 
     st.divider()
@@ -156,32 +206,7 @@ for msg in st.session_state["messages"]:
                     if i < len(sources) - 1:
                         st.divider()
 
-        metadata = msg.get("extra_metadata")
-        if metadata:
-            with st.expander("📊 统计数据", expanded=False):
-                top5 = metadata.get("top5_senders", [])
-                if top5:
-                    st.subheader("发件人 Top 5")
-                    for item in top5:
-                        sender = item.get("sender", "?") if isinstance(item, dict) else item[0]
-                        count = item.get("count", 0) if isinstance(item, dict) else item[1]
-                        st.progress(
-                            count / max(i.get("count",1) if isinstance(i,dict) else i[1] for i in top5),
-                            text=f"{sender}：{count} 封",
-                        )
-                label_dist = metadata.get("label_distribution", {})
-                if label_dist:
-                    st.subheader("标签分布")
-                    st.bar_chart(label_dist)
-                daily = metadata.get("daily_counts", [])
-                if daily:
-                    st.subheader("每日邮件量")
-                    chart_data = {
-                        (d["date"] if isinstance(d, dict) else d[0]):
-                        (d["count"] if isinstance(d, dict) else d[1])
-                        for d in daily
-                    }
-                    st.bar_chart(chart_data)
+        _render_metadata(msg.get("extra_metadata"))
 
 # Handle pending quick query
 pending = st.session_state.pop("pending_query", None)
@@ -196,10 +221,15 @@ if user_input:
 
     # Call API and show assistant bubble
     payload = {"query": user_input, "session_id": session_id}
-    endpoint = "/chat/graph" if use_graph else "/chat"
+    if mode.startswith("Agent"):
+        endpoint = "/chat/agent"
+    elif mode.startswith("Self-RAG"):
+        endpoint = "/chat/graph"
+    else:
+        endpoint = "/chat"
 
     with st.chat_message("assistant"):
-        if use_stream and not use_graph:
+        if use_stream and mode.startswith("普通"):
             # SSE streaming
             import sseclient
             intent_caption = st.empty()
@@ -267,32 +297,7 @@ if user_input:
                         if i < len(sources) - 1:
                             st.divider()
 
-            metadata = result.get("metadata")
-            if metadata:
-                with st.expander("📊 统计数据", expanded=True):
-                    top5 = metadata.get("top5_senders", [])
-                    if top5:
-                        st.subheader("发件人 Top 5")
-                        max_count = max(
-                            (i.get("count",1) if isinstance(i,dict) else i[1]) for i in top5
-                        )
-                        for item in top5:
-                            sender = item.get("sender","?") if isinstance(item,dict) else item[0]
-                            count = item.get("count",0) if isinstance(item,dict) else item[1]
-                            st.progress(count / max_count, text=f"{sender}：{count} 封")
-                    label_dist = metadata.get("label_distribution", {})
-                    if label_dist:
-                        st.subheader("标签分布")
-                        st.bar_chart(label_dist)
-                    daily = metadata.get("daily_counts", [])
-                    if daily:
-                        st.subheader("每日邮件量")
-                        chart_data = {
-                            (d["date"] if isinstance(d, dict) else d[0]):
-                            (d["count"] if isinstance(d, dict) else d[1])
-                            for d in daily
-                        }
-                        st.bar_chart(chart_data)
+            _render_metadata(result.get("metadata"))
 
             st.session_state["messages"].append(
                 {

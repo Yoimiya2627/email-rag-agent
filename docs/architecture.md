@@ -195,9 +195,9 @@ sequenceDiagram
     API-->>U: 200 OK + JSON
 ```
 
-**链路总耗时**：~30~50 秒（推理模型 5~10 秒/次 LLM 调用 × 4~5 次）。
-**LLM 调用清单**：意图分类 → 改写 → 过滤抽取 → 重排打分 → 生成答案 = 5 次。
-**真正的检索（向量 + BM25）只占 ~30ms**——瓶颈完全在 LLM。
+**链路总耗时**：默认 V2 配置约 8.7s（mean）/ 14.4s（p95）；全开 V4 配置约 24s。
+**LLM 调用清单**：意图分类 → 改写 → 过滤抽取 → 重排打分 → 生成答案 = 最多 5 次。
+**真正的检索（向量 + BM25）只占 ~30ms**——瓶颈在 LLM 调用次数，详见 [`docs/evaluation.md`](evaluation.md)。
 
 ---
 
@@ -393,13 +393,66 @@ flowchart LR
 - 普通调用 `max_tokens=1500`（够 reasoning + 短结构化输出）
 - 高推理量调用（reranker、三维度评分）`max_tokens=3000`
 - 所有结构化输出（JSON / 数组）调用都加 `reasoning_content` 兜底解析
-- 所有调用都加 `timeout=cfg.LLM_TIMEOUT`（默认 60s，因为推理慢）
+- 所有调用都加 `timeout=cfg.LLM_TIMEOUT`（默认 60s，留足余量）
 
 详见 `docs/engineering_pitfalls.md` 第一节。
 
 ---
 
-## 十、目录结构
+## 十、Agent 工具调用循环（POST /chat/agent）
+
+在 §六 固定意图路由之外，`/chat/agent` 提供一条 function-calling 的 agent 链路：
+规划模型自主决定调用哪些工具、调几轮，可完成多步任务。
+
+```mermaid
+flowchart TD
+    Q["用户任务"] --> LLM["规划 LLM<br/>(deepseek-chat + tools schema)"]
+    LLM --> D{"返回 tool_calls?"}
+    D -->|否| ANS["最终答案"]
+    D -->|是| EXEC["执行工具<br/>search / get / summarize / draft / stats"]
+    EXEC --> GUARD{"护栏"}
+    GUARD -->|"同工具同参数重复"| BLOCK["拦截，回灌提示"]
+    GUARD -->|正常| FEED["结果回灌为 tool 消息<br/>(超长则截断)"]
+    BLOCK --> FEED
+    FEED --> LLM
+    LLM -.->|"达到 AGENT_MAX_STEPS"| FORCE["强制无工具收尾"]
+    FORCE --> ANS
+
+    style LLM fill:#ffe4b5
+    style ANS fill:#c0ffc0
+    style GUARD fill:#ffb5b5
+```
+
+**5 个工具**（`agents/tools.py`）：
+
+| 工具 | 作用 |
+|---|---|
+| `search_emails` | 混合检索（向量+BM25+RRF），可带 sender/date/labels 过滤 |
+| `get_email` | 按 email_id 取整封邮件 |
+| `summarize_emails` | 检索 + 结构化摘要 |
+| `draft_reply` | 起草回信，支持 email_id 精确定位（多步任务用） |
+| `email_stats` | 发件人 / 标签 / 每日量聚合统计 |
+
+**护栏**（`AGENT_*` 配置，详见 `agents/agent_loop.py`）：
+
+| 护栏 | 机制 |
+|---|---|
+| 步数上限 | `AGENT_MAX_STEPS`（默认 6），超限强制无工具收尾 |
+| 死循环检测 | 同工具 + 同参数调用超过 `AGENT_MAX_REPEAT`（默认 2）次即拦截 |
+| 参数校验 | 丢弃模型幻觉的多余 kwarg，缺失必填参数回灌错误 |
+| 工具报错回灌 | 工具异常被捕获转成 error 结果，不让 loop 崩 |
+| 输出截断 | 单次工具结果超 `AGENT_TOOL_OUTPUT_LIMIT` 截断，防上下文膨胀 |
+
+**与 §六 固定路由的区别**：Coordinator 是"一次分类 → 一条固定链"；agent loop 是 LLM
+自主多轮规划，能把"找出 X 并逐封处理"这类任务拆成 `search → 逐个 draft` 的多步链。
+旧的 `/chat`（固定路由）保留作为降级路径。
+
+**评测**：`scripts/run_agent_eval.py` 用任务成功率 / 工具调用准确率 / 平均步数评测
+agent 本身（区别于 RAGAS 评测检索质量），结果见 `data/eval_results/agent_eval.json`。
+
+---
+
+## 十一、目录结构
 
 ```
 E:/智能邮件agent/
@@ -411,13 +464,16 @@ E:/智能邮件agent/
 │   ├── summarizer_agent.py       # 摘要 agent
 │   ├── writer_agent.py           # 写信 agent
 │   ├── analyzer_agent.py         # 分析 agent
-│   └── graph_workflow.py         # LangGraph Self-RAG
+│   ├── graph_workflow.py         # LangGraph Self-RAG
+│   ├── tools.py                  # Agent 工具层（5 工具 + schema + dispatch）
+│   └── agent_loop.py             # function-calling agent 循环 + 护栏
 ├── core/
 │   ├── loader.py                 # 邮件加载
 │   ├── cleaner.py                # 清洗（去 HTML/引用/签名）
 │   ├── chunker.py                # 切分（滑窗）
 │   ├── embedder.py               # bge-m3 嵌入 + ChromaDB 读写
 │   ├── retriever.py              # Vector + BM25 + RRF（带缓存）
+│   ├── pipeline.py               # 统一检索链路 retrieve()（agent/eval 共用）
 │   ├── reranker.py               # LLM 重排（带熔断器）
 │   ├── generator.py              # 答案生成（含流式）
 │   └── memory.py                 # 多轮对话滑窗（线程安全）

@@ -125,3 +125,27 @@ agent loop 的失败模式护栏：
 - 人工抽查 transcript：答案均有语料依据、多步链合理（如"列招聘要点"自主走
   `search_emails + 3× get_email`；"起草回复"走 `search → get_email → draft_reply`）。
 - 注：8 任务是初始小测试集，数字真实但样本小，后续应扩充任务量再下结论。
+
+## Step 7 — 前端 Agent 模式 + 文档收尾（已完成）
+
+- `frontend/app.py`：选项区改为模式单选（普通 / Self-RAG / Agent），Agent 模式打
+  `/chat/agent`；新增 `_render_metadata` helper 渲染 agent 工具调用步骤（并合并了原本
+  重复两处的统计渲染）。
+- `docs/architecture.md`：新增 §10 Agent 工具调用循环（Mermaid 图 + 工具/护栏表），
+  目录树补 `tools.py` / `agent_loop.py` / `pipeline.py`。
+- `README.md`：30 秒速览、它能做什么、API 端点表、配置表、评测节均补 agent 内容。
+- 修 Step 0 标记的文档不一致：`LLM_TIMEOUT` 默认值 15 → 60（`settings.py` + README 同步）；
+  删除 `generator.py` 过时的 "reasoning 30~70s" 注释；`architecture.md` §3 延迟数字
+  对齐 `evaluation.md`、§9 timeout 措辞修正。
+
+### 验证
+- `frontend/app.py` 语法检查通过；81 单测全绿。
+- 前端 UI 需手动跑 Streamlit 目测（无浏览器环境无法自动验证）。
+
+---
+
+## 收尾遗留（非本次范围）
+
+- `graph_workflow.py` 的检索仍未并入 `core/pipeline.py`（Step 1 决策，故意保留）。
+- demo.mp4 需重录一版含 Agent 模式（视频，需用户手动操作）。
+- 简历叙事重写：项目升级已完成，可按对话中给出的 before/after bullet 改简历。

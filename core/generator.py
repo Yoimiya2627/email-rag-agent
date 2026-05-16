@@ -107,9 +107,9 @@ def stream_generate(
         timeout=cfg.LLM_TIMEOUT,
     )
 
-    # 推理模型（deepseek-v4-flash）先输出 reasoning_content（思考过程，30~70s）
-    # 再输出 content（最终答案）。如果只 yield delta.content，前端会有 30~70s 空白
-    # 期，体验像非流式。两段都转发 + 用 markdown 标记区分，让用户能看到模型在工作。
+    # 推理模型（deepseek-v4-flash）先输出 reasoning_content（思考过程）再输出
+    # content（最终答案）。只 yield delta.content 的话，reasoning 期间前端会有一段
+    # 空白、体验像非流式；两段都转发 + 用 markdown 标记区分，让用户看到模型在工作。
     sent_reasoning_marker = False
     sent_content_marker = False
 
