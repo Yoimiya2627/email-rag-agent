@@ -305,6 +305,6 @@ if user_input:
                     "content": answer,
                     "intent": intent,
                     "sources": sources,
-                    "extra_metadata": metadata,
+                    "extra_metadata": result.get("metadata"),
                 }
             )
