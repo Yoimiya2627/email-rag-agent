@@ -1,7 +1,7 @@
 .PHONY: help install index api ui run eval eval-all latency test clean
 
-# Override with `make PYTHON=python3 install` etc. if needed.
-PYTHON ?= python
+# Prefer the project venv if present. Override with `make PYTHON=python3 install`.
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
 
 help:
 	@echo "Email RAG Agent - common tasks"

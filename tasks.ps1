@@ -10,7 +10,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
+# Prefer the project venv so deps installed there are found without needing to
+# activate it first; $env:PYTHON still overrides, and bare "python" is the
+# fallback when no .venv exists.
+$Python = if ($env:PYTHON) {
+    $env:PYTHON
+} elseif (Test-Path ".venv\Scripts\python.exe") {
+    (Resolve-Path ".venv\Scripts\python.exe").Path
+} else {
+    "python"
+}
 
 function Show-Help {
     Write-Host "Email RAG Agent - common tasks"
