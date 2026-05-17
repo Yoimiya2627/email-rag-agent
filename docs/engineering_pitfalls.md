@@ -479,72 +479,25 @@ choice.message.refusal # 拒答字段（部分模型）
 - LLM：DeepSeek `deepseek-v4-flash`（推理模型）
 - 三个维度：`answer_relevancy` / `faithfulness` / `context_precision`，每条 LLM 打分 0~1
 
-### 完整对比表
+### 完整评测结果
 
-| Version | BM25 | RRF | Rerank | Rewrite | Relevancy | Faithful | Precision |
-|---------|:----:|:---:|:------:|:-------:|----------:|---------:|----------:|
-| **V1** 纯向量 | ❌ | ❌ | ❌ | ❌ | 0.8983 | 0.8683 | 0.5077 |
-| **V2** +BM25+RRF | ✅ | ✅ | ❌ | ❌ | **0.9517** | 0.9117 | 0.5543 |
-| **V3** +Reranker | ✅ | ✅ | ✅ | ❌ | 0.9227 | 0.9050 | 0.5787 |
-| **V4** +Rewrite（全开） | ✅ | ✅ | ✅ | ✅ | 0.9117 | **0.9233** | 0.5500 |
-| **V5** V4-RRF | ✅ | ❌ | ✅ | ✅ | 0.8700 | 0.8517 | **0.6383** |
-| **V6** V4-Reranker | ✅ | ✅ | ❌ | ✅ | 0.9400 | 0.9117 | 0.5533 |
+**6 版消融的完整方法、数据表、业务选型，见 [`evaluation.md`](evaluation.md)——那是评测结论的唯一权威出处，这里不再复制一份。**
 
-各项最优值已加粗。
-
-### 三个反直觉发现
-
-#### 发现 1：BM25 + RRF 是 ROI 最高的组件，而不是 Reranker
-
-V1 → V2 加上 BM25+RRF：三项指标全升（Relevancy +0.053 / Faithful +0.043 / Precision +0.047）——这是整个对比里唯一一次"三项全胜"。
-
-原因：评测题里大量"alice@example.com"、"2024-09-12"、"Q3 预算评审"这种**字面命中型查询**，纯向量检索没法精确命中，BM25 把这部分召回补回来；RRF 又解决了 BM25（无界）和余弦（0~1）的量纲冲突。
-
-教训：不要被 Reranker 的"高级感"骗了——传统 IR 的 BM25 在结构化命名实体场景下依然是性价比之王。
-
-#### 发现 2：LLM Reranker 在这个数据集上是负贡献
-
-V2 → V3 加上 Reranker：Precision 升 0.024，但 Relevancy 降 0.029、Faithful 降 0.007。
-
-V4 → V6 去掉 Reranker：Relevancy **反而升** 0.028、Precision 几乎不变、Faithful 微降 0.012。
-
-两次观察互相印证：Reranker 让 top-3 选得更"严"，所以 precision 升；但 LLM 评分有方差，会把"对生成有用但不是最严格相关"的 chunk 排除掉，导致生成器拿到的上下文窄了——relevancy 和 faithful 受损。
-
-进一步深挖原因：Reranker 跑的是 `deepseek-v4-flash`（推理模型），单次调用 30~50 秒、有方差，**不是 cross-encoder 那种确定性打分**。生产场景应该换成 `BAAI/bge-reranker-v2-m3` 之类的本地 cross-encoder——速度快十倍、结果稳定。
-
-教训：Reranker 更适合用 cross-encoder 模型——用通用 LLM 当 reranker 方差和延迟都偏高（30~50s/次 vs cross-encoder 的毫秒级）。本项目当时为了简化部署没引入新模型，付出了精度代价。
-
-#### 发现 3：Query Rewrite 是双刃剑，在我的数据集上是负贡献
-
-V3 → V4 加上 Query Rewrite：Faithful 微升 0.018，但 Relevancy 降 0.011、Precision 降 0.029。
-
-原因：rewrite 把原 query "改专业化"——比如 "会议纪要" 改成 "会议总结记录"——召回到了语义更宽的 chunks，相关度反而下降。这印证了那个常见的 RAG 警告：**rewrite 可能改变原意**。
-
-更稳的做法是 **rewrite 后保留原 query，两路检索结果取并集**——但本项目当时为了简化没做，全靠 rewrite 之后的 query。这是已知优化空间。
-
-### 谁最强？V2 反而打赢了 V4
-
-按"全开就是最好"的直觉，V4 应该是冠军。实际上：
-
-- **Relevancy 冠军是 V2**（0.9517）—— 比 V4（0.9117）高 0.04
-- **Faithful 冠军是 V4**（0.9233）
-- **Precision 冠军是 V5**（0.6383，因为 V5 拿少而精）
-
-**综合三项指标看，V2 才是这个数据集上的实用最优**。也就是说：BM25+RRF 加上去之后，再叠 Reranker 和 Rewrite 反而把分数拉下来了。
+> 早期这份文档抄过一份结果表。后来评测脚本修了 Bug（后过滤漏应用）、重跑后数字变了，两处就 drift 了——和上文提到的"检索 pipeline 三处重复"是同一类问题：**结论只该有一个来源**。所以这里只保留与具体数字无关、跨重跑都成立的几条教训。
 
 ### 这次评测真正教会我的事
 
-1. **没有评测就没有改进**——如果不跑这次消融，我永远不会知道 V4 比 V2 差。"项目里加了 Reranker 和 Rewrite" 听上去很完整，但拿数字说话才是真懂。
-2. **组件 ROI 排序和直觉相反**——传统 IR 的 BM25 + RRF 比 LLM Reranker 和 Rewrite 这种"看起来高级"的组件价值更高。
-3. **LLM 当 Reranker 的工程取舍**——LLM 打分方差大、延迟高，cross-encoder 是更稳的工程默认；除非数据集特别复杂需要语义推理，否则优先 cross-encoder。本项目下个版本会切到 bge-reranker-v2-m3。
-4. **数据集偏置要承认**——这套结论是在"5000 封 LLM 合成邮件 + 100 条 LLM 生成测试题"上跑出来的。换真实业务数据 / 换更复杂的 query，结论可能反过来。这也是为什么文档里要老实写"已知限制：测试集是合成的"。
+1. **没有评测就没有改进**——"项目里加了 Reranker 和 Rewrite"听上去很完整，但只有把每个组件的 ROI 量化出来，才知道"全开"未必最优。
+2. **要怀疑自己的评测**——这套消融跑过两次，"三个指标的赢家分散、不存在全场最优"这个**模式**两次都成立；但具体哪一版赢哪个指标变了。单次、小样本（每版 30 题）、LLM 当裁判跑出来的精确排名不是定论——跑两次做对比，才分得清信号和噪声。
+3. **LLM 当 Reranker 的工程取舍**——LLM 打分方差大、延迟高（单次 reranker 调用就吃掉约 12s）；cross-encoder 是更稳的工程默认。
+4. **数据集偏置要承认**——结论是在"LLM 合成邮件 + LLM 生成测试题"上跑出来的，换真实业务数据可能反转。
 
 ### 改进方向（按 ROI 排序）
 
-- [ ] 把 Reranker 从 LLM 换成 `bge-reranker-v2-m3`（cross-encoder）
+- [ ] 把 Reranker 从 LLM 换成 `bge-reranker-v2-m3`（cross-encoder）——毫秒级、确定性打分
 - [ ] Query Rewrite 改成"原 query + 改写 query"双路检索取并集
+- [ ] RAGAS testset 从每版 30 题加大到 100 题 × 多次取均值，压低评测噪声
 - [ ] 用真实业务邮件（脱敏）跑一遍，看结论是否一致
-- [ ] 把这一节的发现整理成一篇技术博客发出去
 
 ---
 
