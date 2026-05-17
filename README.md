@@ -95,6 +95,7 @@ copy .env.example .env     # 编辑 .env，填 DEEPSEEK_API_KEY
 | `LLM_TIMEOUT` | `60` | LLM 单次调用超时（秒） |
 | `AGENT_PLANNER_MODEL` | `deepseek-chat` | Agent 规划/选工具用的模型（非推理，更快） |
 | `AGENT_MAX_STEPS` | `6` | Agent 单任务最多工具调用轮数 |
+| `AGENT_MAX_TOKENS` | `4000` | Agent 最终答案的输出 token 上限（防多步长答案被截断） |
 
 **Feature flags**（默认 = V2：`BM25=true, RRF=true, RERANKER=false, REWRITE=false`，业务推荐配置；4 个 flag 全关即等价 V1 纯向量基线）：
 

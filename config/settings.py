@@ -60,3 +60,8 @@ AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))
 AGENT_MAX_REPEAT = int(os.getenv("AGENT_MAX_REPEAT", "2"))
 # Truncate any single tool result longer than this (chars) to bound context growth.
 AGENT_TOOL_OUTPUT_LIMIT = int(os.getenv("AGENT_TOOL_OUTPUT_LIMIT", "4000"))
+# Output-token ceiling for the agent's final-answer generation. A tool-selection
+# turn only emits short tool_calls, so a long multi-step synthesis answer would
+# silently truncate at a low cap. max_tokens is a ceiling, not a reservation —
+# raising it costs nothing on short turns.
+AGENT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "4000"))

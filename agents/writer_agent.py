@@ -57,6 +57,7 @@ def draft_reply_for_email(email: dict, instruction: str = "") -> str:
         ],
         temperature=0.5,
         max_tokens=1000,
+        timeout=cfg.LLM_TIMEOUT,
     )
     return resp.choices[0].message.content
 

@@ -77,7 +77,7 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
             messages=messages,
             tools=TOOL_SCHEMAS,
             temperature=0,
-            max_tokens=1500,
+            max_tokens=cfg.AGENT_MAX_TOKENS,
             timeout=cfg.LLM_TIMEOUT,
         )
         msg = resp.choices[0].message
@@ -141,7 +141,7 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
             "content": "已达到最大步数，请基于已获取的信息直接给出最终回答，不要再调用工具。",
         }],
         temperature=0,
-        max_tokens=1500,
+        max_tokens=cfg.AGENT_MAX_TOKENS,
         timeout=cfg.LLM_TIMEOUT,
     )
     answer = (final.choices[0].message.content or "").strip() or "未能在限定步数内完成任务。"

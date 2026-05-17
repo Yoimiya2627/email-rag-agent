@@ -20,7 +20,7 @@
 1. **agent loop 用原生 function calling**——两个模型都稳定返回 `tool_calls`，不需要手写 JSON 协议兜底。这清除了改造的头号风险。
 2. **planning / 选工具调用用 `deepseek-chat`**：更快（~1s vs ~2s）、无推理开销、function calling 已验证。循环中每一步都省时间，累积收益明显。
    → 新增配置项 `AGENT_PLANNER_MODEL`，默认 `deepseek-chat`。
-3. **最终答案生成保留 `deepseek-v4-flash`**：需要一点推理质量的地方继续用推理模型。
+3. **旧 `/chat` / `/query` 的答案生成保留 `deepseek-v4-flash`**：`core/generator.py` 走 RAG 直接生成，需要推理质量。注意：Step 3 的 agent loop 是另一条路——function-calling 循环全程用 `AGENT_PLANNER_MODEL`（`deepseek-chat`），含最终答案，因为带 `tool_calls` 的多轮对话无法干净地中途换模型。
 4. **`LLM_TIMEOUT` 无需改**：实测单次调用 1~2.3s，60s 余量充足。Bug #1（"15s 超时 vs 推理模型"）经实测**不是运行时 bug**——只是 `settings.py` 默认值 15 偏低 + 注释过时。
 
 ### 留给 Step 7 的文档/默认值清理
