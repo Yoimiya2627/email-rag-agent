@@ -9,9 +9,9 @@
         "ENABLE_QUERY_REWRITE": false
       },
       "avg": {
-        "answer_relevancy": 0.8983,
-        "faithfulness": 0.8683,
-        "context_precision": 0.5077
+        "answer_relevancy": 0.8667,
+        "faithfulness": 0.9233,
+        "context_precision": 0.5937
       }
     },
     {
@@ -23,9 +23,9 @@
         "ENABLE_QUERY_REWRITE": false
       },
       "avg": {
-        "answer_relevancy": 0.9517,
-        "faithfulness": 0.9117,
-        "context_precision": 0.5543
+        "answer_relevancy": 0.9567,
+        "faithfulness": 0.9,
+        "context_precision": 0.5713
       }
     },
     {
@@ -37,9 +37,9 @@
         "ENABLE_QUERY_REWRITE": false
       },
       "avg": {
-        "answer_relevancy": 0.9227,
-        "faithfulness": 0.905,
-        "context_precision": 0.5787
+        "answer_relevancy": 0.9333,
+        "faithfulness": 0.9017,
+        "context_precision": 0.7147
       }
     },
     {
@@ -51,9 +51,9 @@
         "ENABLE_QUERY_REWRITE": true
       },
       "avg": {
-        "answer_relevancy": 0.9117,
-        "faithfulness": 0.9233,
-        "context_precision": 0.55
+        "answer_relevancy": 0.9533,
+        "faithfulness": 0.8783,
+        "context_precision": 0.6427
       }
     },
     {
@@ -65,9 +65,9 @@
         "ENABLE_QUERY_REWRITE": true
       },
       "avg": {
-        "answer_relevancy": 0.87,
-        "faithfulness": 0.8517,
-        "context_precision": 0.6383
+        "answer_relevancy": 0.9467,
+        "faithfulness": 0.9083,
+        "context_precision": 0.6147
       }
     },
     {
@@ -79,9 +79,9 @@
         "ENABLE_QUERY_REWRITE": true
       },
       "avg": {
-        "answer_relevancy": 0.94,
-        "faithfulness": 0.9117,
-        "context_precision": 0.5533
+        "answer_relevancy": 0.96,
+        "faithfulness": 0.8967,
+        "context_precision": 0.605
       }
     }
   ]
