@@ -112,7 +112,7 @@ copy .env.example .env     # 编辑 .env，填 DEEPSEEK_API_KEY
 
 ## 系统架构
 
-完整的架构图、时序图、状态机详见 [`docs/architecture.md`](docs/architecture.md)，覆盖离线索引、在线问答、混合检索 + RRF、Self-RAG 状态机、SSE 线程桥接、降级策略等。
+完整的架构图、时序图、状态机详见 [`docs/architecture.md`](docs/architecture.md)，覆盖离线索引、在线问答、混合检索 + RRF、Self-RAG 状态机、Agent 工具调用循环、SSE 线程桥接、降级策略等。
 
 简化版本：
 
@@ -143,6 +143,25 @@ copy .env.example .env     # 编辑 .env，填 DEEPSEEK_API_KEY
 
 还有一条 Function-calling Agent 链路（`POST /chat/agent`）：规划模型拿到 5 个工具的 schema，自主决定调用顺序——“调用工具 → 结果回灌 → 再判断”的 ReAct 式循环，直到产出最终答案；带 max-steps 硬上限、死循环检测、参数校验、工具报错回灌等护栏。工具与护栏明细见 [`docs/architecture.md`](docs/architecture.md) §10。
 
+agent loop 的工作循环：
+
+```
+  用户任务
+     │
+     ▼
+  ┌──────────────────┐
+  │  调用规划 LLM     │  （deepseek-chat）
+  └─────────┬────────┘
+            │
+       返回 tool_calls？
+       ├─ 是 → 执行工具、结果回灌 → 回到「调用规划 LLM」
+       │       （ReAct 循环，最多 AGENT_MAX_STEPS 步）
+       └─ 否 → 输出最终答案 → Answer
+
+  5 个工具：search_emails · get_email · summarize_emails · draft_reply · email_stats
+  护栏：max-steps 硬上限 · 同参数死循环检测 · 参数校验 · 工具报错回灌 · 输出截断
+```
+
 ## 技术栈
 
 | 层 | 选择 | 理由 |
@@ -152,8 +171,9 @@ copy .env.example .env     # 编辑 .env，填 DEEPSEEK_API_KEY
 | 关键词检索 | `rank_bm25` + RRF 融合 | RRF 不依赖分数量纲（BM25 无界 vs 余弦 0~1） |
 | LLM | DeepSeek `deepseek-v4-flash` | 推理模型，重排和打分质量更稳 |
 | 工作流 | LangGraph 1.x | Self-RAG 状态机，支持条件边和循环重试 |
+| Agent | DeepSeek 原生 function calling | agent loop 自主选工具、多轮调用，省去手写 JSON 协议兜底 |
 | API | FastAPI + SSE | 流式 token 实时推送 |
-| 前端 | Streamlit | 快速搭 chat UI，能切换流式/Self-RAG/普通三种模式 |
+| 前端 | Streamlit | 快速搭 chat UI，普通 / Self-RAG / Agent 三种模式 + 流式输出开关 |
 | 备选实现 | LangChain | 平行写了一版 `langchain_version/`，验证手写链路和框架版的一致性 |
 
 ## 评测
@@ -310,7 +330,7 @@ python -m pytest tests/ -v   # 任意平台
 ├── models/schemas.py          # Pydantic schemas
 ├── scripts/                   # 数据生成 + RAGAS 评测 + agent 评测 + 调试 probe
 ├── langchain_version/         # LangChain 平行实现
-├── data/                      # emails.json + ragas_testset.json + eval_results/
+├── data/                      # emails.json + ragas_testset.json + agent_testset.json + eval_results/
 ├── chroma_db/                 # runtime 生成，已 gitignore
 ├── docs/
 │   ├── architecture.md             # 架构图与流程详解
@@ -352,5 +372,5 @@ docker-compose up --build
 
 - 每个新功能都加了 `ENABLE_XXX` 开关，方便消融实验切换
 - 所有 LLM 调用都带超时（默认 60s）+ 三段降级（重试 → 回退到无 LLM 的合理默认 → 友好提示）
-- 旧实现保留为降级路径，不轻易直接删除——这次几次重大重构（SSE / LangGraph / BM25 缓存）都遵守这个规则
+- 旧实现保留为降级路径，不轻易直接删除——SSE / LangGraph / BM25 缓存、agent loop 升级（旧意图路由留作 `/chat` 降级）都遵守这个规则
 - `.env` 在 `.gitignore` 里；密钥不入库
