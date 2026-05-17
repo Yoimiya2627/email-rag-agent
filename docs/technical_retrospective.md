@@ -1,6 +1,6 @@
 # 技术复盘
 
-> 这份文档记录项目从"能跑"到"跑稳并能解释"过程中遇到的 5 个工程问题。每条按 **现象 → 排查 → 根因 → 修复 → 教训** 展开，对应到具体 commit。
+> 这份文档记录项目从"能跑"到"跑稳并能解释"过程中遇到的 6 个工程问题。每条按 **现象 → 排查 → 根因 → 修复 → 教训** 展开，对应到具体 commit。
 >
 > 更多调试记录见 [`engineering_pitfalls.md`](engineering_pitfalls.md)。
 
@@ -78,6 +78,20 @@
 
 ---
 
+## 6. 评测链路与产品链路漂移
+
+**现象**：做 agent 化改造、抽 `core/pipeline.py` 时，逐处比对检索链路，发现 `run_ragas_eval.py` 和 `measure_latency.py` 跑的并不是产品实际那条链路——RAGAS 一直在量一个用户走不到的 pipeline。
+
+**排查**：把三处检索代码（`RetrieverAgent` / `run_ragas_eval` / `measure_latency`）并排看。产品路径是 rewrite → 抽过滤条件 → 混合检索 → **后过滤（sender/date/label）** → rerank；两个评测脚本把过滤条件抽出来了，却在混合检索之后直接 rerank、**跳过了后过滤**那一步。
+
+**根因**：检索链路被复制到三个地方各自实现，没有单一事实源。某次给产品路径补了后过滤，评测脚本那两份拷贝没同步——三份实现悄悄漂移。评测照常在跑、HTTP 全 200、分数也不离谱，所以漂移一直没被发现。
+
+**修复**（commit `ae05f03`）：抽出 `core/pipeline.py`，把整条检索链路收敛成唯一的 `retrieve()`，`RetrieverAgent` 与两个评测脚本统一改调它——"三份拷贝"变成"一个实现"。改完据此重跑了全部 6 版 RAGAS（旧数字作废）。
+
+**教训**：评测代码和被评测的产品代码必须共用同一条链路，否则评测量的是另一个系统、结论无效。"复制粘贴出来的并行实现"是漂移的温床——尤其当拷贝之间没有测试钉住一致性时。这次顺带补了 `test_pipeline.py`，把"评测与产品走同一个 `retrieve()`"这个约束用测试固定下来。
+
+---
+
 ## 关键 commit 索引
 
 | Commit | 故事 | 主题 |
@@ -86,4 +100,5 @@
 | `b0fc749` | 1 | reranker / scoring max_tokens 提到 3000 |
 | `59f9898` | 2 | 真 SSE 流式（asyncio.Queue + call_soon_threadsafe） |
 | `8cc5b6e` | 3 | BM25 索引缓存 + 锁防 stampede（40× 提速） |
+| `ae05f03` | 6 | 抽出 `core/pipeline.py`，统一 `retrieve()`，修复评测/产品链路漂移 |
 | 多版评测 | 5 | `data/eval_results/comparison.json` —— V1-V6 全量数据 |
