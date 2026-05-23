@@ -65,3 +65,31 @@ AGENT_TOOL_OUTPUT_LIMIT = int(os.getenv("AGENT_TOOL_OUTPUT_LIMIT", "4000"))
 # silently truncate at a low cap. max_tokens is a ceiling, not a reservation —
 # raising it costs nothing on short turns.
 AGENT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "4000"))
+AGENT_TOOL_BACKEND = os.getenv("AGENT_TOOL_BACKEND", "local").lower()
+
+# MCP client/server defaults. The local function-calling backend remains the
+# default; this URL is only used when AGENT_TOOL_BACKEND=mcp.
+MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.getenv("MCP_PORT", "8001"))
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", f"http://{MCP_HOST}:{MCP_PORT}/mcp")
+MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+MCP_TOOL_SCHEMA_CACHE_SECONDS = int(os.getenv("MCP_TOOL_SCHEMA_CACHE_SECONDS", "60"))
+ENABLE_MCP_AUDIT = os.getenv("ENABLE_MCP_AUDIT", "true").lower() == "true"
+MCP_AUDIT_LOG_PATH = os.getenv(
+    "MCP_AUDIT_LOG_PATH",
+    str(BASE_DIR / "data" / "audit" / "mcp_audit.jsonl"),
+)
+
+# Human-in-the-loop approval store for high-risk tools.
+APPROVAL_STORE_PATH = os.getenv(
+    "APPROVAL_STORE_PATH",
+    str(BASE_DIR / "data" / "approvals" / "pending_actions.json"),
+)
+
+# Agent trace events. Disabled by default to keep local unit tests and demos
+# quiet; enable when running evals or production-like debugging.
+ENABLE_AGENT_TRACE = os.getenv("ENABLE_AGENT_TRACE", "false").lower() == "true"
+AGENT_TRACE_LOG_PATH = os.getenv(
+    "AGENT_TRACE_LOG_PATH",
+    str(BASE_DIR / "data" / "traces" / "agent_traces.jsonl"),
+)

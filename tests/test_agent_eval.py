@@ -43,6 +43,7 @@ def test_evaluate_task_builds_record(monkeypatch):
             metadata={
                 "steps": [{"tool": "search_emails", "arguments": {}}],
                 "max_steps_reached": False,
+                "trace_id": "trace-123",
             },
         ),
     )
@@ -54,6 +55,7 @@ def test_evaluate_task_builds_record(monkeypatch):
     assert rec["success"] == 1
     assert rec["n_steps"] == 1
     assert rec["max_steps_reached"] is False
+    assert rec["trace_id"] == "trace-123"
 
 
 def test_evaluate_task_flags_missing_expected_tool(monkeypatch):

@@ -25,6 +25,7 @@ from core.embedder import get_all_chunks
 from agents.summarizer_agent import SummarizerAgent
 from agents.writer_agent import WriterAgent, draft_reply_for_email
 from agents.analyzer_agent import compute_email_stats
+from agents.approvals import ApprovalStore
 from models.schemas import AgentRequest, SearchResult
 import config.settings as cfg
 
@@ -104,6 +105,30 @@ def draft_reply(instruction: str = "", email_id: str = "", query: str = "") -> A
     return resp.answer
 
 
+def send_email(to: List[str], subject: str, body: str, rationale: str) -> dict:
+    """Create a pending approval for a high-risk send-email action.
+
+    The tool never sends directly.  It records the requested action and returns
+    an approval id that a human can approve or reject through the API.
+    """
+    item = ApprovalStore().create(
+        action_type="send_email",
+        payload={
+            "to": list(to or []),
+            "subject": subject,
+            "body": body,
+            "rationale": rationale,
+        },
+        requested_by="agent",
+        risk_level="high",
+    )
+    return {
+        "status": "pending_approval",
+        "approval_id": item["approval_id"],
+        "message": "发送邮件属于高风险动作，已创建待审批请求，需要人工确认后才会执行。",
+    }
+
+
 def email_stats() -> dict:
     """Aggregate corpus statistics (top senders, label distribution, daily volume)."""
     return compute_email_stats()
@@ -111,90 +136,10 @@ def email_stats() -> dict:
 
 # ── Schemas + dispatch ──────────────────────────────────────────────────────
 
-TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_emails",
-            "description": "在邮件库中按语义+关键词混合检索邮件，可选按发件人、相对日期、标签过滤。返回匹配邮件的摘要列表。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "检索查询（自然语言或关键词）"},
-                    "sender": {"type": "string", "description": "发件人过滤关键词，可选"},
-                    "date_hint": {"type": "string", "description": "相对日期，如 '本周' '上月' '最近'，可选"},
-                    "labels": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "标签过滤列表，可选",
-                    },
-                    "limit": {"type": "integer", "description": "返回结果数上限，可选"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_email",
-            "description": "按 email_id 获取一封邮件的完整内容（当检索摘要不足以回答时使用）。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "email_id": {"type": "string", "description": "邮件 id（来自 search_emails 结果）"},
-                },
-                "required": ["email_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "summarize_emails",
-            "description": "检索与某主题相关的多封邮件并生成结构化综合摘要。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "要摘要的主题或问题"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "draft_reply",
-            "description": "起草一封回信。已知具体邮件时传 email_id（精确，多步任务推荐）；否则传 query 让系统检索目标邮件。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "instruction": {"type": "string", "description": "回信要求，如 '礼貌拒绝' '确认参会'"},
-                    "email_id": {"type": "string", "description": "要回复的邮件 id（来自 search_emails 结果），可选"},
-                    "query": {"type": "string", "description": "不知道 email_id 时，用于检索目标邮件的描述，可选"},
-                },
-                "required": ["instruction"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "email_stats",
-            "description": "返回邮件库的聚合统计（发件人 Top5、标签分布、每日邮件量）。无需参数。",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-]
+from agents.tool_registry import openai_tool_schemas, tool_dispatch
 
-TOOL_DISPATCH = {
-    "search_emails": search_emails,
-    "get_email": get_email,
-    "summarize_emails": summarize_emails,
-    "draft_reply": draft_reply,
-    "email_stats": email_stats,
-}
+TOOL_SCHEMAS = openai_tool_schemas()
+TOOL_DISPATCH = tool_dispatch()
 
 
 def call_tool(name: str, arguments: dict) -> Any:

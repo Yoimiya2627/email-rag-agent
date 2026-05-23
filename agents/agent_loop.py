@@ -11,12 +11,15 @@ detection, argument validation and tool-error feedback are added in Step 5.
 """
 import json
 import logging
+import time
 from collections import Counter
 from typing import List
 
 from openai import OpenAI
 
 from agents.tools import TOOL_SCHEMAS, call_tool
+from agents.mcp_adapter import LocalToolBackend, create_mcp_backend_from_settings
+from agents.tracing import AgentTraceRecorder
 from models.schemas import AgentRequest, AgentResponse
 import config.settings as cfg
 
@@ -56,6 +59,15 @@ def _serialize_tool_calls(tool_calls) -> list:
     ]
 
 
+def _get_tool_backend():
+    if cfg.AGENT_TOOL_BACKEND == "mcp":
+        return create_mcp_backend_from_settings()
+    return LocalToolBackend(
+        schemas_provider=lambda: TOOL_SCHEMAS,
+        call_tool_fn=lambda name, args: call_tool(name, args),
+    )
+
+
 def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
     """Run the function-calling agent loop and return the final answer.
 
@@ -70,12 +82,21 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
     steps: List[dict] = []
     call_counts: Counter = Counter()  # (tool, args) signature → times invoked
     client = _get_client()
+    tool_backend = _get_tool_backend()
+    tool_schemas = tool_backend.tool_schemas()
+    trace = AgentTraceRecorder.from_settings()
+    trace.record(
+        "agent_start",
+        query=request.query,
+        session_id=request.session_id,
+        tool_backend=cfg.AGENT_TOOL_BACKEND,
+    )
 
     for step in range(cfg.AGENT_MAX_STEPS):
         resp = client.chat.completions.create(
             model=cfg.AGENT_PLANNER_MODEL,
             messages=messages,
-            tools=TOOL_SCHEMAS,
+            tools=tool_schemas,
             temperature=0,
             max_tokens=cfg.AGENT_MAX_TOKENS,
             timeout=cfg.LLM_TIMEOUT,
@@ -85,7 +106,12 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
 
         if not tool_calls:
             answer = (msg.content or "").strip() or "未能生成回答。"
-            return AgentResponse(answer=answer, sources=[], metadata={"steps": steps})
+            trace.record("agent_end", status="success", answer_chars=len(answer), steps=len(steps))
+            return AgentResponse(
+                answer=answer,
+                sources=[],
+                metadata={"steps": steps, "trace_id": trace.trace_id},
+            )
 
         # Echo the assistant turn (with its tool_calls) back into the history,
         # then append one tool-role message per call — required protocol order.
@@ -116,10 +142,32 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
                     )
                 }
                 steps.append({"tool": name, "arguments": args, "blocked": "repeat"})
+                trace.record(
+                    "tool_call",
+                    step=step + 1,
+                    tool=name,
+                    status="blocked_repeat",
+                    arguments=args,
+                    latency_ms=0,
+                )
             else:
                 logger.info(f"[agent step {step + 1}] tool={name} args={args}")
-                result = call_tool(name, args)
+                started = time.perf_counter()
+                result = tool_backend.call_tool(name, args)
                 steps.append({"tool": name, "arguments": args})
+                status = "success"
+                if isinstance(result, dict) and result.get("error"):
+                    status = "error"
+                elif isinstance(result, dict) and result.get("status") == "pending_approval":
+                    status = "approval_required"
+                trace.record(
+                    "tool_call",
+                    step=step + 1,
+                    tool=name,
+                    status=status,
+                    arguments=args,
+                    latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                )
 
             # Truncate oversized tool output to bound context growth.
             content = json.dumps(result, ensure_ascii=False, default=str)
@@ -145,8 +193,14 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
         timeout=cfg.LLM_TIMEOUT,
     )
     answer = (final.choices[0].message.content or "").strip() or "未能在限定步数内完成任务。"
+    trace.record(
+        "agent_end",
+        status="max_steps_reached",
+        answer_chars=len(answer),
+        steps=len(steps),
+    )
     return AgentResponse(
         answer=answer,
         sources=[],
-        metadata={"steps": steps, "max_steps_reached": True},
+        metadata={"steps": steps, "max_steps_reached": True, "trace_id": trace.trace_id},
     )

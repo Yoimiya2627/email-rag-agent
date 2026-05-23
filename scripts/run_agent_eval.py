@@ -91,6 +91,7 @@ def evaluate_task(item: Dict[str, Any], client: OpenAI) -> Dict[str, Any]:
         "tool_accuracy": tool_accuracy(expected, actual),
         "n_steps": len(actual),
         "max_steps_reached": bool(resp.metadata.get("max_steps_reached", False)),
+        "trace_id": resp.metadata.get("trace_id", ""),
         "success": verdict["success"],
         "reason": verdict["reason"],
         "answer": resp.answer,

@@ -30,6 +30,7 @@ from core.chunker import chunk_email
 from core.embedder import index_chunks, clear_collection, get_collection_stats
 from core.memory import ConversationMemory
 from agents.coordinator import route
+from agents.approvals import ApprovalStore
 import config.settings as cfg
 
 logging.basicConfig(
@@ -227,6 +228,46 @@ async def clear_history(session_id: str = "default"):
     if memory is not None:
         memory.clear()
     return {"success": True, "session_id": session_id}
+
+
+@app.get("/agent/approvals")
+async def list_agent_approvals(status: Optional[str] = None):
+    """List pending/approved/rejected high-risk agent actions."""
+    return {"approvals": ApprovalStore().list(status=status)}
+
+
+@app.post("/agent/approvals/{approval_id}/approve")
+async def approve_agent_action(
+    approval_id: str,
+    reviewer: str = Body("human"),
+    note: str = Body(""),
+):
+    """Approve a pending high-risk agent action.
+
+    The current portfolio implementation records a simulated send result; a
+    production deployment would hand off to SMTP/enterprise-mail APIs here.
+    """
+    try:
+        return ApprovalStore().approve(approval_id, reviewer=reviewer, note=note)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/agent/approvals/{approval_id}/reject")
+async def reject_agent_action(
+    approval_id: str,
+    reviewer: str = Body("human"),
+    note: str = Body(""),
+):
+    """Reject a pending high-risk agent action."""
+    try:
+        return ApprovalStore().reject(approval_id, reviewer=reviewer, note=note)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @app.post("/chat/graph", response_model=AgentResponse)

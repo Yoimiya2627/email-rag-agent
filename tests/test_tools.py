@@ -100,6 +100,23 @@ def test_draft_reply_unknown_email_id_returns_error(monkeypatch):
     assert isinstance(out, dict) and "error" in out
 
 
+def test_send_email_tool_never_sends_without_approval(monkeypatch, tmp_path):
+    import config.settings as cfg
+
+    monkeypatch.setattr(cfg, "APPROVAL_STORE_PATH", str(tmp_path / "approvals.json"), raising=False)
+
+    out = tools_mod.send_email(
+        to=["bob@example.com"],
+        subject="Re: Budget",
+        body="确认收到。",
+        rationale="用户要求确认收到预算邮件",
+    )
+
+    assert out["status"] == "pending_approval"
+    assert "approval_id" in out
+    assert "需要人工确认" in out["message"]
+
+
 def test_email_stats_delegates(monkeypatch):
     monkeypatch.setattr(tools_mod, "compute_email_stats", lambda: {"total_emails": 5000})
     assert tools_mod.email_stats() == {"total_emails": 5000}

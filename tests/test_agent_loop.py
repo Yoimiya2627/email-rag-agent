@@ -77,12 +77,63 @@ def test_loop_executes_tool_then_answers(monkeypatch):
     assert any(m.get("role") == "assistant" and m.get("tool_calls") for m in second_msgs)
 
 
+def test_loop_records_trace_metadata_and_tool_event(monkeypatch, tmp_path):
+    client = _ScriptedClient([
+        _response(tool_calls=[_tool_call("c1", "search_emails", {"query": "预算"})]),
+        _response(content="done"),
+    ])
+    _use_client(monkeypatch, client)
+    monkeypatch.setattr(loop_mod, "call_tool", lambda name, args: [{"email_id": "e1"}])
+    monkeypatch.setattr(loop_mod.cfg, "ENABLE_AGENT_TRACE", True, raising=False)
+    monkeypatch.setattr(loop_mod.cfg, "AGENT_TRACE_LOG_PATH", str(tmp_path / "traces.jsonl"), raising=False)
+
+    out = run_agent_loop(AgentRequest(query="谁发了预算邮件"))
+
+    assert out.metadata["trace_id"]
+    trace_text = (tmp_path / "traces.jsonl").read_text(encoding="utf-8")
+    assert '"event": "agent_start"' in trace_text
+    assert '"event": "tool_call"' in trace_text
+    assert '"tool": "search_emails"' in trace_text
+    assert '"event": "agent_end"' in trace_text
+
+
 def test_loop_passes_tool_schemas(monkeypatch):
     client = _ScriptedClient([_response(content="ok")])
     _use_client(monkeypatch, client)
 
     run_agent_loop(AgentRequest(query="hi"))
     assert client.calls[0]["tools"] is loop_mod.TOOL_SCHEMAS
+
+
+def test_loop_can_use_configured_mcp_tool_backend(monkeypatch):
+    client = _ScriptedClient([
+        _response(tool_calls=[_tool_call("c1", "email_stats", {})]),
+        _response(content="共有 3 封邮件。"),
+    ])
+    _use_client(monkeypatch, client)
+
+    class FakeBackend:
+        def tool_schemas(self):
+            return [{
+                "type": "function",
+                "function": {
+                    "name": "email_stats",
+                    "description": "Stats",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }]
+
+        def call_tool(self, name, args):
+            return {"total_emails": 3}
+
+    monkeypatch.setattr(loop_mod.cfg, "AGENT_TOOL_BACKEND", "mcp")
+    monkeypatch.setattr(loop_mod, "create_mcp_backend_from_settings", lambda: FakeBackend())
+
+    out = run_agent_loop(AgentRequest(query="邮件总数"))
+
+    assert out.answer == "共有 3 封邮件。"
+    assert client.calls[0]["tools"][0]["function"]["name"] == "email_stats"
+    assert out.metadata["steps"] == [{"tool": "email_stats", "arguments": {}}]
 
 
 def test_loop_stops_at_max_steps(monkeypatch):

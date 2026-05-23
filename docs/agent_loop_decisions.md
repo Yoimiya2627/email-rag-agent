@@ -56,11 +56,12 @@ agent loop 步骤（Step 3-4 重做 Self-RAG 路径时）一并处理。
 
 ## Step 2 — 工具层 agents/tools.py（已完成）
 
-5 个工具，每个 = 函数 + OpenAI function schema + 分发表项：
+最初是 5 个工具，当前已扩展为 6 个工具；每个 = 函数 + OpenAI function schema + 分发表项：
 - `search_emails(query, sender?, date_hint?, labels?, limit?)` — 混合检索 + 后过滤 + rerank
 - `get_email(email_id)` — 取整封邮件（按 chunk_index 拼接）
 - `summarize_emails(query)` — 复用 `SummarizerAgent`
 - `draft_reply(query)` — 复用 `WriterAgent`
+- `send_email(to, subject, body, rationale)` — 高风险动作，只创建 pending approval，不直接发送
 - `email_stats()` — 复用 `compute_email_stats()`（已从 AnalyzerAgent 提为模块级函数）
 
 `TOOL_SCHEMAS` / `TOOL_DISPATCH` / `call_tool()` 供 Step 3 的 agent loop 使用。

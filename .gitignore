@@ -32,6 +32,9 @@ Thumbs.db
 
 # Logs
 *.log
+data/audit/
+data/approvals/
+data/traces/
 
 # Claude Code local settings
 .claude/

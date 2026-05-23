@@ -1,4 +1,4 @@
-.PHONY: help install index api ui run eval eval-all latency test clean
+.PHONY: help install index api ui run mcp eval agent-eval trace-summary eval-all latency test clean
 
 # Prefer the project venv if present. Override with `make PYTHON=python3 install`.
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
@@ -9,9 +9,12 @@ help:
 	@echo "  make install     pip install + preload bge-m3 (~5 min first time, ~570MB)"
 	@echo "  make index       index data/emails.json into ChromaDB"
 	@echo "  make run         start API on :8000 + Streamlit on :8501 (Ctrl-C stops both)"
+	@echo "  make mcp         start standalone MCP server on :8001"
 	@echo "  make api         API only — handy when iterating on backend"
 	@echo "  make ui          Streamlit only — handy when iterating on frontend"
 	@echo "  make eval        run RAGAS on V2 only (~3 min, recommended config)"
+	@echo "  make agent-eval  run agent task evaluation"
+	@echo "  make trace-summary summarize agent trace JSONL"
 	@echo "  make eval-all    run all 6 ablation versions (~30 min)"
 	@echo "  make latency     measure end-to-end latency"
 	@echo "  make test        run unit tests"
@@ -37,8 +40,17 @@ run:
 	  $(PYTHON) -m streamlit run frontend/app.py & \
 	  wait
 
+mcp:
+	$(PYTHON) mcp_server.py --transport streamable-http
+
 eval:
 	$(PYTHON) scripts/run_ragas_eval.py --versions V2
+
+agent-eval:
+	$(PYTHON) scripts/run_agent_eval.py
+
+trace-summary:
+	$(PYTHON) scripts/summarize_agent_traces.py
 
 eval-all:
 	$(PYTHON) scripts/run_ragas_eval.py

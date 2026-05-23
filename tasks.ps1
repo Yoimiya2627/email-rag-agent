@@ -27,9 +27,12 @@ function Show-Help {
     Write-Host "  .\tasks.ps1 install     pip install + preload bge-m3 (~5 min first time, ~570MB)"
     Write-Host "  .\tasks.ps1 index       index data/emails.json into ChromaDB"
     Write-Host "  .\tasks.ps1 run         start API on :8000 + Streamlit on :8501 (Ctrl-C stops both)"
+    Write-Host "  .\tasks.ps1 mcp         start standalone MCP server on :8001"
     Write-Host "  .\tasks.ps1 api         API only"
     Write-Host "  .\tasks.ps1 ui          Streamlit only"
     Write-Host "  .\tasks.ps1 eval        run RAGAS on V2 only (~3 min, recommended config)"
+    Write-Host "  .\tasks.ps1 agent-eval run agent task evaluation"
+    Write-Host "  .\tasks.ps1 trace-summary summarize agent trace JSONL"
     Write-Host "  .\tasks.ps1 eval-all    run all 6 ablation versions (~30 min)"
     Write-Host "  .\tasks.ps1 latency     measure end-to-end latency"
     Write-Host "  .\tasks.ps1 test        run unit tests"
@@ -80,8 +83,20 @@ function Invoke-Run {
     }
 }
 
+function Invoke-Mcp {
+    & $Python mcp_server.py --transport streamable-http
+}
+
 function Invoke-Eval {
     & $Python scripts/run_ragas_eval.py --versions V2
+}
+
+function Invoke-AgentEval {
+    & $Python scripts/run_agent_eval.py
+}
+
+function Invoke-TraceSummary {
+    & $Python scripts/summarize_agent_traces.py
 }
 
 function Invoke-EvalAll {
@@ -117,7 +132,10 @@ switch ($Cmd.ToLower()) {
     "api"      { Invoke-Api }
     "ui"       { Invoke-Ui }
     "run"      { Invoke-Run }
+    "mcp"      { Invoke-Mcp }
     "eval"     { Invoke-Eval }
+    "agent-eval" { Invoke-AgentEval }
+    "trace-summary" { Invoke-TraceSummary }
     "eval-all" { Invoke-EvalAll }
     "latency"  { Invoke-Latency }
     "test"     { Invoke-Test }

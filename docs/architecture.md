@@ -409,7 +409,7 @@ flowchart TD
     Q["用户任务"] --> LLM["规划 LLM<br/>(deepseek-chat + tools schema)"]
     LLM --> D{"返回 tool_calls?"}
     D -->|否| ANS["最终答案"]
-    D -->|是| EXEC["执行工具<br/>search / get / summarize / draft / stats"]
+    D -->|是| EXEC["执行工具<br/>search / get / summarize / draft / send / stats"]
     EXEC --> GUARD{"护栏"}
     GUARD -->|"同工具同参数重复"| BLOCK["拦截，回灌提示"]
     GUARD -->|正常| FEED["结果回灌为 tool 消息<br/>(超长则截断)"]
@@ -423,15 +423,54 @@ flowchart TD
     style GUARD fill:#ffb5b5
 ```
 
-**5 个工具**（`agents/tools.py`）：
+工具 schema 不再直接手写在 loop 里，而是来自 `agents/tool_registry.py`：
 
-| 工具 | 作用 |
+```mermaid
+flowchart LR
+    Registry["tool_registry<br/>工具元数据单一来源"]
+    Local["local backend<br/>TOOL_SCHEMAS + call_tool"]
+    MCPServer["mcp_server.py<br/>FastMCP tools/resources/prompts"]
+    MCPClient["MCP backend<br/>tools/list + tools/call"]
+    Loop["agent_loop.py<br/>/chat/agent"]
+
+    Registry --> Local
+    Registry --> MCPServer
+    Local --> Loop
+    MCPServer --> MCPClient --> Loop
+```
+
+默认 `AGENT_TOOL_BACKEND=local`，所以现有 `/chat/agent` 仍然走进程内
+function-calling 工具层；设置 `AGENT_TOOL_BACKEND=mcp` 后，`agents/mcp_adapter.py`
+会从 `MCP_SERVER_URL` 拉取 MCP tools，再转换成 OpenAI-compatible `tools` schema
+交给规划模型。模型返回 tool call 后，后端通过 MCP `tools/call` 执行工具。
+
+**6 个工具**（`agents/tools.py`）：
+
+| 工具 | 风险级别 | 是否人审 | 作用 |
+|---|---|---:|---|
+| `search_emails` | low | 否 | 混合检索（向量+BM25+RRF），可带 sender/date/labels 过滤 |
+| `get_email` | low | 否 | 按 email_id 取整封邮件 |
+| `summarize_emails` | low | 否 | 检索 + 结构化摘要 |
+| `draft_reply` | medium | 否 | 起草回信，支持 email_id 精确定位（多步任务用） |
+| `send_email` | high | 是 | 只创建 pending approval，不直接发送 |
+| `email_stats` | low | 否 | 发件人 / 标签 / 每日量聚合统计 |
+
+同一批能力也由 `mcp_server.py` 暴露为：
+
+| MCP 能力 | 内容 |
 |---|---|
-| `search_emails` | 混合检索（向量+BM25+RRF），可带 sender/date/labels 过滤 |
-| `get_email` | 按 email_id 取整封邮件 |
-| `summarize_emails` | 检索 + 结构化摘要 |
-| `draft_reply` | 起草回信，支持 email_id 精确定位（多步任务用） |
-| `email_stats` | 发件人 / 标签 / 每日量聚合统计 |
+| Tools | 上表 6 个工具 |
+| Resources | `email://{email_id}`、`email-corpus://stats` |
+| Prompts | `draft_reply_prompt`、`summarize_emails_prompt` |
+
+MCP backend 已加入生产化基础：
+
+| 能力 | 代码 | 说明 |
+|---|---|---|
+| Bearer token | `mcp_server.StaticBearerTokenVerifier` / `StreamableHttpMCPClient.headers()` | `MCP_AUTH_TOKEN` 非空时 client 带 `Authorization: Bearer ...`，server 注入 token verifier |
+| Schema cache | `MCPToolBackend.tool_schemas()` | 缓存 `tools/list` 结果，避免每轮 planner 重复发现工具 |
+| Audit JSONL | `MCPAuditLogger` | 记录 tool、status、latency、request_id 到 `MCP_AUDIT_LOG_PATH` |
+| 工具风险元数据 | `ToolSpec.risk_level` / `requires_approval` | 高风险工具可被人审链路拦住 |
 
 **护栏**（`AGENT_*` 配置，详见 `agents/agent_loop.py`）：
 
@@ -442,6 +481,26 @@ flowchart TD
 | 参数校验 | 丢弃模型幻觉的多余 kwarg，缺失必填参数回灌错误 |
 | 工具报错回灌 | 工具异常被捕获转成 error 结果，不让 loop 崩 |
 | 输出截断 | 单次工具结果超 `AGENT_TOOL_OUTPUT_LIMIT` 截断，防上下文膨胀 |
+| 高风险动作人审 | `send_email` 只创建 `pending_approval`，由 `/agent/approvals/*` 人工确认 |
+
+**Human-in-the-loop**：
+
+```mermaid
+flowchart LR
+    Agent["agent tool_call: send_email"] --> Store["ApprovalStore<br/>pending_actions.json"]
+    Store --> Pending["status=pending"]
+    Pending --> Approve["POST /agent/approvals/{id}/approve"]
+    Pending --> Reject["POST /agent/approvals/{id}/reject"]
+    Approve --> Sim["simulated_send<br/>sent=true"]
+    Reject --> Block["blocked_by_human<br/>sent=false"]
+```
+
+**Agent trace**：
+
+`agents/tracing.py` 在 `ENABLE_AGENT_TRACE=true` 时写 JSONL，记录 `agent_start`、
+`tool_call`、`agent_end`。`scripts/summarize_agent_traces.py` 可汇总 runs、tool_calls、
+tool_errors、approval_required、avg_tool_latency_ms。`scripts/run_agent_eval.py` 会把
+`trace_id` 写入每条评测记录，方便从 eval case 反查真实工具轨迹。
 
 **与 §六 固定路由的区别**：Coordinator 是"一次分类 → 一条固定链"；agent loop 是 LLM
 自主多轮规划，能把"找出 X 并逐封处理"这类任务拆成 `search → 逐个 draft` 的多步链。
@@ -456,8 +515,9 @@ agent 本身（区别于 RAGAS 评测检索质量），结果见 `data/eval_resu
 
 ```
 E:/智能邮件agent/
-├── api/main.py                   # FastAPI 入口，7 个端点
+├── api/main.py                   # FastAPI 入口，含 chat / agent / approval 端点
 ├── frontend/app.py               # Streamlit 前端
+├── mcp_server.py                 # MCP server（tools/resources/prompts）
 ├── agents/
 │   ├── coordinator.py            # 意图分类 + 路由
 │   ├── retriever_agent.py        # 检索 agent（含 prepare_contexts 公开方法）
@@ -465,7 +525,11 @@ E:/智能邮件agent/
 │   ├── writer_agent.py           # 写信 agent
 │   ├── analyzer_agent.py         # 分析 agent
 │   ├── graph_workflow.py         # LangGraph Self-RAG
-│   ├── tools.py                  # Agent 工具层（5 工具 + schema + dispatch）
+│   ├── tool_registry.py          # 工具元数据单一来源
+│   ├── mcp_adapter.py            # MCP tools/list → function schema，tools/call → tool result + audit/cache
+│   ├── approvals.py              # Human-in-the-loop 审批存储
+│   ├── tracing.py                # Agent trace JSONL
+│   ├── tools.py                  # Agent 工具层（6 工具 + schema + dispatch）
 │   └── agent_loop.py             # function-calling agent 循环 + 护栏
 ├── core/
 │   ├── loader.py                 # 邮件加载
@@ -483,6 +547,8 @@ E:/智能邮件agent/
 │   ├── generate_emails.py        # LLM 生成 5000 封测试邮件
 │   ├── generate_ragas_data.py    # 生成 RAGAS 测试集
 │   ├── run_ragas_eval.py         # 6 版本消融评测
+│   ├── run_agent_eval.py         # Agent 任务评测
+│   ├── summarize_agent_traces.py # Trace 汇总
 │   └── debug_*.py                # 诊断 probe
 ├── langchain_version/rag_chain.py # LangChain 平行实现
 ├── chroma_db/                    # ChromaDB 持久化
@@ -493,7 +559,7 @@ E:/智能邮件agent/
 ├── docs/
 │   ├── architecture.md             # 本文
 │   ├── evaluation.md               # RAGAS 6 版评测 + 业务选型
-│   ├── technical_retrospective.md  # 5 个工程问题复盘
+│   ├── technical_retrospective.md  # 工程问题复盘
 │   └── engineering_pitfalls.md     # 完整问题清单 + 调试方法论
 ├── Dockerfile + docker-compose.yml
 └── .env (gitignored)

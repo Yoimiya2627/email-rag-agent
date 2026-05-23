@@ -1,376 +1,351 @@
-# Email RAG Agent
+﻿# Email RAG Agent
 
 > **Author**: 赵伟鑫 (Yoimiya2627) — Agent 开发工程师 / 大模型应用开发工程师
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
-一个面向邮件场景的智能体（Agent）系统——基于原生 function calling 的 agent loop 自主规划、多轮调用工具完成任务，底层是混合检索（向量 + BM25 + RRF）的 RAG 链路。
+一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、审计、人审审批和 JSONL trace。
 
-做这个项目的初衷是想把"RAG 链路里每一层（向量检索 / BM25 / RRF 融合 / LLM 重排 / Query Rewrite）到底各自贡献多少"这件事真正搞清楚——所以从一开始就把所有组件做成可开关的特性，配套写了消融评测脚本去量化它们。
+这个项目的重点不是“调一个 LLM API”，而是把邮件 RAG 能力做成可编排、可评测、可回归、可审计的 Agent 工程系统。
 
 ## 目录
 
-- [30 秒速览](#30-秒速览)
+- [核心亮点](#核心亮点)
 - [Demo](#demo)
-- [它能做什么](#它能做什么)
+- [功能能力](#功能能力)
 - [快速开始](#快速开始)
 - [配置说明](#配置说明)
 - [系统架构](#系统架构)
-- [技术栈](#技术栈)
-- [评测](#评测)
-- [工程问题复盘](#工程问题复盘)
+- [Agent 工具层](#agent-工具层)
+- [MCP Server](#mcp-server)
+- [Human-in-the-loop](#human-in-the-loop)
+- [Trace 与 Eval](#trace-与-eval)
+- [评测结果](#评测结果)
 - [测试](#测试)
-- [已知限制](#已知限制)
-- [后续扩展方向](#后续扩展方向)
 - [API 端点](#api-端点)
 - [目录结构](#目录结构)
-- [其他启动方式](#其他启动方式)
-- [开发笔记](#开发笔记)
+- [已知限制和下一步](#已知限制和下一步)
 
-## 30 秒速览
+## 核心亮点
 
-- **Function-calling Agent**：ReAct 式工具调用循环，规划模型自主多轮调用 5 个工具完成多步任务，带 max-steps / 死循环检测 / 工具报错回灌等护栏 → [`docs/architecture.md`](docs/architecture.md) §10
-- **多 Agent 路由**：5 种意图（查 / 汇总 / 写信 / 统计 / 兜底），LLM 分类 + 异常降级
-- **混合检索 + RRF 融合**：向量（bge-m3）+ BM25 双路并行，绕开分数量纲冲突
-- **Self-RAG 反思**：LangGraph 状态机，全不相关时改写 query 重试（最多 2 次）
-- **SSE 真流式**：worker 线程 + asyncio.Queue 桥接同步 SDK 与异步框架
-- **6 版 RAGAS 消融**：三维度赢家分散在 V1/V3/V6，按业务目标选 BM25+RRF 方案 → [`docs/evaluation.md`](docs/evaluation.md)
-- **6 个工程问题复盘**：max_tokens / SSE 假流式 / BM25 缓存 / 熔断器跨版本污染 / 评测链路漂移 / RAGAS 反直觉 → [`docs/technical_retrospective.md`](docs/technical_retrospective.md)
+- **Function-calling Agent Loop**：`/chat/agent` 使用 DeepSeek 原生 tool calls，多轮执行 `plan -> tool_call -> observe -> re-plan`。
+- **MCP-ready Tool Backend**：工具定义集中在 `agents/tool_registry.py`，同源派生本地 function schema 和 FastMCP 注册。
+- **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache。
+- **Human-in-the-loop 安全链路**：新增高风险 `send_email` 工具，但它只创建 pending approval，不会直接发信；人类通过 API approve/reject。
+- **Agent Trace 平台化雏形**：agent run / tool call / approval_required / error 写入 JSONL，可用脚本汇总运行次数、工具错误和平均工具延迟。
+- **RAG 消融评测**：6 版 RAGAS-style 对比，量化 BM25、RRF、reranker、query rewrite 的 ROI。
+- **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断。
+- **107 个 pytest**：覆盖 RAG、pipeline、tools、tool registry、MCP adapter/server/production、approval、trace、agent loop、agent eval。
 
 ## Demo
 
 [![Demo preview](docs/demo.png)](docs/demo.mp4)
 
-> 约 1 分 40 秒：邮件检索 / 预算相关查询 / 统计分析 / 切到 evaluation 表格。点击预览图打开 MP4（约 17 MB）。
+约 1 分 40 秒：邮件检索、预算查询、统计分析、evaluation 表格。点击预览图打开 MP4。
 
-## 它能做什么
+## 功能能力
 
-- **Agent 多步任务**："找一封关于预算评审的邮件，帮我起草确认参会的回复" → agent 自主规划、多轮调用工具（检索 → 取详情 → 起草）完成
-- **检索式问答**："Q3 预算评审会议是谁发的？" → 从 5000 封邮件里找出相关邮件回答
-- **批量摘要**："这周项目进展整理一下" → 多封相关邮件综合摘要
-- **回信草稿**："帮我回 Bob 那封询价邮件" → 起草回复
-- **统计分析**："本月每个发件人发了多少封？" → 聚合元数据回答
-- **多轮对话**：每个 session 独立记忆，5 轮滑窗（10 条消息）
-- **流式输出**：SSE 真流式（不是攒齐再放）
+- 邮件问答：从 5000 封邮件中检索并回答事实问题。
+- 多步 Agent：例如“找出报销邮件并帮我起草回复”，agent 会自主 `search_emails -> get_email -> draft_reply`。
+- 人审发信：`send_email` 创建审批单，必须人类确认后才进入 simulated send。
+- 批量摘要：按主题检索多封邮件并生成结构化摘要。
+- 回信草稿：针对检索到的邮件或指定 `email_id` 起草回复。
+- 统计分析：发件人 Top、标签分布、每日邮件量。
+- 多轮记忆：按 session 隔离，默认保留 5 轮滑窗。
+- SSE 真流式：worker 线程 + `asyncio.Queue` 桥接同步 LLM SDK 与 FastAPI SSE。
+- Self-RAG：LangGraph 状态机，检索结果不相关时 rewrite query，最多重试 2 次。
 
 ## 快速开始
 
-### macOS / Linux
-
-```bash
-cp .env.example .env       # 编辑 .env，填 DEEPSEEK_API_KEY
-make install               # pip install + 预下载 bge-m3（首次约 5 分钟，~570MB）
-make index                 # 索引 data/emails.json 进 ChromaDB（约 2 分钟）
-make run                   # 启 FastAPI :8000 + Streamlit :8501（Ctrl-C 同时停）
-```
-
-打开 http://localhost:8501 试用，API 文档在 http://localhost:8000/docs。
-
-### Windows（PowerShell）
-
-如果首次执行被 ExecutionPolicy 拦，在当前会话临时放开：`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`。
+### Windows PowerShell
 
 ```powershell
-copy .env.example .env     # 编辑 .env，填 DEEPSEEK_API_KEY
+copy .env.example .env
+# 编辑 .env，填 DEEPSEEK_API_KEY
 .\tasks.ps1 install
 .\tasks.ps1 index
 .\tasks.ps1 run
 ```
 
-看所有命令：`make help` 或 `.\tasks.ps1 help`。
-其他启动方式（单独起 API/UI、Docker、跑全量评测）见 [其他启动方式](#其他启动方式)。
+如果 PowerShell 拦截脚本：
 
-## 配置说明
-
-唯一**必填**的环境变量是 `DEEPSEEK_API_KEY`，其它都有合理默认值。完整字段见 [`.env.example`](.env.example)。
-
-**核心可选配置**：
-
-| 配置 | 默认 | 说明 |
-|------|------|------|
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 推理模型，重排和打分质量更稳；改成 `deepseek-chat` 可换非推理模型省 token |
-| `EMBEDDING_MODEL` | `BAAI/bge-m3` | 本地嵌入模型，首次运行自动下载约 570MB |
-| `EMBEDDING_DEVICE` | `cpu` | 有 GPU 改 `cuda` 提速 |
-| `CHROMA_PERSIST_DIR` | `./chroma_db` | 向量库本地目录 |
-| `TOP_K` / `RERANK_TOP_N` | `5` / `3` | 检索召回数 / 重排后保留数 |
-| `LLM_TIMEOUT` | `60` | LLM 单次调用超时（秒） |
-| `AGENT_PLANNER_MODEL` | `deepseek-chat` | Agent 规划/选工具用的模型（非推理，更快） |
-| `AGENT_MAX_STEPS` | `6` | Agent 单任务最多工具调用轮数 |
-| `AGENT_MAX_TOKENS` | `4000` | Agent 最终答案的输出 token 上限（防多步长答案被截断） |
-
-**Feature flags**（默认 = V2：`BM25=true, RRF=true, RERANKER=false, REWRITE=false`，业务推荐配置；4 个 flag 全关即等价 V1 纯向量基线）：
-
-| Flag | 默认 | 说明 |
-|------|:----:|------|
-| `ENABLE_BM25` | ✅ | 关闭后退回纯向量检索 |
-| `ENABLE_RRF` | ✅ | 关闭后 BM25 仍跑但用简单加权融合（不再用 RRF） |
-| `ENABLE_RERANKER` | ❌ | 开启后引入 LLM 重排，mean 延迟 +~12s（V2→V3） |
-| `ENABLE_QUERY_REWRITE` | ❌ | 开启后多一次 LLM 调用做 query 改写 |
-
-> 想跑全开 V4 配置（关心 faithfulness 且能接受高延迟的合规场景）把 `RERANKER` 和 `REWRITE` 都改成 `true` 即可。
-
-各 flag 对三维度指标和延迟的具体影响见 [`docs/evaluation.md`](docs/evaluation.md)。
-
-## 系统架构
-
-完整的架构图、时序图、状态机详见 [`docs/architecture.md`](docs/architecture.md)，覆盖离线索引、在线问答、混合检索 + RRF、Self-RAG 状态机、Agent 工具调用循环、SSE 线程桥接、降级策略等。
-
-简化版本：
-
-```
-                  ┌──────────────────────────────────────────────┐
-   用户 query  →  │  Coordinator（LLM 意图分类）                 │
-                  └─────┬─────────┬──────────┬─────────┬─────────┘
-                        │         │          │         │
-                  RetrieverAgent  Summarizer  Writer   Analyzer
-                        │         │          │         │
-                        └────┬────┴──────────┘         │
-                             ↓                          │
-              ┌──────────────────────────┐              │
-              │ Query Rewrite (LLM)      │              │
-              │ Hybrid Search:           │              │
-              │   Vector (bge-m3)        │              │
-              │ ⊕ BM25 (rank_bm25)       │              │
-              │   → RRF 融合             │              │
-              │ → 后过滤 (sender/date)   │              │
-              │ → LLM Rerank (熔断器)    │              │
-              │ → DeepSeek Generate      │              │
-              └──────────────────────────┘              │
-                             ↓                          ↓
-                          Answer ←── 元数据聚合（发件人 Top / 日期分布）
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-另有一条 Self-RAG 链路（`POST /chat/graph`），用 LangGraph 实现状态机，在生成前加一步"LLM 判断检索结果是否真的相关"，不相关就改写 query 重试（最多 2 次）。
-
-还有一条 Function-calling Agent 链路（`POST /chat/agent`）：规划模型拿到 5 个工具的 schema，自主决定调用顺序——“调用工具 → 结果回灌 → 再判断”的 ReAct 式循环，直到产出最终答案；带 max-steps 硬上限、死循环检测、参数校验、工具报错回灌等护栏。工具与护栏明细见 [`docs/architecture.md`](docs/architecture.md) §10。
-
-agent loop 的工作循环：
-
-```
-  用户任务
-     │
-     ▼
-  ┌──────────────────┐
-  │  调用规划 LLM     │  （deepseek-chat）
-  └─────────┬────────┘
-            │
-       返回 tool_calls？
-       ├─ 是 → 执行工具、结果回灌 → 回到「调用规划 LLM」
-       │       （ReAct 循环，最多 AGENT_MAX_STEPS 步）
-       └─ 否 → 输出最终答案 → Answer
-
-  5 个工具：search_emails · get_email · summarize_emails · draft_reply · email_stats
-  护栏：max-steps 硬上限 · 同参数死循环检测 · 参数校验 · 工具报错回灌 · 输出截断
-```
-
-## 技术栈
-
-| 层 | 选择 | 理由 |
-|---|---|---|
-| 嵌入 | `BAAI/bge-m3`（本地） | 中文好、8192 token 长上下文、零 API 成本 |
-| 向量库 | ChromaDB（本地持久化） | 开发期零运维、迁移到 Milvus/Qdrant 改一个文件即可 |
-| 关键词检索 | `rank_bm25` + RRF 融合 | RRF 不依赖分数量纲（BM25 无界 vs 余弦 0~1） |
-| LLM | DeepSeek `deepseek-v4-flash` | 推理模型，重排和打分质量更稳 |
-| 工作流 | LangGraph 1.x | Self-RAG 状态机，支持条件边和循环重试 |
-| Agent | DeepSeek 原生 function calling | agent loop 自主选工具、多轮调用，省去手写 JSON 协议兜底 |
-| API | FastAPI + SSE | 流式 token 实时推送 |
-| 前端 | Streamlit | 快速搭 chat UI，普通 / Self-RAG / Agent 三种模式 + 流式输出开关 |
-| 备选实现 | LangChain | 平行写了一版 `langchain_version/`，验证手写链路和框架版的一致性 |
-
-## 评测
-
-`scripts/run_ragas_eval.py` 实现了 6 个版本的消融对比：
-
-| 版本 | BM25 | RRF | Reranker | Query Rewrite |
-|------|------|-----|----------|---------------|
-| V1   | ❌   | ❌  | ❌       | ❌            |
-| V2   | ✅   | ✅  | ❌       | ❌            |
-| V3   | ✅   | ✅  | ✅       | ❌            |
-| V4   | ✅   | ✅  | ✅       | ✅            |
-| V5   | ✅   | ❌  | ✅       | ✅            |
-| V6   | ✅   | ✅  | ❌       | ✅            |
-
-三维度指标（每条都用 LLM 打分，0~1）：
-- `answer_relevancy`：答案与问题切题度
-- `faithfulness`：答案是否有上下文依据（不编）
-- `context_precision`：检索片段中真正有用的比例
-
-跑法：
-
-```bash
-python scripts/run_ragas_eval.py                                # 默认每版抽 30 题
-python scripts/run_ragas_eval.py --versions V2,V4 --limit 100   # 完整测试集
-```
-
-输出 `data/eval_results/comparison.json` + 终端对比表。
-
-### 实测结果（5000 封语料 / 100 题测试集，每版抽 30 题）
-
-![RAGAS 三维度 V1–V6 对比](docs/charts/v1-v6-radar.png)
-
-![V1–V6 延迟对比](docs/charts/v1-v6-latency.png)
-
-| Version | BM25 | RRF | Rerank | Rewrite | Relevancy | Faithful | Precision |
-|---------|:----:|:---:|:------:|:-------:|----------:|---------:|----------:|
-| V1 纯向量 | ❌ | ❌ | ❌ | ❌ | 0.8667 | **0.9233** | 0.5937 |
-| V2 +BM25+RRF | ✅ | ✅ | ❌ | ❌ | 0.9567 | 0.9000 | 0.5713 |
-| V3 +Reranker | ✅ | ✅ | ✅ | ❌ | 0.9333 | 0.9017 | **0.7147** |
-| V4 全开 | ✅ | ✅ | ✅ | ✅ | 0.9533 | 0.8783 | 0.6427 |
-| V5 V4-RRF | ✅ | ❌ | ✅ | ✅ | 0.9467 | 0.9083 | 0.6147 |
-| V6 V4-Reranker | ✅ | ✅ | ❌ | ✅ | **0.9600** | 0.8967 | 0.6050 |
-
-> 图表用 `python scripts/generate_charts.py` 重新生成，数据源是 `data/eval_results/comparison.json` + `latency.json`。
-
-**一个稳健发现，一个方法论提醒：**
-
-1. **没有"全场最优"的配置**：三个指标各自的最优版本都不一样——relevancy 最高 V6、faithfulness 最高 V1（纯向量基线）、precision 最高 V3。组件之间是 trade-off，不是单调叠加。这套消融跑过两次，两次都出现"三个指标被三个不同配置瓜分"——但**具体哪个配置赢哪个指标并不稳定**。所以这里下的结论是这个**模式**（不存在通吃的配置），不是精确排名。
-2. **n=30 + LLM 打分有不可忽略的方差**：上表是单次、每版 30 题、LLM 当裁判的结果，重跑会波动。这些数字应被当作**有噪声的估计**——4 位小数不代表 4 位精度。要更稳的结论需加大题量（→100）或多次取平均。
-
-**方向性观察**（趋势可信，精确数值不必较真，完整方法见 [`docs/evaluation.md`](docs/evaluation.md)）：
-
-- **LLM Reranker 提精度、降切题度**：V2→V3 加 reranker，context_precision 明显上升（剔掉噪声片段），代价是 answer_relevancy 略降。建议进一步替换为 cross-encoder（如 `bge-reranker-v2-m3`）——LLM 当 reranker 收益不稳定，且 V2→V3 mean 延迟增加约 12s，cross-encoder 预计可压到毫秒级。
-- **Query Rewrite 是双刃剑**：在这套规整的合成数据上，加 rewrite 对三指标互有增减、整体不构成明显增益——合成数据口语化程度低，rewrite 收益有限；真实数据口语化更重，ROI 预计不同。
-
-**业务选型**：邮件查询场景关心 relevancy + 低延迟——最终选 **V2（向量+BM25+RRF）**：relevancy 处于第一梯队（与最高的 V6 基本持平），且不带 reranker / rewrite，**延迟最低**（mean 8.7s，约为全开 V4 的 1/3）。组件不是越多越好，按业务目标和延迟要求选方案。
-
-### Agent 级评测
-
-RAGAS 评测的是检索质量；`scripts/run_agent_eval.py` 评测 **agent 本身**——在一个多步任务测试集上量化任务成功率、工具调用准确率（实际用的工具是否覆盖预期）、平均步数。这衡量"agent 有没有选对工具、有没有真的完成任务"，和检索三维度是正交的。结果输出到 `data/eval_results/agent_eval.json`。
-
-```bash
-python scripts/run_agent_eval.py
-```
-
-首批 8 个多步任务的结果（`data/eval_results/agent_eval.json`）：任务成功率 **100%**、工具调用准确率 **100%**、平均 **2.0** 步、**0%** 撞 max-steps。人工抽查 transcript，多步链合理——如“列招聘要点”自主走 `search_emails` + 3× `get_email`，“起草回复”走 `search_emails → get_email → draft_reply`。
-
-> 注：8 个任务是初始小测试集，数字真实但样本小，扩充任务量后再下强结论。
-
-## 工程问题复盘
-
-6 个工程问题完整复盘（按 现象 → 排查 → 根因 → 修复 → 教训 结构）见 [`docs/technical_retrospective.md`](docs/technical_retrospective.md)；更多调试记录与待办识别见 [`docs/engineering_pitfalls.md`](docs/engineering_pitfalls.md)。这里列出最有代表性的几个：
-
-1. **推理模型 `max_tokens` 陷阱**：`deepseek-v4-flash` 的 `max_tokens` 同时覆盖 `reasoning_content` 和 `content`。原代码各处写的是 128~256，结果推理过程吃光预算后 `content` 永远是空字符串——6 处 LLM 调用（RAGAS 打分 / query rewrite / 过滤抽取 / reranker / 意图分类 / Self-RAG grade）全部受影响。修复后普通调用 bump 到 1500、高推理量调用 3000，并加 `reasoning_content` 兜底解析。
-
-2. **SSE 假流式**：`/chat/stream` 端点用 `list(stream_generate(...))` 把所有 token 收完才 yield，等于伪装的非流式。改成 `asyncio.Queue` + 工作线程 `call_soon_threadsafe` 桥接才是真流式。
-
-3. **BM25 每次查询都重建索引**：5000 文档单次 800ms+。加了 `(chunk_count, BM25Okapi, ...)` 三元组缓存 + 用 `collection.count()` 做 cheap probe 检测漂移，命中后 22ms（40× 提升）。
-
-4. **消融实验里 reranker 熔断器状态泄漏**：模块全局变量 `_consecutive_failures` 被 V1~V6 共用，V3 偶发失败会永久关闭后续版本的 reranker。加 `reset_circuit_breaker()` 在每个版本开始前清零。
-
-5. **多线程 session 状态丢失**：`defaultdict(ConversationMemory)` 的 get-or-create 不是原子操作，并发首次访问同一 session 会互相覆盖。换成显式 lock + helper。
-
-6. **评测链路与产品链路漂移**：做 agent 化改造、抽 `core/pipeline.py` 时发现，`run_ragas_eval` / `measure_latency` 把 sender/date/label 过滤条件抽出来了，却跳过了"后过滤"那一步——评测跑的检索链路和产品实际跑的不是同一条，RAGAS 一直在量一个用户走不到的 pipeline。修复时把检索链路收敛成唯一的 `core.pipeline.retrieve()`，三处调用统一走它，并据此重跑了全部 6 版评测。
-
-## 测试
-
-`tests/` 下 9 个文件、81 个用例覆盖关键模块：
-
-- `test_chunker.py`：段落切分、强制切分的 overlap 边界、`min_chunk_size` 合并、空文本处理。
-- `test_retriever.py`：`ENABLE_BM25` / `ENABLE_RRF` flag 分支、RRF 融合分数计算、BM25 缓存命中与按 `collection.count()` 漂移失效。
-- `test_memory.py`：滑动窗口裁剪、session 隔离、8 线程并发 `add` 不丢消息。
-- `test_coordinator.py`：意图分类正常路径、`reasoning_content` 兜底、JSON 损坏 / LLM 异常 / 未知 intent 全部回退到 `GENERAL`、`route()` GENERAL fallback 路由到 `RetrieverAgent`。
-- `test_eval.py`：LLM 打分降级到向量打分的两级 fallback、版本 flag 切换、消融跑跨版本 `reset_circuit_breaker()` 调用次数。
-- `test_pipeline.py`：`core/pipeline.py` 的后过滤（sender / label / 相对日期窗口）、过滤清空时回退原列表、`retrieve()` 全链路顺序（用 `filters['query']` 检索、对原始 query 重排）。
-- `test_tools.py`：5 个工具的实现与参数透传、`call_tool` 分发、丢弃幻觉 kwarg / 缺必填参数报错 / 工具内部异常转 error 结果、`TOOL_SCHEMAS` 与分发表一致性。
-- `test_agent_loop.py`：function-calling 循环——无工具直接作答、单步 / 多步工具链、tool 消息回灌协议、撞 `max_steps` 强制收尾、坏 JSON 参数降级、死循环拦截、超长工具输出截断。
-- `test_agent_eval.py`：agent 评测脚本的 `tool_accuracy` 子集判定、指标汇总（成功率 / 工具准确率 / 平均步数）、空记录、单任务打分记录构造。
-
-全部用 mock，不调用真实 LLM、不读 ChromaDB。运行：
-
-```bash
-make test                    # macOS / Linux
-.\tasks.ps1 test             # Windows
-python -m pytest tests/ -v   # 任意平台
-```
-
-## 已知限制
-
-- 单进程方案：`_sessions` 是进程内 dict，多 worker 部署需要换 Redis
-- `/chat` 系列端点的 agent / 工作流是同步实现，直接在 `async` 端点里运行会阻塞事件循环——单实例 demo 无影响，高并发需改 `asyncio.to_thread` 或多 worker
-- 5000 邮件下 in-memory BM25 仍可接受，10 万级先压测，百万级或复杂过滤/检索需要换 Elasticsearch
-
-## 后续扩展方向
-
-- **LLM Reranker → cross-encoder**：当前 reranker 用 LLM 打分，方差和延迟都偏高（单组件吃掉 ~12s）；换 `bge-reranker-v2-m3` 这类 cross-encoder 可拿到毫秒级 + 确定性打分，是评测里 ROI 最明显的下一步。
-- **扩大 agent 测试集**：当前 agent 评测只有 8 个多步任务，需补充更多步、边界、失败场景，让任务成功率等指标更有统计意义。
-- 在邮件场景基础上抽象可复用的 RAG / Agent / 评测能力，向客服 FAQ 检索、工单摘要等场景扩展。
-
-## API 端点
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET  | `/health` | 健康检查 |
-| POST | `/index` | 索引邮件 |
-| POST | `/index/clear` | 清空索引 |
-| GET  | `/index/status` | 已索引数量 |
-| POST | `/chat` | 多 Agent 问答（含意图分类） |
-| POST | `/chat/stream` | SSE 流式问答 |
-| POST | `/chat/graph` | Self-RAG 工作流（LangGraph） |
-| POST | `/chat/agent` | Function-calling Agent（自主多步工具调用） |
-| DELETE | `/chat/history` | 清除指定 session 记忆 |
-| POST | `/query` | 直连 RAG（不走意图路由） |
-
-请求体（除 `/index` 外）通用：
-
-```json
-{
-  "query": "最近有哪些重要邮件？",
-  "session_id": "user-001"
-}
-```
-
-## 目录结构
-
-```
-.
-├── api/main.py                # FastAPI 入口
-├── frontend/app.py            # Streamlit
-├── agents/                    # Coordinator + 4 专家 agent + LangGraph + agent loop/tools
-├── core/                      # loader/cleaner/chunker/embedder/retriever/pipeline/reranker/generator/memory
-├── config/settings.py         # 配置 + .env
-├── models/schemas.py          # Pydantic schemas
-├── scripts/                   # 数据生成 + RAGAS 评测 + agent 评测 + 调试 probe
-├── langchain_version/         # LangChain 平行实现
-├── data/                      # emails.json + ragas_testset.json + agent_testset.json + eval_results/
-├── chroma_db/                 # runtime 生成，已 gitignore
-├── docs/
-│   ├── architecture.md             # 架构图与流程详解
-│   ├── evaluation.md               # RAGAS 6 版评测 + 业务选型
-│   ├── agent_loop_decisions.md     # Agent 化改造的逐步决策日志
-│   ├── technical_retrospective.md  # 6 个工程问题复盘
-│   └── engineering_pitfalls.md     # 完整问题清单 + 调试方法论
-├── Makefile + tasks.ps1       # 一键启动（macOS/Linux + Windows）
-├── Dockerfile + docker-compose.yml
-└── requirements.txt
-```
-
-## 其他启动方式
-
-### 单独起 API 或前端
-
-调试时常常只想起一个服务：
-
-| 用途 | macOS / Linux | Windows |
-|------|---------------|---------|
-| 只起 API | `make api` | `.\tasks.ps1 api` |
-| 只起 Streamlit | `make ui` | `.\tasks.ps1 ui` |
-| 跑全 6 版评测（~30 分钟） | `make eval-all` | `.\tasks.ps1 eval-all` |
-| 测延迟 | `make latency` | `.\tasks.ps1 latency` |
-| 清 chroma_db + __pycache__ | `make clean` | `.\tasks.ps1 clean` |
-
-### Docker
-
-不想本地装 Python 也可以走 docker-compose：
+### macOS / Linux
 
 ```bash
 cp .env.example .env
-docker-compose up --build
+# 编辑 .env，填 DEEPSEEK_API_KEY
+make install
+make index
+make run
 ```
 
-启动后 API 在 :8000、前端在 :8501。首次启动会下嵌入模型（约 570MB），与本地启动一致。
+打开：
 
-## 开发笔记
+- Frontend: http://localhost:8501
+- FastAPI docs: http://localhost:8000/docs
+- MCP server: http://127.0.0.1:8001/mcp
 
-- 每个新功能都加了 `ENABLE_XXX` 开关，方便消融实验切换
-- 所有 LLM 调用都带超时（默认 60s）+ 三段降级（重试 → 回退到无 LLM 的合理默认 → 友好提示）
-- 旧实现保留为降级路径，不轻易直接删除——SSE / LangGraph / BM25 缓存、agent loop 升级（旧意图路由留作 `/chat` 降级）都遵守这个规则
-- `.env` 在 `.gitignore` 里；密钥不入库
+## 配置说明
+
+唯一必填环境变量是 `DEEPSEEK_API_KEY`。完整配置见 [`.env.example`](.env.example)。
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 普通 RAG 生成、重排和打分模型 |
+| `AGENT_PLANNER_MODEL` | `deepseek-chat` | Agent planner，function calling 更轻更快 |
+| `AGENT_MAX_STEPS` | `6` | 单次 agent 任务最多工具轮数 |
+| `AGENT_MAX_REPEAT` | `2` | 同工具同参数重复超过后拦截 |
+| `AGENT_TOOL_OUTPUT_LIMIT` | `4000` | 单次工具结果最大字符数 |
+| `AGENT_TOOL_BACKEND` | `local` | `local` 进程内工具；`mcp` 走 MCP server |
+| `MCP_SERVER_URL` | `http://127.0.0.1:8001/mcp` | Streamable HTTP MCP 地址 |
+| `MCP_AUTH_TOKEN` | 空 | 填写后 MCP client/server 启用 bearer token |
+| `ENABLE_MCP_AUDIT` | `true` | MCP 工具调用写审计 JSONL |
+| `MCP_AUDIT_LOG_PATH` | `./data/audit/mcp_audit.jsonl` | MCP 审计日志 |
+| `APPROVAL_STORE_PATH` | `./data/approvals/pending_actions.json` | 人审审批存储 |
+| `ENABLE_AGENT_TRACE` | `false` | 是否记录 agent trace JSONL |
+| `AGENT_TRACE_LOG_PATH` | `./data/traces/agent_traces.jsonl` | trace 输出路径 |
+
+Feature flags 默认是 V2 推荐配置：`BM25=true, RRF=true, RERANKER=false, REWRITE=false`。
+
+| Flag | 默认 | 说明 |
+|---|---:|---|
+| `ENABLE_BM25` | true | 向量 + BM25 混检 |
+| `ENABLE_RRF` | true | Reciprocal Rank Fusion |
+| `ENABLE_RERANKER` | false | LLM reranker，质量可能提升但延迟高 |
+| `ENABLE_QUERY_REWRITE` | false | LLM query rewrite |
+
+## 系统架构
+
+```text
+Streamlit UI
+   |
+FastAPI
+   |-- /chat         -> Coordinator -> Specialist Agents -> core.pipeline.retrieve()
+   |-- /chat/stream  -> Coordinator -> worker thread -> asyncio.Queue -> SSE
+   |-- /chat/graph   -> LangGraph Self-RAG -> retrieve/grade/rewrite/generate
+   |-- /chat/agent   -> function-calling planner -> local/MCP tool backend
+   |-- /agent/approvals -> human approve/reject high-risk actions
+   |
+Core RAG
+   |-- query rewrite
+   |-- hybrid search: bge-m3 vector + BM25
+   |-- RRF fusion
+   |-- metadata post-filter
+   |-- optional reranker
+   |-- DeepSeek generation
+```
+
+Agent 工具 backend：
+
+```text
+agents/tool_registry.py
+   |-- openai_tool_schemas() -> agents/tools.py -> LocalToolBackend
+   |-- ToolSpec metadata     -> mcp_server.py -> FastMCP tools/resources/prompts
+
+agents/agent_loop.py
+   |-- AGENT_TOOL_BACKEND=local -> in-process call_tool()
+   |-- AGENT_TOOL_BACKEND=mcp   -> tools/list + tools/call via Streamable HTTP
+```
+
+完整架构见 [docs/architecture.md](docs/architecture.md)。
+
+## Agent 工具层
+
+| Tool | 风险级别 | 是否人审 | 作用 |
+|---|---|---:|---|
+| `search_emails` | low | 否 | 混合检索邮件，支持 sender/date/labels 过滤 |
+| `get_email` | low | 否 | 按 `email_id` 获取完整邮件 |
+| `summarize_emails` | low | 否 | 检索并总结相关邮件 |
+| `draft_reply` | medium | 否 | 起草回信，不发送 |
+| `send_email` | high | 是 | 只创建 pending approval，不直接发信 |
+| `email_stats` | low | 否 | 邮件统计聚合 |
+
+`call_tool()` 会丢弃模型幻觉参数、检查必填参数、捕获工具异常并返回 `{"error": ...}`，让错误以 tool result 形式回灌给模型，而不是把 HTTP 请求打成 500。
+
+## MCP Server
+
+启动 MCP server：
+
+```powershell
+.\.venv\Scripts\python.exe mcp_server.py --transport streamable-http
+```
+
+或：
+
+```bash
+python mcp_server.py --transport streamable-http
+```
+
+切换 `/chat/agent` 到 MCP backend：
+
+```env
+AGENT_TOOL_BACKEND=mcp
+MCP_SERVER_URL=http://127.0.0.1:8001/mcp
+MCP_AUTH_TOKEN=optional-shared-secret
+```
+
+MCP 暴露能力：
+
+| 类型 | 内容 |
+|---|---|
+| Tools | 6 个 agent tools |
+| Resources | `email://{email_id}`、`email-corpus://stats` |
+| Prompts | `draft_reply_prompt`、`summarize_emails_prompt` |
+
+生产化基础：
+
+- Bearer token：`MCP_AUTH_TOKEN` 非空时 client 自动带 `Authorization: Bearer ...`，server 注入 `StaticBearerTokenVerifier`。
+- Schema cache：`MCPToolBackend` 缓存 `tools/list` 结果，避免每轮 planner 都重新发现工具。
+- Audit JSONL：MCP tool call 写入 `MCP_AUDIT_LOG_PATH`，记录 tool、status、latency、request_id。
+
+## Human-in-the-loop
+
+`send_email` 是高风险工具。agent 调用时只会生成审批单：
+
+```json
+{
+  "status": "pending_approval",
+  "approval_id": "...",
+  "message": "发送邮件属于高风险动作，已创建待审批请求，需要人工确认后才会执行。"
+}
+```
+
+审批 API：
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/agent/approvals?status=pending` | 查看审批单 |
+| `POST` | `/agent/approvals/{approval_id}/approve` | 人工批准，当前为 simulated send |
+| `POST` | `/agent/approvals/{approval_id}/reject` | 人工拒绝 |
+
+当前实现是本地 JSON 文件存储，面试口径是“接口和边界已经打通，生产环境可把 `ApprovalStore` 换成 Redis/DB，并接企业邮箱 API”。
+
+## Trace 与 Eval
+
+开启 trace：
+
+```env
+ENABLE_AGENT_TRACE=true
+AGENT_TRACE_LOG_PATH=./data/traces/agent_traces.jsonl
+```
+
+每次 agent run 会记录：
+
+- `agent_start`
+- `tool_call`：tool、arguments、status、latency_ms
+- `agent_end`：status、steps、answer_chars
+
+汇总 trace：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\summarize_agent_traces.py --json
+```
+
+Agent eval：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_agent_eval.py --limit 8
+```
+
+`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate，并把每条记录关联 `trace_id`。
+
+## 评测结果
+
+RAG 消融脚本：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_ragas_eval.py --versions V2
+.\.venv\Scripts\python.exe scripts\run_ragas_eval.py
+```
+
+6 个版本：
+
+| Version | BM25 | RRF | Reranker | Rewrite |
+|---|---:|---:|---:|---:|
+| V1 | false | false | false | false |
+| V2 | true | true | false | false |
+| V3 | true | true | true | false |
+| V4 | true | true | true | true |
+| V5 | true | false | true | true |
+| V6 | true | true | false | true |
+
+当前结论：
+
+- V2 是默认推荐：相关性高、延迟最低，适合对话默认路径。
+- Reranker 对 precision 有帮助，但 LLM reranker 延迟和方差较高，下一步更适合换 cross-encoder。
+- Query rewrite 在部分场景提升 relevancy，但需要更稳 benchmark 和真实数据集验证。
+
+详细数据见 [docs/evaluation.md](docs/evaluation.md)。
+
+## 测试
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/ -q
+```
+
+当前回归结果：`107 passed`。
+
+覆盖重点：
+
+- RAG：chunker、retriever、pipeline、memory、coordinator、eval。
+- Agent：tool registry、tools、agent loop、agent eval。
+- MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL。
+- Safety：approval store、`send_email` pending approval、approve/reject。
+- Trace：JSONL recorder、agent trace metadata、trace summary。
+
+## API 端点
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/health` | 健康检查 |
+| `POST` | `/index` | 索引邮件 |
+| `POST` | `/index/clear` | 清空索引 |
+| `GET` | `/index/status` | 索引状态 |
+| `POST` | `/chat` | Coordinator 固定意图路由 |
+| `POST` | `/chat/stream` | SSE 流式聊天 |
+| `POST` | `/chat/graph` | LangGraph Self-RAG |
+| `POST` | `/chat/agent` | Function-calling Agent |
+| `DELETE` | `/chat/history` | 清空 session memory |
+| `GET` | `/agent/approvals` | 查看人审审批单 |
+| `POST` | `/agent/approvals/{id}/approve` | 批准高风险动作 |
+| `POST` | `/agent/approvals/{id}/reject` | 拒绝高风险动作 |
+| `POST` | `/query` | 直接 RAG 查询 |
+
+## 目录结构
+
+```text
+api/main.py                    FastAPI 入口和审批 API
+frontend/app.py                Streamlit UI
+mcp_server.py                  FastMCP server
+agents/
+  agent_loop.py                Function-calling ReAct loop
+  tool_registry.py             工具元数据单一事实源
+  tools.py                     6 个工具实现和 call_tool 护栏
+  mcp_adapter.py               MCP backend/client/audit
+  approvals.py                 Human-in-the-loop approval store
+  tracing.py                   Agent trace JSONL recorder
+  coordinator.py               LLM 意图分类和固定路由
+  graph_workflow.py            LangGraph Self-RAG
+core/
+  pipeline.py                  标准 RAG pipeline
+  retriever.py                 向量 + BM25 + RRF
+  reranker.py                  LLM reranker + circuit breaker
+scripts/
+  run_ragas_eval.py            RAGAS-style 消融评测
+  run_agent_eval.py            Agent 任务评测
+  summarize_agent_traces.py    Trace 汇总
+tests/                         107 个单测
+docs/                          架构、评测、复盘和面经
+```
+
+## 已知限制和下一步
+
+- 合成邮件数据不能代表真实企业邮箱分布；下一步接脱敏真实数据并标注 supporting chunks。
+- `send_email` 当前是 simulated send；生产要接企业邮箱 API、权限系统、审计和撤销策略。
+- `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
+- MCP 已有 token verifier 和审计，但生产还需要更完整的 OAuth、租户隔离、密钥轮换和部署层 TLS。
+- Agent eval 目前是首批任务集；下一步扩到 50-100 条，覆盖异常、歧义、权限和多步边界。
+- 检索侧下一步优先换 cross-encoder reranker，减少 LLM reranker 延迟和飘分。
