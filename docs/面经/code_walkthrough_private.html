@@ -241,8 +241,8 @@
 私人面试速查</h1>
 <blockquote>
 <p>这份文档不入库（gitignore），面试前 30 分钟翻一遍。</p>
-<p>当前分支重点看 17 个关键文件，其中最新 Agent 升级最容易被问的是
-<code>agents/agent_loop.py</code>、<code>agents/tool_registry.py</code>、<code>agents/mcp_adapter.py</code>、<code>mcp_server.py</code>、<code>agents/approvals.py</code>、<code>agents/tracing.py</code>、<code>agents/tools.py</code>、<code>api/main.py</code>、<code>core/pipeline.py</code>，旧
+<p>当前分支重点看 19 个关键文件，其中最新 Agent 升级最容易被问的是
+<code>agents/agent_loop.py</code>、<code>agents/tool_registry.py</code>、<code>agents/tool_policy.py</code>、<code>agents/evalops.py</code>、<code>agents/mcp_adapter.py</code>、<code>mcp_server.py</code>、<code>agents/approvals.py</code>、<code>agents/tracing.py</code>、<code>agents/tools.py</code>、<code>api/main.py</code>、<code>core/pipeline.py</code>，旧
 RAG 链路仍要能讲清
 <code>coordinator / retriever / reranker / memory / api</code>。</p>
 <p>三份文档分工：<code>resume_interview_question_bank.html</code>
@@ -303,9 +303,10 @@ search/get/summarize/draft/send/stats</td>
 <tr>
 <td>MCP server</td>
 <td><code>mcp_server.py</code> → <code>agents/tool_registry.py</code> →
-<code>agents/tools.py</code></td>
+<code>agents/tool_policy.py</code> → <code>agents/tools.py</code></td>
 <td>对外暴露 6 个 tools、2 个 resources、2 个 prompts；默认
-<code>127.0.0.1:8001/mcp</code>；支持 bearer token</td>
+<code>127.0.0.1:8001/mcp</code>；支持 bearer token、allowed-tools 和
+read-only 策略</td>
 </tr>
 <tr>
 <td>审批 API</td>
@@ -318,6 +319,20 @@ search/get/summarize/draft/send/stats</td>
 <code>scripts/summarize_agent_traces.py</code></td>
 <td>记录 agent_start/tool_call/agent_end，汇总 tool
 error、approval_required 和 latency</td>
+</tr>
+<tr>
+<td>Agent EvalOps</td>
+<td><code>scripts/run_agent_eval.py</code> →
+<code>agents/evalops.py</code></td>
+<td>54 条任务集、failure_category 归因、trace_id 反查和 Markdown
+报告</td>
+</tr>
+<tr>
+<td>MCP 审计 API</td>
+<td><code>api/main.py</code> →
+<code>MCPAuditLogger.load_events()</code></td>
+<td><code>/agent/mcp-audit</code> 按 tool/status/limit
+查询工具调用审计</td>
 </tr>
 <tr>
 <td>RAGAS/延迟评测</td>
@@ -410,7 +425,9 @@ tool_calls 做决策，但工具 schema 可以来自 MCP
 <p><strong>对应测试</strong>：<code>tests/test_mcp_adapter.py</code>：MCP
 tool schema 转换、structuredContent 解析、工具异常转
 <code>{"error": ...}</code>。<code>tests/test_mcp_production.py</code>：auth
-header、schema cache、audit JSONL、server token verifier。</p>
+header、schema cache、audit JSONL、server token
+verifier。<code>tests/test_mcp_audit_api.py</code>：审计日志读取和 API
+查询。</p>
 <h3 id="mcp_server.py"><code>mcp_server.py</code></h3>
 <p><strong>职责一句话</strong>：用 MCP Python SDK / FastMCP
 把邮件系统能力标准化暴露出去，供外部 MCP Host 或内部 MCP backend
@@ -428,11 +445,33 @@ Prompts：<code>draft_reply_prompt</code> /
 里的真实函数。默认用 Streamable HTTP 跑在
 <code>127.0.0.1:8001/mcp</code>，避开 FastAPI 的 8000 端口。现在
 <code>MCP_AUTH_TOKEN</code> 非空时会注入 bearer token
-verifier；面试时要讲清边界：这是作品集级生产化，线上还要补
-OAuth、租户隔离、TLS 和密钥轮换。</p>
+verifier；<code>MCP_ALLOWED_TOOLS</code> 和
+<code>MCP_READ_ONLY_MODE</code> 可以控制 MCP
+对外暴露面；<code>/agent/mcp-audit</code> 可以查询 tool call
+审计。面试时要讲清边界：这是作品集级生产化，线上还要补
+OAuth、租户隔离、TLS、密钥轮换和部署层限流。</p>
 <p><strong>对应测试</strong>：<code>tests/test_mcp_server.py</code>：fake
 FastMCP 注册 6 tools、2 resources、2 prompts；真实 SDK 导入和
 <code>build_server()</code> 已做过冒烟。</p>
+<h3 id="agentstool_policy.py"><code>agents/tool_policy.py</code></h3>
+<p><strong>职责一句话</strong>：MCP-facing 工具可见性策略，控制外部 MCP
+Host 能看到哪些工具。</p>
+<p><strong>核心函数 / 状态</strong>： -
+<code>ToolPolicy.allowed_tools</code>：显式工具白名单，未知工具会被忽略。
+- <code>ToolPolicy.read_only</code>：只暴露 <code>risk_level=low</code>
+且不需要人审的工具，隐藏 <code>draft_reply</code> 和
+<code>send_email</code>。 - <code>ToolPolicy.from_settings()</code>：从
+<code>MCP_ALLOWED_TOOLS</code> / <code>MCP_READ_ONLY_MODE</code>
+构造策略。</p>
+<p><strong>60 秒回答</strong>： &gt; MCP server
+不是把所有内部能力无条件暴露出去。我加了一层
+<code>ToolPolicy</code>：可以用 allowed-tools 做白名单，也可以用
+read-only 模式只暴露低风险工具。这样外部 Host
+接入时可以按场景收敛攻击面，<code>send_email</code> 这类 high-risk tool
+不会在只读模式里出现。</p>
+<p><strong>对应测试</strong>：<code>tests/test_mcp_policy.py</code>：read-only
+隐藏中高风险工具、allowed-tools
+白名单过滤、<code>mcp_server.register_tools()</code> 尊重策略。</p>
 <h3 id="agentsapprovals.py"><code>agents/approvals.py</code></h3>
 <p><strong>职责一句话</strong>：Human-in-the-loop
 的本地审批存储。高风险工具不会直接执行，而是创建 <code>pending</code>
@@ -474,6 +513,29 @@ case 反查完整工具轨迹。</p>
 <p><strong>对应测试</strong>：<code>tests/test_agent_tracing.py</code>：JSONL
 写入与汇总指标；<code>tests/test_agent_loop.py</code> 验证 loop 产出
 trace metadata。</p>
+<h3 id="agentsevalops.py"><code>agents/evalops.py</code></h3>
+<p><strong>职责一句话</strong>：把 agent eval
+从“跑几个任务”升级成可复盘的 EvalOps：任务元数据、失败归因、trace 反查和
+Markdown 报告。</p>
+<p><strong>核心函数 / 状态</strong>： -
+<code>events_by_trace_id(events)</code>：按 trace_id 聚合 JSONL trace。
+- <code>classify_eval_record(record, trace_events)</code>：归因为
+<code>forbidden_tool</code>、<code>missing_expected_tool</code>、<code>tool_error</code>、<code>approval_required</code>、<code>max_steps</code>、<code>judge_failed</code>
+等。 - <code>build_eval_report(payload, trace_events)</code> /
+<code>write_eval_report()</code>：生成
+<code>agent_eval_report.md</code>。 -
+<code>data/agent_testset.json</code>：54 条任务，每条有
+<code>id/task_type/risk_level/expected_tools/forbidden_tools/success_criteria</code>。</p>
+<p><strong>60 秒回答</strong>： &gt; 我把 agent eval 从 8 条健康检查扩成
+54
+条元数据化任务集，不只看最终回答，还看是否调用了期望工具、是否调用了禁用工具、是否触发
+max steps，以及 trace 里有没有 tool error 或
+approval_required。报告会输出
+failure_category，方便把失败样例沉淀回测试集。</p>
+<p><strong>对应测试</strong>：<code>tests/test_agent_evalops.py</code>：trace
+分组、失败归因、报告内容、任务集
+schema；<code>tests/test_agent_eval.py</code>：eval record
+元数据、禁用工具违规率。</p>
 <h3 id="agentstools.py"><code>agents/tools.py</code></h3>
 <p><strong>职责一句话</strong>：保留 6 个真实工具函数和
 <code>call_tool()</code> 参数校验；schema / dispatch 元数据已迁移到
@@ -836,9 +898,8 @@ planner 或工具设计有问题。</li>
 </ul>
 <blockquote>
 <p>60 秒回答：RAGAS 看检索和生成质量，agent eval
-看“模型会不会用工具”。我现在首批 8
-条任务是小样本健康检查，不能吹成生产级 benchmark，但它能防止
-search、get、draft 这种多步链路退化。</p>
+看“模型会不会用工具”。我现在有 54 条元数据化 agent
+任务，覆盖检索、摘要、统计、起草、详情读取、发信人审、禁用工具和歧义/边界场景；它还不能代表真实线上分布，但已经从健康检查升级成可回归的行为评测集。</p>
 </blockquote>
 <h3 id="mcp-相关文件">MCP 相关文件</h3>
 <p><strong><code>agents/tool_registry.py</code></strong>：工具元数据单一来源，防止
@@ -854,9 +915,9 @@ class="sourceCode powershell"><code class="sourceCode powershell"><span id="cb1-
 <p>60 秒回答：MCP 这次不是“追热点”，而是为了把本地工具层标准化。默认
 <code>AGENT_TOOL_BACKEND=local</code> 保持原 agent 路径稳定；当设置为
 <code>mcp</code> 时，agent loop 通过 MCP 动态发现和调用工具。现在还补了
-bearer token、schema cache、audit JSONL、人审和
-trace。这样既有兼容性，也为外部 MCP Host
-或企业系统接入留了协议边界。</p>
+bearer token、schema cache、audit JSONL、allowed-tools/read-only
+policy、人审、trace 和 audit query API。这样既有兼容性，也为外部 MCP
+Host 或企业系统接入留了权限和审计边界。</p>
 </blockquote>
 <h3 id="frontendapp.py"><code>frontend/app.py</code></h3>
 <p><strong>职责一句话</strong>：Streamlit
@@ -949,7 +1010,7 @@ tools/resources/prompts</li>
 <p><strong>module-level 全局可变状态</strong>出现在三处——reranker
 熔断器、memory 的 session 字典、retriever 的 BM25
 cache——<strong>每处都搭配显式锁或 reset 钩子</strong>。</p>
-<p><strong>测试边界</strong>清楚：unit test 测 deterministic 代码（107
+<p><strong>测试边界</strong>清楚：unit test 测 deterministic 代码（118
 用例 mock 全过），RAGAS-style evaluation 测检索/生成质量，agent eval 和
 trace 测真实多步工具行为。</p>
 <p><strong>降级层叠</strong>也清楚：LLM 调用 → reasoning_content 兜底 →

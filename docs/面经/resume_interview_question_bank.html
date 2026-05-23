@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -201,7 +201,7 @@
     <div class="grid">
       <div class="stat"><b>5000</b><span>合成邮件语料</span></div>
       <div class="stat"><b>100</b><span>检索评测题</span></div>
-      <div class="stat"><b>107</b><span>pytest 用例</span></div>
+      <div class="stat"><b>118</b><span>pytest 用例</span></div>
       <div class="stat"><b>8</b><span>首批 Agent 多步任务</span></div>
       <div class="stat"><b>3</b><span>普通 RAG / Self-RAG / Function-calling Agent 链路</span></div>
       <div class="stat"><b>6</b><span>Agent 工具：search / get / summarize / draft / send / stats</span></div>
@@ -223,10 +223,10 @@
     </nav>
 
     <h2 id="overview">1. 项目整体讲解</h2>
-    <p><b>30 秒版本：</b>这是一个智能邮件 RAG Agent 系统。底层用向量检索 + BM25 + RRF 做混合检索，支持邮件问答；上层基于 DeepSeek function calling 实现 ReAct 式 agent loop，把检索、取详情、摘要、起草回信、申请发信、统计分析封装成 6 个工具。最新一版又把工具层升级为 MCP-ready：同一份 <code>tool_registry.py</code> 同时派生本地 function schema 和 FastMCP tools/resources/prompts，并补了 bearer token、audit、人审审批和 agent trace。项目还做了 RAGAS-style 6 版消融、Agent 级任务评测、107 个 pytest 用例和失败模式护栏。</p>
+    <p><b>30 秒版本：</b>这是一个智能邮件 RAG Agent 系统。底层用向量检索 + BM25 + RRF 做混合检索，支持邮件问答；上层基于 DeepSeek function calling 实现 ReAct 式 agent loop，把检索、取详情、摘要、起草回信、申请发信、统计分析封装成 6 个工具。最新一版又把工具层升级为 MCP-ready：同一份 <code>tool_registry.py</code> 同时派生本地 function schema 和 FastMCP tools/resources/prompts，并补了 bearer token、tool policy、audit query、人审审批和 EvalOps trace。项目还做了 RAGAS-style 6 版消融、54 条 Agent 任务评测、118 个 pytest 用例和失败模式护栏。</p>
     <p><b>3 分钟版本：</b>系统入口是 Streamlit 前端，后端是 FastAPI。普通模式走 <code>/chat</code>，Coordinator 先做 LLM 意图分类，再路由到 RetrieverAgent、SummarizerAgent、WriterAgent、AnalyzerAgent。流式模式走 <code>/chat/stream</code>，用 worker 线程和 <code>asyncio.Queue</code> 桥接同步 LLM 流和异步 SSE。Self-RAG 走 <code>/chat/graph</code>，用 LangGraph 做检索后自检和 rewrite。Agent 模式走 <code>/chat/agent</code>，planner 模型拿到 6 个工具 schema 后，根据任务自主调用工具，并把工具结果回灌给模型继续判断下一步；工具后端默认 local，也可以通过 <code>AGENT_TOOL_BACKEND=mcp</code> 切到 MCP backend，经 <code>tools/list</code> 动态发现、<code>tools/call</code> 执行。高风险 <code>send_email</code> 不直接发信，只创建 pending approval，由人工 approve/reject。</p>
     <div class="note">
-      <b>面试时的核心定位：</b>不要把项目讲成“我调了 DeepSeek API”。要讲成“我把 RAG 能力工具化，用 function calling 做 Agent 编排，并把工具层升级成 MCP-ready 的标准化接入层，同时补了高风险动作人审和 trace 可观测”。
+      <b>面试时的核心定位：</b>不要把项目讲成“我调了 DeepSeek API”。要讲成“我把 RAG 能力工具化，用 function calling 做 Agent 编排，并把工具层升级成 MCP-ready 的标准化接入层，同时补了高风险动作人审、MCP 权限审计和 EvalOps 可观测”。
     </div>
     <div class="note">
       <b>三份文档怎么配合：</b>这份 HTML 是“广度题库”，负责把面试官可能问到的问题铺开；<code>interview_qa_walkthrough_v2_full.html</code> 是“深度讲稿”，负责把 6 张王炸牌讲透；<code>code_walkthrough_private.html</code> 是“代码速查”，负责把每个关键文件讲清。三份按这个顺序消化，就等于把项目从简历、架构、代码、评测、追问都过了一遍。
@@ -239,9 +239,10 @@
       <tr><td><code>/chat/stream</code></td><td>Coordinator 判断意图，普通问答走 SSE token 流</td><td>普通检索上下文仍复用 RetrieverAgent 准备的检索能力；重点是线程桥接 SSE</td></tr>
       <tr><td><code>/chat/graph</code></td><td>LangGraph Self-RAG：retrieve -> grade -> rewrite/generate</td><td>复用底层 <code>hybrid_search</code> / <code>rerank</code>，但不是完整调用 <code>retrieve()</code></td></tr>
       <tr><td><code>/chat/agent</code></td><td>planner -> tool backend(local/MCP) -> tool result -> re-plan</td><td>local backend 直接调用本地工具；MCP backend 通过 <code>tools/list</code> 和 <code>tools/call</code> 连接 <code>mcp_server.py</code>。<code>search_emails</code> 仍复用底层检索组件。</td></tr>
-      <tr><td><code>mcp_server.py</code></td><td>FastMCP -> tools / resources / prompts</td><td>暴露 6 tools、2 resources、2 prompts，和本地 function schema 同源于 <code>tool_registry.py</code>，避免工具定义漂移；可启用 bearer token。</td></tr>
+      <tr><td><code>mcp_server.py</code></td><td>FastMCP -> tools / resources / prompts</td><td>暴露 6 tools、2 resources、2 prompts，和本地 function schema 同源于 <code>tool_registry.py</code>，避免工具定义漂移；可启用 bearer token、allowed-tools 白名单和 read-only 策略。</td></tr>
       <tr><td><code>/agent/approvals</code></td><td><code>api/main.py</code> -> <code>agents.approvals</code></td><td>高风险 <code>send_email</code> 只创建待审批单，由人工 approve/reject。</td></tr>
-      <tr><td>Trace</td><td><code>agents.tracing</code> -> <code>scripts/summarize_agent_traces.py</code></td><td>记录 agent_start、tool_call、agent_end，用于排查工具错误、延迟和人审触发。</td></tr>
+      <tr><td>Trace / EvalOps</td><td><code>agents.tracing</code> -> <code>agents.evalops</code></td><td>记录 agent_start、tool_call、agent_end；54 条任务集可输出 failure_category 和 Markdown 报告。</td></tr>
+      <tr><td><code>/agent/mcp-audit</code></td><td><code>MCPAuditLogger.load_events</code></td><td>按 tool/status/limit 查询 MCP 工具调用审计事件。</td></tr>
       <tr><td>评测脚本</td><td><code>run_ragas_eval.py</code> / <code>measure_latency.py</code></td><td>完整复用 <code>retrieve()</code>，避免标准 RAG 的产品链路和评测链路漂移</td></tr>
     </table>
 
@@ -305,7 +306,7 @@
         <text x="615" y="370" text-anchor="middle" class="h">Agent 级评测</text>
         <text x="615" y="391" text-anchor="middle" class="s">8 tasks / tool accuracy / task success</text>
         <rect x="820" y="342" width="185" height="62" class="box green"/>
-        <text x="912" y="370" text-anchor="middle" class="h">107 pytest</text>
+        <text x="912" y="370" text-anchor="middle" class="h">118 pytest</text>
         <text x="912" y="391" text-anchor="middle" class="s">mock LLM / DB，覆盖失败模式</text>
 
         <path d="M350 49 L455 49" class="line"/>
@@ -389,7 +390,7 @@
     <details open>
       <summary>Q1：请你用一分钟介绍这个项目。</summary>
       <div class="answer">
-        <p>我做的是一个智能邮件 RAG Agent 系统。底层是邮件 RAG，用向量检索、BM25 和 RRF 融合做邮件问答；上层新增了基于 DeepSeek function calling 的 ReAct 式 agent loop，把检索、取详情、摘要、起草回复、申请发信、统计封装为 6 个工具，让模型可以自主完成多步任务。最新一版把工具层升级为 MCP-ready：同一份 <code>tool_registry.py</code> 既派生本地 function schema，也通过 FastMCP 暴露 tools/resources/prompts，并补了 token、audit、approval 和 trace。系统提供普通 RAG、Self-RAG 和 Function-calling Agent 三条链路，同时有 6 版检索消融、8 条 Agent 任务评测和 107 个 pytest 用例。</p>
+        <p>我做的是一个智能邮件 RAG Agent 系统。底层是邮件 RAG，用向量检索、BM25 和 RRF 融合做邮件问答；上层新增了基于 DeepSeek function calling 的 ReAct 式 agent loop，把检索、取详情、摘要、起草回复、申请发信、统计封装为 6 个工具，让模型可以自主完成多步任务。最新一版把工具层升级为 MCP-ready：同一份 <code>tool_registry.py</code> 既派生本地 function schema，也通过 FastMCP 暴露 tools/resources/prompts，并补了 token、tool policy、audit query、approval 和 trace/EvalOps。系统提供普通 RAG、Self-RAG 和 Function-calling Agent 三条链路，同时有 6 版检索消融、54 条 Agent 任务评测和 118 个 pytest 用例。</p>
         <div class="follow">追问重点：面试官想确认你不是只会“调 API”，而是能讲清架构、链路、评测和工程兜底。</div>
       </div>
     </details>
@@ -423,7 +424,7 @@
     <details>
       <summary>Q5：你作为项目负责人，这次架构升级的核心是什么？</summary>
       <div class="answer">
-        <p>核心是六件事。第一，把原来的 RAG 和 Specialist Agent 能力工具化，新增 function-calling agent loop。第二，把工具定义抽成 <code>tool_registry.py</code>，同一份定义派生本地 schema 和 FastMCP 注册，避免工具定义漂移。第三，给 MCP backend 补 token、schema cache 和 audit。第四，把高风险 <code>send_email</code> 设计成人审 pending approval。第五，用 agent trace 记录 tool call、状态和耗时。第六，把标准 RAG 链路抽到 <code>core.pipeline.retrieve()</code>，让产品和评测尽量复用同一条检索管线。</p>
+        <p>核心是八件事。第一，把原来的 RAG 和 Specialist Agent 能力工具化，新增 function-calling agent loop。第二，把工具定义抽成 <code>tool_registry.py</code>，同一份定义派生本地 schema 和 FastMCP 注册，避免工具定义漂移。第三，给 MCP backend 补 token、schema cache 和 audit。第四，用 <code>tool_policy.py</code> 做 allowed-tools/read-only 可见性控制。第五，把高风险 <code>send_email</code> 设计成人审 pending approval。第六，用 agent trace 记录 tool call、状态和耗时。第七，用 EvalOps 做 54 条任务集、failure_category 和报告。第八，把标准 RAG 链路抽到 <code>core.pipeline.retrieve()</code>，让产品和评测尽量复用同一条检索管线。</p>
         <div class="follow">边界要说清：<code>/chat/graph</code> 和 <code>/chat/agent</code> 不是完整调用 <code>retrieve()</code>，它们复用的是底层检索、后过滤和 rerank 组件。</div>
       </div>
     </details>
@@ -693,9 +694,9 @@
     </details>
 
     <details>
-      <summary>Q42：107 个 pytest 覆盖了什么？</summary>
+      <summary>Q42：118 个 pytest 覆盖了什么？</summary>
       <div class="answer">
-        <p>覆盖 chunker、retriever、pipeline、memory、coordinator、tools、tool_registry、mcp_server、mcp_adapter、mcp_production、approvals、tracing、agent_loop、eval、agent_eval。重点不是数量，而是覆盖了关键失败模式：BM25 cache、RRF 融合、filter fallback、工具参数校验、工具异常、MCP schema 转换/注册、MCP 鉴权/审计、人审审批、Agent trace、Agent 死循环、max steps、长输出截断、session memory 并发安全等。</p>
+        <p>覆盖 chunker、retriever、pipeline、memory、coordinator、tools、tool_registry、tool_policy、mcp_server、mcp_adapter、mcp_production、mcp_audit_api、approvals、tracing、evalops、agent_loop、eval、agent_eval。重点不是数量，而是覆盖了关键失败模式：BM25 cache、RRF 融合、filter fallback、工具参数校验、工具异常、MCP schema 转换/注册、MCP 鉴权/审计/权限策略、人审审批、Agent trace、EvalOps 失败归因、Agent 死循环、max steps、长输出截断、session memory 并发安全等。</p>
       </div>
     </details>
 
@@ -730,9 +731,9 @@
     <h2 id="pitfalls">10. 高风险追问</h2>
 
     <details>
-      <summary>Q47：你这个 Agent eval 只有 8 条，能说明什么？</summary>
+      <summary>Q47：你这个 Agent eval 现在 54 条，能说明什么？</summary>
       <div class="answer">
-        <p>只能说明当前核心任务路径可回归，不能说明泛化能力。我会主动承认样本小。下一步应扩充到更多任务类型，包括多邮件逐封处理、错误 email_id、无结果查询、工具异常、需要用户确认的写操作、歧义查询等。这个态度比夸大 100% 成功率更可信。</p>
+        <p>能说明核心任务路径已经可以回归，但不能说明线上泛化能力。我会主动承认 54 条仍是作品集级任务集。它的价值是覆盖检索、摘要、统计、起草、详情读取、发信人审、禁用工具、歧义和边界场景，并且每条都有 expected_tools、forbidden_tools、success_criteria 和 failure_category，下一步要接真实失败样本继续扩到 100+。</p>
       </div>
     </details>
 
@@ -753,7 +754,7 @@
     <details>
       <summary>Q50：你最容易被问倒的地方是什么？</summary>
       <div class="answer">
-        <p>第一是把 Coordinator 和 Agent loop 关系说反。第二是把 V2 说成指标最好。第三是把 MCP 和 function calling 说成互相替代，而不是“决策协议 vs 工具接入协议”。第四是把 8 条 agent eval 说得太满。第五是不能解释 SSE 里的线程和队列。第六是 C++ 工作经历里的性能提升没有验证口径。复习时要优先把这六个点背顺。</p>
+        <p>第一是把 Coordinator 和 Agent loop 关系说反。第二是把 V2 说成指标最好。第三是把 MCP 和 function calling 说成互相替代，而不是“决策协议 vs 工具接入协议”。第四是把 54 条 agent eval 说得太满。第五是不能解释 SSE 里的线程和队列。第六是 C++ 工作经历里的性能提升没有验证口径。复习时要优先把这六个点背顺。</p>
       </div>
     </details>
 
@@ -965,7 +966,7 @@
     <details>
       <summary>Q80：你觉得这个项目下一步最有价值的优化是什么？</summary>
       <div class="answer">
-        <p>第一是把 MCP 生产化继续加深，从 bearer token/audit 升到 OAuth、租户隔离、TLS 和密钥轮换。第二是把 high-risk human-in-the-loop 从 simulated send 接到真实企业邮箱 API。第三是扩充 agent eval，从 8 条增加到覆盖多步、异常、歧义和权限场景。第四是把 LLM reranker 换成 cross-encoder 或专用 rerank 模型，降低延迟和飘分。第五是把 trace 接成更完整的 observability，看每一步 tool call、耗时、token 和失败原因。</p>
+        <p>第一是把 MCP 生产化继续加深，从 bearer token/audit 升到 OAuth、租户隔离、TLS 和密钥轮换。第二是把 high-risk human-in-the-loop 从 simulated send 接到真实企业邮箱 API。第三是扩充 agent eval，从 54 条继续扩到 100+ 条，并接入真实失败样本。第四是把 LLM reranker 换成 cross-encoder 或专用 rerank 模型，降低延迟和飘分。第五是把 trace 接成更完整的 observability，看每一步 tool call、耗时、token 和失败原因。</p>
       </div>
     </details>
 
@@ -1026,7 +1027,7 @@
     <details>
       <summary>Q88：MCP 是什么？和你现在的 function calling 有什么关系？</summary>
       <div class="answer">
-        <p>MCP 可以理解成“把工具、资源、提示词标准化暴露给模型应用的协议”。我的项目现在已经把工具层抽成 <code>tool_registry.py</code>，同一份定义派生本地 function-calling schema 和 FastMCP 注册；<code>mcp_server.py</code> 暴露 6 tools、2 resources、2 prompts，<code>mcp_adapter.py</code> 支持 <code>/chat/agent</code> 切到 MCP backend，并补了 bearer token、schema cache 和 audit。function calling 决定模型想调什么工具，MCP 决定工具服务怎么被发现和执行。</p>
+        <p>MCP 可以理解成“把工具、资源、提示词标准化暴露给模型应用的协议”。我的项目现在已经把工具层抽成 <code>tool_registry.py</code>，同一份定义派生本地 function-calling schema 和 FastMCP 注册；<code>mcp_server.py</code> 暴露 6 tools、2 resources、2 prompts，<code>mcp_adapter.py</code> 支持 <code>/chat/agent</code> 切到 MCP backend，并补了 bearer token、schema cache、audit、allowed-tools/read-only policy 和审计查询 API。function calling 决定模型想调什么工具，MCP 决定工具服务怎么被发现和执行。</p>
       </div>
     </details>
 

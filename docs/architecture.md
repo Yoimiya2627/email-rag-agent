@@ -470,6 +470,8 @@ MCP backend 已加入生产化基础：
 | Bearer token | `mcp_server.StaticBearerTokenVerifier` / `StreamableHttpMCPClient.headers()` | `MCP_AUTH_TOKEN` 非空时 client 带 `Authorization: Bearer ...`，server 注入 token verifier |
 | Schema cache | `MCPToolBackend.tool_schemas()` | 缓存 `tools/list` 结果，避免每轮 planner 重复发现工具 |
 | Audit JSONL | `MCPAuditLogger` | 记录 tool、status、latency、request_id 到 `MCP_AUDIT_LOG_PATH` |
+| Tool policy | `agents/tool_policy.py` | 支持 `MCP_ALLOWED_TOOLS` 白名单和 `MCP_READ_ONLY_MODE` 只读暴露策略 |
+| Audit query API | `GET /agent/mcp-audit` | 按 tool/status/limit 查询 MCP 工具调用审计事件 |
 | 工具风险元数据 | `ToolSpec.risk_level` / `requires_approval` | 高风险工具可被人审链路拦住 |
 
 **护栏**（`AGENT_*` 配置，详见 `agents/agent_loop.py`）：
@@ -495,19 +497,27 @@ flowchart LR
     Reject --> Block["blocked_by_human<br/>sent=false"]
 ```
 
-**Agent trace**：
+**Agent trace + EvalOps**：
 
 `agents/tracing.py` 在 `ENABLE_AGENT_TRACE=true` 时写 JSONL，记录 `agent_start`、
 `tool_call`、`agent_end`。`scripts/summarize_agent_traces.py` 可汇总 runs、tool_calls、
 tool_errors、approval_required、avg_tool_latency_ms。`scripts/run_agent_eval.py` 会把
 `trace_id` 写入每条评测记录，方便从 eval case 反查真实工具轨迹。
 
+`agents/evalops.py` 把 trace 和 eval record 连接起来：54 条 agent 任务集每条都带
+`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；
+评测记录会生成 `failure_category`，区分 forbidden_tool、missing_expected_tool、
+tool_error、approval_required、max_steps、judge_failed 等失败原因，并可输出
+`agent_eval_report.md` 供面试或回归复盘。
+
 **与 §六 固定路由的区别**：Coordinator 是"一次分类 → 一条固定链"；agent loop 是 LLM
 自主多轮规划，能把"找出 X 并逐封处理"这类任务拆成 `search → 逐个 draft` 的多步链。
 旧的 `/chat`（固定路由）保留作为降级路径。
 
-**评测**：`scripts/run_agent_eval.py` 用任务成功率 / 工具调用准确率 / 平均步数评测
-agent 本身（区别于 RAGAS 评测检索质量），结果见 `data/eval_results/agent_eval.json`。
+**评测**：`scripts/run_agent_eval.py` 用任务成功率 / 工具调用准确率 / 平均步数 /
+禁用工具违规率评测 agent 本身（区别于 RAGAS 评测检索质量），结果见
+`data/eval_results/agent_eval.json`，报告可写到
+`data/eval_results/agent_eval_report.md`。
 
 ---
 
@@ -526,6 +536,8 @@ E:/智能邮件agent/
 │   ├── analyzer_agent.py         # 分析 agent
 │   ├── graph_workflow.py         # LangGraph Self-RAG
 │   ├── tool_registry.py          # 工具元数据单一来源
+│   ├── tool_policy.py            # MCP 工具可见性策略
+│   ├── evalops.py                # Agent eval 失败归因和报告生成
 │   ├── mcp_adapter.py            # MCP tools/list → function schema，tools/call → tool result + audit/cache
 │   ├── approvals.py              # Human-in-the-loop 审批存储
 │   ├── tracing.py                # Agent trace JSONL
@@ -547,7 +559,7 @@ E:/智能邮件agent/
 │   ├── generate_emails.py        # LLM 生成 5000 封测试邮件
 │   ├── generate_ragas_data.py    # 生成 RAGAS 测试集
 │   ├── run_ragas_eval.py         # 6 版本消融评测
-│   ├── run_agent_eval.py         # Agent 任务评测
+│   ├── run_agent_eval.py         # Agent 任务评测 + EvalOps report
 │   ├── summarize_agent_traces.py # Trace 汇总
 │   └── debug_*.py                # 诊断 probe
 ├── langchain_version/rag_chain.py # LangChain 平行实现

@@ -31,6 +31,7 @@ from core.embedder import index_chunks, clear_collection, get_collection_stats
 from core.memory import ConversationMemory
 from agents.coordinator import route
 from agents.approvals import ApprovalStore
+from agents.mcp_adapter import MCPAuditLogger
 import config.settings as cfg
 
 logging.basicConfig(
@@ -268,6 +269,17 @@ async def reject_agent_action(
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/agent/mcp-audit")
+async def list_mcp_audit_events(
+    tool: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+):
+    """List MCP tool-call audit events for operational review."""
+    events = MCPAuditLogger.load_events(tool=tool, status=status, limit=limit)
+    return {"count": len(events), "events": events}
 
 
 @app.post("/chat/graph", response_model=AgentResponse)

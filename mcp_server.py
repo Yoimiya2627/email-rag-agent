@@ -13,6 +13,7 @@ import time
 from typing import Any, Callable
 
 import config.settings as cfg
+from agents.tool_policy import ToolPolicy
 from agents.tool_registry import TOOL_REGISTRY, ToolSpec, tool_dispatch
 from agents.tools import email_stats, get_email
 
@@ -64,11 +65,12 @@ def _tool_decorator(server: Any, spec: ToolSpec) -> Callable:
         return server.tool()
 
 
-def register_tools(server: Any) -> list[str]:
+def register_tools(server: Any, policy: ToolPolicy | None = None) -> list[str]:
     """Register every local email-agent tool on a FastMCP-compatible server."""
     dispatch = tool_dispatch()
+    visible_specs = (policy or ToolPolicy.from_settings()).visible_specs(TOOL_REGISTRY)
     registered = []
-    for name, spec in TOOL_REGISTRY.items():
+    for name, spec in visible_specs.items():
         fn = dispatch[name]
         _tool_decorator(server, spec)(fn)
         registered.append(name)
@@ -137,7 +139,10 @@ def register_prompts(server: Any) -> list[str]:
     return [name for name, _, _ in prompts]
 
 
-def build_server(server_factory: Callable[..., Any] | None = None) -> Any:
+def build_server(
+    server_factory: Callable[..., Any] | None = None,
+    policy: ToolPolicy | None = None,
+) -> Any:
     """Build a FastMCP server and register the email tools.
 
     ``server_factory`` is injectable so tests can verify registration without
@@ -155,7 +160,7 @@ def build_server(server_factory: Callable[..., Any] | None = None) -> Any:
         port=cfg.MCP_PORT,
         **_auth_kwargs(),
     )
-    register_tools(server)
+    register_tools(server, policy=policy)
     register_resources(server)
     register_prompts(server)
     return server

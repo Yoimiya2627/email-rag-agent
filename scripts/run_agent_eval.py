@@ -26,6 +26,9 @@ from typing import Any, Dict, List
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from openai import OpenAI
+
+from agents.evalops import classify_eval_record, events_by_trace_id, write_eval_report
+from agents.tracing import load_events
 import config.settings as cfg
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -81,14 +84,21 @@ def evaluate_task(item: Dict[str, Any], client: OpenAI) -> Dict[str, Any]:
 
     task = item["task"]
     expected = item.get("expected_tools", [])
+    forbidden = item.get("forbidden_tools", [])
     resp = run_agent_loop(AgentRequest(query=task))
     actual = [s["tool"] for s in resp.metadata.get("steps", [])]
     verdict = judge_success(client, task, resp.answer)
-    return {
+    record = {
+        "id": item.get("id", ""),
         "task": task,
+        "task_type": item.get("task_type", "general"),
+        "risk_level": item.get("risk_level", "low"),
+        "success_criteria": item.get("success_criteria", ""),
         "expected_tools": expected,
+        "forbidden_tools": forbidden,
         "actual_tools": actual,
         "tool_accuracy": tool_accuracy(expected, actual),
+        "forbidden_tool_violation": bool(set(forbidden or []) & set(actual or [])),
         "n_steps": len(actual),
         "max_steps_reached": bool(resp.metadata.get("max_steps_reached", False)),
         "trace_id": resp.metadata.get("trace_id", ""),
@@ -96,6 +106,8 @@ def evaluate_task(item: Dict[str, Any], client: OpenAI) -> Dict[str, Any]:
         "reason": verdict["reason"],
         "answer": resp.answer,
     }
+    record["failure_category"] = classify_eval_record(record, [])
+    return record
 
 
 def aggregate(records: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -106,6 +118,10 @@ def aggregate(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "tool_accuracy": round(sum(1 for r in records if r["tool_accuracy"]) / n, 4),
         "avg_steps": round(sum(r["n_steps"] for r in records) / n, 2),
         "max_steps_reached_rate": round(sum(1 for r in records if r["max_steps_reached"]) / n, 4),
+        "forbidden_tool_violation_rate": round(
+            sum(1 for r in records if r.get("forbidden_tool_violation")) / n,
+            4,
+        ),
     }
 
 
@@ -113,6 +129,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Max tasks to run")
     parser.add_argument("--output", default=str(RESULTS_DIR / "agent_eval.json"))
+    parser.add_argument("--report-output", default=None, help="Optional Markdown EvalOps report path")
+    parser.add_argument("--trace-input", default=None, help="Optional trace JSONL path for failure attribution")
     args = parser.parse_args()
 
     with open(TESTSET_PATH, encoding="utf-8") as f:
@@ -130,16 +148,38 @@ def main():
         except Exception as exc:
             logger.warning(f"  task failed: {exc}")
             records.append({
-                "task": item["task"], "error": str(exc), "success": 0,
+                "id": item.get("id", ""),
+                "task": item["task"],
+                "task_type": item.get("task_type", "general"),
+                "risk_level": item.get("risk_level", "low"),
+                "success_criteria": item.get("success_criteria", ""),
+                "error": str(exc),
+                "success": 0,
                 "tool_accuracy": False, "n_steps": 0, "max_steps_reached": False,
                 "actual_tools": [], "expected_tools": item.get("expected_tools", []),
+                "forbidden_tools": item.get("forbidden_tools", []),
+                "forbidden_tool_violation": False,
+                "trace_id": "",
+                "failure_category": "exception",
             })
         time.sleep(0.3)
 
+    trace_events = load_events(args.trace_input) if args.trace_input else []
+    if trace_events:
+        traces = events_by_trace_id(trace_events)
+        for record in records:
+            record["failure_category"] = classify_eval_record(
+                record,
+                traces.get(record.get("trace_id", ""), []),
+            )
+
     summary = aggregate(records)
+    payload = {"summary": summary, "records": records}
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
-        json.dump({"summary": summary, "records": records}, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    if args.report_output:
+        write_eval_report(payload, args.report_output, trace_events)
 
     print("\n" + "=" * 60)
     print("Agent evaluation")
@@ -149,6 +189,7 @@ def main():
     print(f"  tool-call accuracy    : {summary['tool_accuracy']:.0%}")
     print(f"  avg steps / task      : {summary['avg_steps']}")
     print(f"  max-steps-reached rate: {summary['max_steps_reached_rate']:.0%}")
+    print(f"  forbidden-tool rate   : {summary['forbidden_tool_violation_rate']:.0%}")
     print("=" * 60)
     logger.info(f"saved → {args.output}")
 

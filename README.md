@@ -3,7 +3,7 @@
 > **Author**: 赵伟鑫 (Yoimiya2627) — Agent 开发工程师 / 大模型应用开发工程师
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
-一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、审计、人审审批和 JSONL trace。
+一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批和 EvalOps trace/report。
 
 这个项目的重点不是“调一个 LLM API”，而是把邮件 RAG 能力做成可编排、可评测、可回归、可审计的 Agent 工程系统。
 
@@ -29,12 +29,12 @@
 
 - **Function-calling Agent Loop**：`/chat/agent` 使用 DeepSeek 原生 tool calls，多轮执行 `plan -> tool_call -> observe -> re-plan`。
 - **MCP-ready Tool Backend**：工具定义集中在 `agents/tool_registry.py`，同源派生本地 function schema 和 FastMCP 注册。
-- **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache。
+- **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache；MCP server 支持 allowed-tools 和 read-only 工具可见性策略。
 - **Human-in-the-loop 安全链路**：新增高风险 `send_email` 工具，但它只创建 pending approval，不会直接发信；人类通过 API approve/reject。
-- **Agent Trace 平台化雏形**：agent run / tool call / approval_required / error 写入 JSONL，可用脚本汇总运行次数、工具错误和平均工具延迟。
+- **Agent EvalOps**：54 条 agent 任务集覆盖多步、异常、歧义、权限和高风险发信；eval record 关联 `trace_id`，可输出失败归因和 Markdown 报告。
 - **RAG 消融评测**：6 版 RAGAS-style 对比，量化 BM25、RRF、reranker、query rewrite 的 ROI。
 - **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断。
-- **107 个 pytest**：覆盖 RAG、pipeline、tools、tool registry、MCP adapter/server/production、approval、trace、agent loop、agent eval。
+- **118 个 pytest**：覆盖 RAG、pipeline、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、trace、EvalOps、agent loop、agent eval。
 
 ## Demo
 
@@ -53,6 +53,7 @@
 - 多轮记忆：按 session 隔离，默认保留 5 轮滑窗。
 - SSE 真流式：worker 线程 + `asyncio.Queue` 桥接同步 LLM SDK 与 FastAPI SSE。
 - Self-RAG：LangGraph 状态机，检索结果不相关时 rewrite query，最多重试 2 次。
+- Agent EvalOps：`data/agent_testset.json` 维护 54 条带类型/风险/期望工具/禁用工具/成功标准的任务，eval 可生成 Markdown 报告。
 
 ## 快速开始
 
@@ -104,6 +105,8 @@ make run
 | `MCP_AUTH_TOKEN` | 空 | 填写后 MCP client/server 启用 bearer token |
 | `ENABLE_MCP_AUDIT` | `true` | MCP 工具调用写审计 JSONL |
 | `MCP_AUDIT_LOG_PATH` | `./data/audit/mcp_audit.jsonl` | MCP 审计日志 |
+| `MCP_ALLOWED_TOOLS` | 空 | 逗号分隔的 MCP 可见工具白名单；空表示全部可见 |
+| `MCP_READ_ONLY_MODE` | `false` | `true` 时 MCP server 只暴露 low-risk 且不需要人审的只读工具 |
 | `APPROVAL_STORE_PATH` | `./data/approvals/pending_actions.json` | 人审审批存储 |
 | `ENABLE_AGENT_TRACE` | `false` | 是否记录 agent trace JSONL |
 | `AGENT_TRACE_LOG_PATH` | `./data/traces/agent_traces.jsonl` | trace 输出路径 |
@@ -128,6 +131,7 @@ FastAPI
    |-- /chat/graph   -> LangGraph Self-RAG -> retrieve/grade/rewrite/generate
    |-- /chat/agent   -> function-calling planner -> local/MCP tool backend
    |-- /agent/approvals -> human approve/reject high-risk actions
+   |-- /agent/mcp-audit -> query MCP tool-call audit logs
    |
 Core RAG
    |-- query rewrite
@@ -200,6 +204,8 @@ MCP 暴露能力：
 - Bearer token：`MCP_AUTH_TOKEN` 非空时 client 自动带 `Authorization: Bearer ...`，server 注入 `StaticBearerTokenVerifier`。
 - Schema cache：`MCPToolBackend` 缓存 `tools/list` 结果，避免每轮 planner 都重新发现工具。
 - Audit JSONL：MCP tool call 写入 `MCP_AUDIT_LOG_PATH`，记录 tool、status、latency、request_id。
+- Tool policy：`MCP_ALLOWED_TOOLS` 可按工具白名单收敛暴露面；`MCP_READ_ONLY_MODE=true` 时只暴露 low-risk 且不需要人审的工具。
+- Audit query：`GET /agent/mcp-audit?tool=email_stats&status=success&limit=20` 可按工具和状态查看审计事件。
 
 ## Human-in-the-loop
 
@@ -247,10 +253,10 @@ AGENT_TRACE_LOG_PATH=./data/traces/agent_traces.jsonl
 Agent eval：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_agent_eval.py --limit 8
+.\.venv\Scripts\python.exe scripts\run_agent_eval.py --limit 8 --report-output data/eval_results/agent_eval_report.md
 ```
 
-`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate，并把每条记录关联 `trace_id`。
+`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate、forbidden_tool_violation_rate，并把每条记录关联 `trace_id`。任务集现在是 54 条元数据化 case，每条包含 `id`、`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；报告会给出 `failure_category`，用于区分 missing_expected_tool、forbidden_tool、tool_error、approval_required、max_steps 等问题。
 
 ## 评测结果
 
@@ -286,13 +292,13 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前回归结果：`107 passed`。
+当前回归结果：`118 passed`。
 
 覆盖重点：
 
 - RAG：chunker、retriever、pipeline、memory、coordinator、eval。
-- Agent：tool registry、tools、agent loop、agent eval。
-- MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL。
+- Agent：tool registry、tools、agent loop、agent eval、EvalOps failure attribution/report。
+- MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL、tool policy、audit query API。
 - Safety：approval store、`send_email` pending approval、approve/reject。
 - Trace：JSONL recorder、agent trace metadata、trace summary。
 
@@ -312,6 +318,7 @@ RAG 消融脚本：
 | `GET` | `/agent/approvals` | 查看人审审批单 |
 | `POST` | `/agent/approvals/{id}/approve` | 批准高风险动作 |
 | `POST` | `/agent/approvals/{id}/reject` | 拒绝高风险动作 |
+| `GET` | `/agent/mcp-audit` | 查询 MCP 工具调用审计事件 |
 | `POST` | `/query` | 直接 RAG 查询 |
 
 ## 目录结构
@@ -323,6 +330,8 @@ mcp_server.py                  FastMCP server
 agents/
   agent_loop.py                Function-calling ReAct loop
   tool_registry.py             工具元数据单一事实源
+  tool_policy.py               MCP 工具可见性策略
+  evalops.py                   Agent eval 失败归因和报告生成
   tools.py                     6 个工具实现和 call_tool 护栏
   mcp_adapter.py               MCP backend/client/audit
   approvals.py                 Human-in-the-loop approval store
@@ -337,7 +346,7 @@ scripts/
   run_ragas_eval.py            RAGAS-style 消融评测
   run_agent_eval.py            Agent 任务评测
   summarize_agent_traces.py    Trace 汇总
-tests/                         107 个单测
+tests/                         118 个单测
 docs/                          架构、评测、复盘和面经
 ```
 
@@ -346,6 +355,6 @@ docs/                          架构、评测、复盘和面经
 - 合成邮件数据不能代表真实企业邮箱分布；下一步接脱敏真实数据并标注 supporting chunks。
 - `send_email` 当前是 simulated send；生产要接企业邮箱 API、权限系统、审计和撤销策略。
 - `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
-- MCP 已有 token verifier 和审计，但生产还需要更完整的 OAuth、租户隔离、密钥轮换和部署层 TLS。
-- Agent eval 目前是首批任务集；下一步扩到 50-100 条，覆盖异常、歧义、权限和多步边界。
+- MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
+- Agent eval 已扩到 54 条元数据化任务；下一步扩到 100+ 条并接入人工复核样本。
 - 检索侧下一步优先换 cross-encoder reranker，减少 LLM reranker 延迟和飘分。

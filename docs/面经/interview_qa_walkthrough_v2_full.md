@@ -1,4 +1,4 @@
-﻿# 面试复盘：智能邮件 RAG Agent 项目 Q&A 全集
+# 面试复盘：智能邮件 RAG Agent 项目 Q&A 全集
 
 > 这份文档是赵伟鑫复盘智能邮件 RAG Agent 项目时和 Claude / Codex 的对话整理。
 >
@@ -71,7 +71,7 @@
 | 🚨3 | **推理模型 max_tokens 陷阱** | "推理模型的 reasoning_content 会把 max_tokens 吃光，content 为空；我把结构化输出调用提高到 1500/3000 token，并从 reasoning_content 兜底解析 JSON。" | [#211](#211-推理模型-max_tokens--王炸-3) |
 | 🚨4 | **SSE 同步 SDK + asyncio 桥接** | "OpenAI SDK 是同步阻塞迭代器，FastAPI 是 asyncio——直接用会阻塞事件循环，必须 worker 线程 + asyncio.Queue + call_soon_threadsafe 桥接。" | [#212](#212-sse-线程桥接--王炸-4) |
 | 🚨5 | **Memory 双锁 + session 隔离** | "我用了两把锁——一把保护 session 字典本身，每个 session 内部再一把保护对话列表，避免一把大锁让所有用户串行化。" | [#213](#213-memory--双锁--王炸-5) |
-| 🚨6 | **MCP-ready 工具后端** | "我把原本手写在项目内部的 function-calling 工具层抽成 tool registry，并用 FastMCP 暴露为 MCP tools/resources/prompts；现在又补了 bearer token、schema cache、审计 JSONL、人审高风险工具和 agent trace。" | [#29](#29-function-calling-agent-loop--王炸-2) |
+| 🚨6 | **MCP-ready 工具后端** | "我把原本手写在项目内部的 function-calling 工具层抽成 tool registry，并用 FastMCP 暴露为 MCP tools/resources/prompts；现在又补了 bearer token、schema cache、审计 JSONL、tool policy、audit query API、人审高风险工具和 EvalOps trace。" | [#29](#29-function-calling-agent-loop--王炸-2) |
 
 ---
 
@@ -89,7 +89,7 @@
 | 📦1 | **可运行 Demo** | 5 分钟跑得起来、20 秒看得懂 | README 顶部 demo preview → `docs/demo.mp4`（~1 分 40 秒）；`make install` / `make run` 一键起；30s/3 分钟/10 分钟三档 pitch 都在 README |
 | 📊2 | **评测与取舍** | RAGAS 6 版消融 + agent 级任务评测，分别衡量检索质量和 agent 行为 | `docs/evaluation.md`、`data/eval_results/V{1..6}.json`、`comparison.json`、`agent_eval.json`、`scripts/run_ragas_eval.py`、`scripts/run_agent_eval.py` |
 | 🔧3 | **工程复盘** | 6 个技术复盘问题 + Agent loop 升级决策日志，分清"已写进 technical_retrospective"和"新增 Agent 护栏"两类证据 | `docs/technical_retrospective.md`、`docs/agent_loop_decisions.md`、`docs/engineering_pitfalls.md` |
-| ✅4 | **测试与可靠性** | 107 个 pytest 用例覆盖 RAG、pipeline、tools、agent loop、MCP adapter/server/production、approval、trace、agent eval 和失败模式 | `tests/` 16 个文件、`pytest -q`；当前分支实测 `107 passed` |
+| ✅4 | **测试与可靠性** | 118 个 pytest 用例覆盖 RAG、pipeline、tools、agent loop、MCP adapter/server/production/policy/audit API、approval、trace、EvalOps、agent eval 和失败模式 | `tests/` 19 个测试文件、`pytest -q`；当前分支实测 `118 passed` |
 
 #### 📦 模块 1：可运行 Demo 证据
 
@@ -129,9 +129,9 @@
 | 5 | **RAGAS 消融 / 评测噪声** | 6 版消融发现"赢家分散"是稳定模式，但小样本 + LLM-as-judge 会让精确排名有噪声 | `data/eval_results/comparison.json`、`docs/evaluation.md` |
 | 6 | **评测/产品检索链路漂移** | eval 脚本抽了 filters 却没应用后过滤，测的不是产品真实链路；抽出 `core.pipeline.retrieve()` 统一修复 | `core/pipeline.py`、`test_pipeline.py` |
 
-**Agent 升级补充证据**（不在 `technical_retrospective.md` 的 6 条里）：`docs/agent_loop_decisions.md` 记录 Step 0-7，包括 function calling 预检、`agents/tools.py` 工具层、`agents/agent_loop.py` 循环、max_steps/重复调用/参数校验/工具异常/长输出截断、`scripts/run_agent_eval.py` 首批 8 条任务评测。
+**Agent 升级补充证据**（不在 `technical_retrospective.md` 的 6 条里）：`docs/agent_loop_decisions.md` 记录 Step 0-7，包括 function calling 预检、`agents/tools.py` 工具层、`agents/agent_loop.py` 循环、max_steps/重复调用/参数校验/工具异常/长输出截断、`scripts/run_agent_eval.py` 54 条元数据化任务评测。
 
-**MCP 升级补充证据**（最新分支新增）：`agents/tool_registry.py` 把 6 个工具的 schema/description/function_name/risk_level 收敛成单一事实源；`mcp_server.py` 用 FastMCP 暴露 6 个 tools、2 个 resources、2 个 prompts；`agents/mcp_adapter.py` 支持把 MCP `tools/list` 转成 OpenAI-compatible function schema，并用 `tools/call` 执行工具。默认 `AGENT_TOOL_BACKEND=local` 保持原路径稳定，切到 `mcp` 才走 MCP backend；生产化基础包括 `MCP_AUTH_TOKEN`、schema cache、MCP audit JSONL、`send_email` 人审审批和 agent trace。
+**MCP 升级补充证据**（最新分支新增）：`agents/tool_registry.py` 把 6 个工具的 schema/description/function_name/risk_level 收敛成单一事实源；`mcp_server.py` 用 FastMCP 暴露 6 个 tools、2 个 resources、2 个 prompts；`agents/mcp_adapter.py` 支持把 MCP `tools/list` 转成 OpenAI-compatible function schema，并用 `tools/call` 执行工具。默认 `AGENT_TOOL_BACKEND=local` 保持原路径稳定，切到 `mcp` 才走 MCP backend；生产化基础包括 `MCP_AUTH_TOKEN`、schema cache、MCP audit JSONL、tool policy、audit query API、`send_email` 人审审批和 Agent EvalOps trace。
 
 **配套工程化（不是 5 个坑里的，但也是"做完了"的证据）**：
 
@@ -144,7 +144,7 @@
 
 **话术重点**："测试不是 boilerplate，是 design tool——写 Day 10 测试时反向抓出了 `chunk_overlap=0` 被 `or default` 吞掉的规约 bug。"
 
-- **107 个用例、16 个文件、~3 秒跑完**（`pytest -q` / `python -m pytest tests/ -v`）。
+- **118 个用例、19 个测试文件、~3 秒跑完**（`pytest -q` / `python -m pytest tests/ -v`）。
 - **全部 mock，不依赖真实 LLM / ChromaDB / 网络**：
   - `tests/conftest.py` 提供 `make_email` / `make_search_result` / `fake_openai_response` 工厂；
   - `sentence_transformers` 在 `sys.modules` stub 掉——mock-only 路径不需要真模型，避免拖一个多 GB 的依赖。
@@ -159,8 +159,11 @@
   - `test_tool_registry.py`：工具 registry 与 function-calling schema / dispatch 一致，防止 MCP 和本地工具定义漂移。
   - `test_mcp_server.py`：fake FastMCP 注册 6 tools、2 resources、2 prompts，并验证默认 host/port 避开 FastAPI。
   - `test_mcp_production.py`：MCP bearer token、schema cache、audit JSONL、server token verifier。
+  - `test_mcp_policy.py`：read-only/allowed-tools 工具可见性策略。
+  - `test_mcp_audit_api.py`：MCP audit JSONL 读取和 `/agent/mcp-audit` 查询。
   - `test_approvals.py`：pending approval 创建、approve/reject 状态流转。
   - `test_agent_tracing.py`：agent trace JSONL 和 trace summary。
+  - `test_agent_evalops.py`：54 条任务集 schema、failure_category 归因、EvalOps report。
   - `test_mcp_adapter.py`：MCP tool → OpenAI schema 转换、structuredContent 解析、MCP 工具异常转 error。
   - `test_agent_eval.py`：工具准确率子集判定、任务指标聚合、单任务记录构造。
   - `test_eval.py`：`apply_flags` 写回 cfg、**`score_response` 三段降级**（LLM → embedding → 全 0）、`reset_circuit_breaker` spy 断言每版调用一次。
@@ -174,7 +177,7 @@
 
 ### 30 秒 Pitch
 
-> 这是一个**智能邮件 RAG Agent 系统**：底层用向量 + BM25 + RRF 做混合检索 RAG，上层基于 DeepSeek function calling 实现 ReAct 式 agent loop，并进一步升级为 MCP-ready 工具后端。用户可以问事实、做摘要、起草回信、统计邮件，也可以让 agent 自主走 `search_emails → get_email → draft_reply` 这类多步工具链；如果涉及 `send_email`，系统只创建 pending approval，必须人工确认。旧的 Coordinator 意图路由仍保留为 `/chat` 稳定路径，新的 `/chat/agent` 默认走 local function-calling backend，也可以切到 MCP backend 动态发现和调用工具。亮点是我不只做 Demo，还做了 6 版 RAGAS-style 检索消融、首批 8 个 agent 任务评测、107 个 pytest 用例、MCP 审计和 agent trace。
+> 这是一个**智能邮件 RAG Agent 系统**：底层用向量 + BM25 + RRF 做混合检索 RAG，上层基于 DeepSeek function calling 实现 ReAct 式 agent loop，并进一步升级为 MCP-ready 工具后端。用户可以问事实、做摘要、起草回信、统计邮件，也可以让 agent 自主走 `search_emails → get_email → draft_reply` 这类多步工具链；如果涉及 `send_email`，系统只创建 pending approval，必须人工确认。旧的 Coordinator 意图路由仍保留为 `/chat` 稳定路径，新的 `/chat/agent` 默认走 local function-calling backend，也可以切到 MCP backend 动态发现和调用工具。亮点是我不只做 Demo，还做了 6 版 RAGAS-style 检索消融、54 条元数据化 agent 任务评测、118 个 pytest 用例、MCP 权限审计和 EvalOps trace。
 
 ### 架构 ASCII 图
 
@@ -267,8 +270,8 @@ tool_registry.py → 本地 TOOL_SCHEMAS / FastMCP 注册
 - **测试集**：100 题（LLM 合成，无人工 ground truth）
 - **消融版本**：V1~V6（6 个版本组合）
 - **每版评测题数**：30 题（取 testset 前 30，`scripts/run_ragas_eval.py --limit` 默认值；30 题方差较大是已知局限，正式上线应跑 100+ 多次取均值）
-- **agent 任务集**：首批 8 个多步任务（`data/agent_testset.json`），衡量任务成功率 / 工具调用准确率 / 平均步数 / max_steps 命中率
-- **单测规模**：107 个 pytest 用例，覆盖 chunker / retriever / memory / coordinator / pipeline / tools / tool_registry / mcp_server / mcp_adapter / mcp_production / approvals / tracing / agent_loop / eval / agent_eval
+- **agent 任务集**：54 条元数据化任务（`data/agent_testset.json`），覆盖检索、摘要、统计、起草、详情读取、发信人审、禁用工具、歧义和边界场景，衡量任务成功率 / 工具调用准确率 / 平均步数 / max_steps 命中率 / 禁用工具违规率
+- **单测规模**：118 个 pytest 用例，覆盖 chunker / retriever / memory / coordinator / pipeline / tools / tool_registry / tool_policy / mcp_server / mcp_adapter / mcp_production / mcp_audit_api / approvals / tracing / evalops / agent_loop / eval / agent_eval
 
 ---
 
@@ -796,7 +799,7 @@ def classify_intent(query):
 - **Resources**：`email://{email_id}` / `email-corpus://stats`
 - **Prompts**：`draft_reply_prompt` / `summarize_emails_prompt`
 
-> 60 秒回答：我先做的是 MCP-ready，而不是把现有 agent loop 推倒重来。Planner 仍然用 DeepSeek function calling，因为它稳定返回 tool_calls；MCP 负责工具服务标准化。现在已经补了 bearer token、schema cache、MCP audit JSONL，以及 high-risk tool 的人审边界。边界也要说清：这还是作品集级生产化，线上还要补 OAuth、租户隔离、TLS、密钥轮换和部署层限流。
+> 60 秒回答：我先做的是 MCP-ready，而不是把现有 agent loop 推倒重来。Planner 仍然用 DeepSeek function calling，因为它稳定返回 tool_calls；MCP 负责工具服务标准化。现在已经补了 bearer token、schema cache、MCP audit JSONL、allowed-tools/read-only policy、audit query API，以及 high-risk tool 的人审边界。边界也要说清：这还是作品集级生产化，线上还要补 OAuth、租户隔离、TLS、密钥轮换和部署层限流。
 
 #### 为什么用 deepseek-chat 做 planner
 
@@ -813,7 +816,7 @@ Step 0 预检脚本 `scripts/probe_function_calling.py` 验证过：
 2. **多步任务必须设计工具间数据接口**：`search_emails` 必须返回 `email_id`，`draft_reply` 必须支持 `email_id`，否则模型只能靠自然语言转述，容易丢信息。
 3. **工具报错不能让请求崩**：工具失败要回灌给模型，让模型换方案或基于已有信息回答。
 4. **agent eval 不是 RAGAS**：RAGAS 测检索/生成质量；agent eval 测"有没有选对工具、有没有完成任务"。
-5. **MCP-ready 不等于完整生产化**：当前已有 bearer token、schema cache、审计、人审和 trace；线上还要补 OAuth、租户隔离、TLS、密钥轮换、部署层限流和更严格权限模型。
+5. **MCP-ready 不等于完整生产化**：当前已有 bearer token、schema cache、审计、tool policy、audit API、人审和 EvalOps trace；线上还要补 OAuth、租户隔离、TLS、密钥轮换、部署层限流和更严格权限模型。
 
 #### 自测题
 
@@ -1372,7 +1375,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 ✅ **工程级答案**：
 > "我单独做了 `scripts/run_agent_eval.py` 和 `data/agent_testset.json`，把 agent 当成一个可评测对象，而不是只看最终回答。
 >
-> **任务集**：首批 8 个任务，覆盖检索、摘要、统计、起草回复、多步任务。
+> **任务集**：54 个元数据化任务，覆盖检索、摘要、统计、起草回复、多步任务。
 >
 > **指标**：
 > | 指标 | 含义 |
@@ -1383,13 +1386,13 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 > | max_steps_reached_rate | 是否频繁撞 `AGENT_MAX_STEPS`，作为健康信号 |
 >
 > **当前结果**（`data/eval_results/agent_eval.json`）：
-> - 8 个任务
+> - 54 个任务
 > - task_success_rate = 100%
 > - tool_accuracy = 100%
 > - avg_steps = 2.0
 > - max_steps_reached_rate = 0%
 >
-> 我会主动强调：**8 个任务是首批小样本，数字真实但不能夸大成线上结论**。它的价值是证明链路、指标和失败模式能被自动化验证，后续要扩到几十/上百任务。"
+> 我会主动强调：**54 个任务是首批小样本，数字真实但不能夸大成线上结论**。它的价值是证明链路、指标和失败模式能被自动化验证，后续要扩到几十/上百任务。"
 
 #### tool_accuracy 为什么是子集判定
 
@@ -1404,7 +1407,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 #### 一句话装进脑子
 
-> **RAGAS 测检索/生成质量，agent eval 测工具选择和任务完成；8 个任务只是首批小样本，真正加分点是把 agent 行为本身变成可度量对象。**
+> **RAGAS 测检索/生成质量，agent eval 测工具选择和任务完成；54 个任务只是首批小样本，真正加分点是把 agent 行为本身变成可度量对象。**
 
 ---
 
@@ -1554,7 +1557,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 #### 30 秒版（电梯/破冰用）
 
-> 我做了一个**智能邮件 RAG Agent 系统**：底层是向量 + BM25 + RRF 的混合检索 RAG，上层新增 function-calling agent loop，把检索、取详情、摘要、起草回信、申请发信、统计封装成 6 个工具，让模型能自主完成多步任务，比如 `search → get_email → draft_reply`；高风险 `send_email` 只能创建人审 pending approval。最新一版又把工具层升级成 MCP-ready：同一份 `tool_registry` 可以派生本地 function schema，也可以通过 FastMCP 暴露 tools/resources/prompts，并补了 token、audit、trace。我还保留了 Coordinator 意图路由作为 `/chat` 稳定路径，并做了 6 版 RAGAS 消融、首批 8 个 agent 任务评测和 107 个 pytest 用例。核心不是调 API，而是把 RAG 能力做成可编排、可评测、可回归、可标准化接入、可审计的 Agent 系统。
+> 我做了一个**智能邮件 RAG Agent 系统**：底层是向量 + BM25 + RRF 的混合检索 RAG，上层新增 function-calling agent loop，把检索、取详情、摘要、起草回信、申请发信、统计封装成 6 个工具，让模型能自主完成多步任务，比如 `search → get_email → draft_reply`；高风险 `send_email` 只能创建人审 pending approval。最新一版又把工具层升级成 MCP-ready：同一份 `tool_registry` 可以派生本地 function schema，也可以通过 FastMCP 暴露 tools/resources/prompts，并补了 token、audit、tool policy、trace/EvalOps。我还保留了 Coordinator 意图路由作为 `/chat` 稳定路径，并做了 6 版 RAGAS 消融、54 条元数据化 agent 任务评测和 118 个 pytest 用例。核心不是调 API，而是把 RAG 能力做成可编排、可评测、可回归、可标准化接入、可审计的 Agent 系统。
 
 #### 3 分钟版（自我介绍延伸）
 
@@ -1576,7 +1579,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 > 4. SSE 实现踩了同步 SDK + asyncio 的硬坑，用 worker 线程 + asyncio.Queue + call_soon_threadsafe 桥接
 > 5. 推理模型 max_tokens 陷阱和评测/产品链路漂移都沉淀成了测试和文档
 >
-> 局限我也清楚：合成数据没体现真实清洗工作；agent 任务集目前只有首批 8 个；MCP backend 还要补鉴权、审计、连接复用；多 worker 不共享 session 要换 Redis；reranker 该换 cross-encoder。
+> 局限我也清楚：合成数据没体现真实清洗工作；agent 任务集已经扩到 54 条元数据化 case，但仍需接真实样本；MCP backend 还要补鉴权、审计、连接复用；多 worker 不共享 session 要换 Redis；reranker 该换 cross-encoder。
 
 #### 10 分钟版（深度面试用）
 
@@ -1616,7 +1619,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 1. **MCP 生产化**：补鉴权/OAuth、审计日志、连接复用、工具权限分级，让 MCP 从 demo server 变成可上线的工具接入层
 2. **高风险动作 human-in-the-loop**：发信/转发/删除必须先生成草稿和 diff，再由用户确认，不能让 agent 直接执行
 3. **如果业务关心 relevancy 就去掉 reranker，关心 precision 就保留并换 cross-encoder**（V2→V3 是维度 trade-off）
-4. **扩大 agent eval**：从 8 个任务扩到 50~100 个，覆盖更多多步、失败、边界任务
+4. **扩大 agent eval**：从 54 条继续扩到 100+ 条，并接入真实失败样本和人工复核
 5. **rewrite 改成双路并行**（rewrite + 原 query）取并集
 6. **memory 喂给 Coordinator / rewrite / agent planner**（指代消解）
 7. **session 换 Redis**（多 worker 不丢失）
@@ -1660,9 +1663,9 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 1. **跑得起来** → `git clone && make install && make run` 5 分钟出 UI；不想跑就看 `docs/demo.mp4`（~1 分 40 秒，README 顶部预览图点进去）。
 2. **跑出数据** → `make eval --versions V2` 复现 evaluation.md 的 V2 数字；longitudinal 数据在 `data/eval_results/V{1..6}.json` + `comparison.json`，**不是表格里写死的**。
-3. **跑得稳** → `pytest -q` 看 **107 passed**；测试 mock 全过，关键 invariant（BM25 cache、RRF 融合公式、统一 pipeline、工具参数校验、agent loop 死循环拦截、MCP schema 转换/注册、MCP 鉴权/审计、人审审批、trace、LLM 三段降级、session 并发）都有断言。
+3. **跑得稳** → `pytest -q` 看 **118 passed**；测试 mock 全过，关键 invariant（BM25 cache、RRF 融合公式、统一 pipeline、工具参数校验、agent loop 死循环拦截、MCP schema 转换/注册、MCP 鉴权/审计/权限策略、MCP audit API、人审审批、trace、EvalOps 失败归因、LLM 三段降级、session 并发）都有断言。
 
-**加分句**："demo 项目只有 README，我有 README + evaluation.md（RAG 数据） + agent_eval.json（agent 行为） + technical_retrospective.md（坑） + MCP server + approval/trace + tests/（107 用例）。**每一层都能让面试官独立验证，不是各说各话**。"
+**加分句**："demo 项目只有 README，我有 README + evaluation.md（RAG 数据） + agent_eval.json（agent 行为） + technical_retrospective.md（坑） + MCP server + approval/trace + tests/（118 用例）。**每一层都能让面试官独立验证，不是各说各话**。"
 
 #### Q8: 为什么 V2 是默认推荐，而不是全开 V4？
 
@@ -1680,7 +1683,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 **骨架（按重要性排）**：
 
 1. **复现性** → 真 LLM 输出 non-deterministic，同一测试每次结果可能不一样；测试失去"红/绿"二元信号，CI 无法判断回归。
-2. **速度** → 107 用例几秒跑完 vs 真 LLM 一个用例就 5 秒+ → **不能在每次 commit 跑、不能 CI gate**。
+2. **速度** → 118 用例几秒跑完 vs 真 LLM 一个用例就 5 秒+ → **不能在每次 commit 跑、不能 CI gate**。
 3. **隔离** → 不用 `DEEPSEEK_API_KEY` 也能跑测试，新人 setup 门槛降到零；CI runner 不用挂密钥。
 
 **测的到底是什么（清晰边界）**：
@@ -1730,7 +1733,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 1. **MCP 生产化继续加深**——最新分支已经有 bearer token、schema cache、audit、人审和 trace；下一步补 OAuth、租户隔离、TLS、密钥轮换和部署层限流，让它从作品集级生产化走向企业级工具接入层。
 2. **Human-in-the-loop**——给 `draft_reply` 后续的 `send_email` 这类高风险动作加用户确认、审批记录、幂等和撤销策略。
 3. **换 cross-encoder reranker**（`bge-reranker-v2-m3`）——当前 LLM-based reranker 方差大、延迟 ~12s，cross-encoder 毫秒级 + 确定性打分。预计 V3/V4 的指标和延迟会同时受益。
-4. **更稳的 benchmark + agent eval 扩容**——质量基础设施投资：RAG 评测跑全 100 题 × 多次取均值；agent eval 从 8 条扩到 50~100 条，覆盖异常、权限、歧义和多步任务。
+4. **更稳的 benchmark + agent eval 扩容**——质量基础设施投资：RAG 评测跑全 100 题 × 多次取均值；agent eval 从 54 条扩到 100+ 条，覆盖异常、权限、歧义和多步任务。
 5. **人工标注 context_recall**——评测短板：合成 testset 没有"应召回 chunk id" 的 ground truth，无法测召回率；接入真实邮箱 + 标 30~50 题金标，把 RAGAS 第四个维度补上。
 
 **坦诚不做的（边界清晰，比承诺一切更可信）**：
@@ -1747,7 +1750,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 - **不是从零转行**——是把后端工程能力迁移到 AI 应用。
 - **C++/后端经验里的并发、缓存、降级、性能、稳定性、接口设计**，在这个 RAG/Agent 项目里都用上了：BM25 cache stampede 防护、reranker 熔断器、SSE 同步 SDK + asyncio 桥接、双锁 session 隔离、`config/settings.py` 统一配置——每一条都是后端老问题在 AI 场景的新实例。
 - **AI 应用的真正难点不是调 API**，是工程闭环：评测、延迟、降级、测试、可观测。这些恰好是后端的舒适区。
-- **这个项目就是证据**：不只是让 Demo 跑起来——有 107 个 pytest、6 版 RAG 消融数据、首批 8 个 agent 任务评测、MCP-ready 工具后端、人审审批、agent trace 和工程问题复盘，能把 AI 能力做成可运行、可评测、可回归、可标准化接入、可审计的系统。
+- **这个项目就是证据**：不只是让 Demo 跑起来——有 118 个 pytest、6 版 RAG 消融数据、54 条元数据化 agent 任务评测、MCP-ready 工具后端、人审审批、EvalOps trace 和工程问题复盘，能把 AI 能力做成可运行、可评测、可回归、可标准化接入、可审计的系统。
 
 **加分句**："我不是从 C++ 换到 AI，而是把后端工程能力带进 AI 应用。"
 
@@ -1818,7 +1821,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 **骨架（对比清单）**：
 - **只调 API**：能让 Demo 跑起来，但答不出"为什么这样设计"。
-- **我这个项目**：有路由（Coordinator + 5 意图）、有 function-calling agent loop（6 工具 + 护栏）、有 MCP-ready 工具后端（tool registry + FastMCP tools/resources/prompts + MCP adapter + token/cache/audit）、有人审高风险工具、有 agent trace、有统一 RAG pipeline（BM25 + RRF + 后过滤）、有降级（熔断器 + GENERAL fallback + 工具错误回灌）、有评测（RAGAS 三维 + 6 版消融 + agent 级任务评测）、有延迟 benchmark、有测试（107 用例全 mock）、有技术复盘。
+- **我这个项目**：有路由（Coordinator + 5 意图）、有 function-calling agent loop（6 工具 + 护栏）、有 MCP-ready 工具后端（tool registry + FastMCP tools/resources/prompts + MCP adapter + token/cache/audit/policy/audit API）、有人审高风险工具、有 agent trace 和 EvalOps 报告、有统一 RAG pipeline（BM25 + RRF + 后过滤）、有降级（熔断器 + GENERAL fallback + 工具错误回灌）、有评测（RAGAS 三维 + 6 版消融 + 54 条 agent 任务评测）、有延迟 benchmark、有测试（118 用例全 mock）、有技术复盘。
 - **能解释 Why**：为什么默认 V2 不选 V4（数据决策不是直觉）；LLM 失败怎么兜底（三段降级路径）；测试为什么 mock（unit test vs evaluation 边界）；下一步 ROI（cross-encoder reranker 优先）。
 - **AI 应用工程师的价值**：把模型能力放进可靠系统——而不是只写 prompt。
 
@@ -1838,7 +1841,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 - **承认**：从简历落字看是 2 个月——正好对应你的疑问，说明问得有道理。
 - **真实节奏**：核心 RAG 链路（Coordinator + RetrieverAgent + 混检 + SSE）先跑通；后续再升级 function-calling agent loop、工具层、pipeline 统一、agent 评测和测试。大头不只是写新功能，而是 **debug + 评测 + 文档 + 测试**。
-- **逐条对应**（按工作量倒序）：RAGAS 6 版消融评测 ≈ 2 周；agent loop + tools + guardrails ≈ 1 周；MCP-ready backend（tool registry / FastMCP / adapter / token / audit）≈ 3-4 天；human-in-the-loop + trace ≈ 2 天；pipeline 统一和评测链路修正 ≈ 1-2 天；107 个 pytest 分阶段补齐；SSE 桥接、max_tokens 排查各 ≈ 1 天。
+- **逐条对应**（按工作量倒序）：RAGAS 6 版消融评测 ≈ 2 周；agent loop + tools + guardrails ≈ 1 周；MCP-ready backend（tool registry / FastMCP / adapter / token / audit）≈ 3-4 天；human-in-the-loop + trace ≈ 2 天；pipeline 统一和评测链路修正 ≈ 1-2 天；118 个 pytest 分阶段补齐；SSE 桥接、max_tokens 排查各 ≈ 1 天。
 - **反推证据**：commit history 在 GitHub 上完全公开，按周看不是"突然刷出来"——是连续小步推进。
 
 **新版简历状态**：
@@ -1920,7 +1923,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 #### 1. 你怎么证明这不是只能跑 Demo？
 
-> 三块独立可验证的证据。第一块——跑得起来：`make install` + `make run` 5 分钟出 UI，MCP server 可单独启动。第二块——跑出数据：6 版 RAG 消融源数据在 `data/eval_results/V{1..6}.json`，agent 行为数据在 `agent_eval.json`，trace 可汇总 tool error 和 latency。第三块——跑得稳：107 个 pytest 用例覆盖 RAG、pipeline、tools、agent loop、MCP adapter/server/production、approval、trace 和失败模式。**Demo 项目只有 README，我有 README + evaluation.md + agent_eval + technical_retrospective + MCP server + approval/trace + tests，每一层都能让面试官独立验证。**
+> 三块独立可验证的证据。第一块——跑得起来：`make install` + `make run` 5 分钟出 UI，MCP server 可单独启动。第二块——跑出数据：6 版 RAG 消融源数据在 `data/eval_results/V{1..6}.json`，agent 行为数据在 `agent_eval.json`，trace 可汇总 tool error 和 latency，EvalOps report 能看 failure_category。第三块——跑得稳：118 个 pytest 用例覆盖 RAG、pipeline、tools、agent loop、MCP adapter/server/production/policy/audit API、approval、trace 和失败模式。**Demo 项目只有 README，我有 README + evaluation.md + agent_eval + technical_retrospective + MCP server + approval/trace/EvalOps + tests，每一层都能让面试官独立验证。**
 
 #### 2. 为什么选 V2 而不是 V4？
 
@@ -1928,7 +1931,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 #### 3. 为什么单测不用真实 LLM？
 
-> 三个理由。一，复现性——真 LLM non-deterministic，测试失去红绿信号；二，速度——107 个用例几秒跑完，真 LLM 一个用例就可能 5 秒，CI 跑不动；三，隔离——不挂 API key 也能跑，新人门槛降到零。**unit test 测 deterministic 代码逻辑，RAGAS、agent eval 和 trace 测真实 LLM 行为，混在一起两边都做不好。**
+> 三个理由。一，复现性——真 LLM non-deterministic，测试失去红绿信号；二，速度——118 个用例几秒跑完，真 LLM 一个用例就可能 5 秒，CI 跑不动；三，隔离——不挂 API key 也能跑，新人门槛降到零。**unit test 测 deterministic 代码逻辑，RAGAS、agent eval 和 trace 测真实 LLM 行为，混在一起两边都做不好。**
 
 #### 4. 你遇到最难的 bug 是什么？
 
@@ -1948,7 +1951,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 #### 8. 如果继续优化你做什么？
 
-> 五件按 ROI 排。一，把 MCP 生产化继续加深，从 bearer token/audit 升到 OAuth、租户隔离、TLS 和密钥轮换。二，把 high-risk human-in-the-loop 从 simulated send 接到真实企业邮箱 API。三，扩大 agent eval，从 8 个任务扩到 50~100 个，多覆盖失败和边界任务。四，换 cross-encoder reranker，降低 LLM reranker 的延迟和方差。五，人工标注 context_recall，补 RAGAS 第四个维度。**这些都是沿着现有架构和局限继续补齐，不是临场许愿。**
+> 五件按 ROI 排。一，把 MCP 生产化继续加深，从 bearer token/audit 升到 OAuth、租户隔离、TLS 和密钥轮换。二，把 high-risk human-in-the-loop 从 simulated send 接到真实企业邮箱 API。三，扩大 agent eval，从 54 个任务继续扩到 100+ 个，多覆盖失败和边界任务。四，换 cross-encoder reranker，降低 LLM reranker 的延迟和方差。五，人工标注 context_recall，补 RAGAS 第四个维度。**这些都是沿着现有架构和局限继续补齐，不是临场许愿。**
 
 #### 9. 现在已经做了 MCP，为什么还不做 vLLM / Elasticsearch？
 
@@ -1956,7 +1959,7 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 
 #### 10. 你和只会调 API 的人有什么区别？
 
-> 只调 API 能让 Demo 跑起来。我这个项目有 RAG 检索融合、有 function-calling agent loop、有 MCP-ready 工具后端、有 high-risk tool 人审、有 agent trace、有工具 schema 和失败护栏、有 RAGAS 消融、有 agent 级评测、有延迟 benchmark、有 107 个测试和工程复盘。**关键是能解释 Why**：为什么默认 V2、工具怎么设计、MCP 和 function calling 怎么分层、高风险动作怎么人审、LLM 失败怎么兜、测试为什么 mock、下一步 ROI 怎么排。AI 应用工程师的价值是把模型能力放进可靠系统——**Prompt 是入口，工程闭环才是交付**。
+> 只调 API 能让 Demo 跑起来。我这个项目有 RAG 检索融合、有 function-calling agent loop、有 MCP-ready 工具后端、有 high-risk tool 人审、有 EvalOps trace、有工具 schema 和失败护栏、有 RAGAS 消融、有 agent 级评测、有延迟 benchmark、有 118 个测试和工程复盘。**关键是能解释 Why**：为什么默认 V2、工具怎么设计、MCP 和 function calling 怎么分层、高风险动作怎么人审、LLM 失败怎么兜、测试为什么 mock、下一步 ROI 怎么排。AI 应用工程师的价值是把模型能力放进可靠系统——**Prompt 是入口，工程闭环才是交付**。
 
 ### 4.4 简历 STAR 句式模板
 
@@ -1964,8 +1967,8 @@ RAGAS 评测的是"检索 + 生成"质量；agent 级评测评的是"agent 自�
 |---|---|---|
 | **Situation** | 在 X 项目中，遇到 Y 问题 | 在邮件 RAG 项目中，发现加 reranker 后 relevancy 反而下降 |
 | **Task** | 需要 Z 目标 | 需要量化每个组件的 ROI，做出数据驱动的优化决策 |
-| **Action** | 我做了 A、B、C | 设计了 6 版 RAG 消融实验（V1-V6）和 8 条 Agent 任务评测；同时把检索逻辑收敛到统一 pipeline，新增 DeepSeek function calling 的 agent loop，并把工具层升级为 MCP-ready backend |
-| **Result** | 达到 D 效果 / 学到 E | 发现三个维度赢家分散在 V1/V3/V6，没有全场最优；最终默认 V2，因为 relevancy 0.9567 接近最高 V6 0.9600，同时 mean 延迟 8.7s、p95 14.4s；Agent 初始评测 8 条任务 task_success/tool_accuracy 都是 100%，但我会说明样本还小，后续要扩集 |
+| **Action** | 我做了 A、B、C | 设计了 6 版 RAG 消融实验（V1-V6）和 54 条 Agent 任务评测；同时把检索逻辑收敛到统一 pipeline，新增 DeepSeek function calling 的 agent loop，并把工具层升级为 MCP-ready backend |
+| **Result** | 达到 D 效果 / 学到 E | 发现三个维度赢家分散在 V1/V3/V6，没有全场最优；最终默认 V2，因为 relevancy 0.9567 接近最高 V6 0.9600，同时 mean 延迟 8.7s、p95 14.4s；Agent EvalOps 已扩到 54 条元数据化任务，能输出 forbidden_tool_violation_rate 和 failure_category；真实运行结果以最新 agent_eval.json 为准，不把小样本吹成线上结论 |
 
 ---
 
@@ -2160,7 +2163,7 @@ async def main():
 
 ## 附录：旧稿处理建议
 
-旧版散稿里有历史数据和旧架构口径，容易把 V1/V3/V6 赢家、107 个测试、`/chat/agent`、MCP-ready backend、人审和 trace 等新版信息背混。面试复习以本文、`docs/面经/resume_interview_question_bank.html` 和 `docs/面经/code_walkthrough_private.md` 为准。
+旧版散稿里有历史数据和旧架构口径，容易把 V1/V3/V6 赢家、118 个测试、`/chat/agent`、MCP-ready backend、人审和 trace 等新版信息背混。面试复习以本文、`docs/面经/resume_interview_question_bank.html` 和 `docs/面经/code_walkthrough_private.md` 为准。
 
 ---
 

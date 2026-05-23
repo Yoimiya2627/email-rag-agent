@@ -79,6 +79,12 @@ MCP_AUDIT_LOG_PATH = os.getenv(
     "MCP_AUDIT_LOG_PATH",
     str(BASE_DIR / "data" / "audit" / "mcp_audit.jsonl"),
 )
+MCP_ALLOWED_TOOLS = [
+    item.strip()
+    for item in os.getenv("MCP_ALLOWED_TOOLS", "").split(",")
+    if item.strip()
+]
+MCP_READ_ONLY_MODE = os.getenv("MCP_READ_ONLY_MODE", "false").lower() == "true"
 
 # Human-in-the-loop approval store for high-risk tools.
 APPROVAL_STORE_PATH = os.getenv(

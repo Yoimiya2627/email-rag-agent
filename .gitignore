@@ -35,6 +35,7 @@ Thumbs.db
 data/audit/
 data/approvals/
 data/traces/
+.pytest_tmp*/
 
 # Claude Code local settings
 .claude/

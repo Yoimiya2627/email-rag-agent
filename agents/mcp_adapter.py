@@ -179,6 +179,38 @@ class MCPAuditLogger:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
 
+    @staticmethod
+    def load_events(
+        path: str | Path | None = None,
+        tool: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Load MCP audit events, optionally filtering by tool and status."""
+        audit_path = Path(path or cfg.MCP_AUDIT_LOG_PATH)
+        if not audit_path.exists():
+            return []
+
+        rows: list[dict[str, Any]] = []
+        with audit_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if tool and row.get("tool") != tool:
+                    continue
+                if status and row.get("status") != status:
+                    continue
+                rows.append(row)
+
+        if limit and limit > 0:
+            return rows[-limit:]
+        return rows
+
 
 class StreamableHttpMCPClient:
     """Small synchronous facade over the MCP SDK streamable HTTP client."""
