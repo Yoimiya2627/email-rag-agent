@@ -1,5 +1,7 @@
 """Tests for human-in-the-loop approval workflows."""
 
+import pytest
+
 from agents.approvals import ApprovalStore
 
 
@@ -22,6 +24,45 @@ def test_approval_store_creates_and_approves_pending_action(tmp_path):
     assert approved["status"] == "approved"
     assert approved["reviewer"] == "human"
     assert approved["result"]["mode"] == "simulated_send"
+
+
+def test_approval_store_persists_executor_result(tmp_path):
+    store = ApprovalStore(tmp_path / "approvals.json")
+    item = store.create(
+        action_type="send_email",
+        payload={"to": ["alice@example.com"], "subject": "Budget", "body": "确认收到"},
+    )
+
+    approved = store.approve(
+        item["approval_id"],
+        reviewer="human",
+        note="ok",
+        executor=lambda approval: {
+            "mode": "gmail_draft",
+            "provider": "gmail",
+            "draft_id": "draft-123",
+            "sent": False,
+            "subject": approval["payload"]["subject"],
+        },
+    )
+
+    assert approved["status"] == "approved"
+    assert approved["result"]["mode"] == "gmail_draft"
+    assert approved["result"]["draft_id"] == "draft-123"
+    assert approved["result"]["subject"] == "Budget"
+
+
+def test_approval_executor_failure_keeps_item_pending(tmp_path):
+    store = ApprovalStore(tmp_path / "approvals.json")
+    item = store.create(action_type="send_email", payload={"to": ["alice@example.com"]})
+
+    def fail(_approval):
+        raise RuntimeError("gmail unavailable")
+
+    with pytest.raises(RuntimeError, match="gmail unavailable"):
+        store.approve(item["approval_id"], executor=fail)
+
+    assert store.get(item["approval_id"])["status"] == "pending"
 
 
 def test_send_email_tool_creates_pending_approval(monkeypatch, tmp_path):

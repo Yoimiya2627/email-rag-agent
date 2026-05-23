@@ -97,7 +97,7 @@ def test_agent_testset_has_evalops_metadata():
         "success_criteria",
     }
 
-    assert len(cases) >= 50
+    assert len(cases) >= 100
     assert len({case["id"] for case in cases}) == len(cases)
     for case in cases:
         assert required.issubset(case)

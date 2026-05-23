@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import config.settings as cfg
 
@@ -77,13 +77,15 @@ class ApprovalStore:
         approval_id: str,
         reviewer: str = "human",
         note: str = "",
+        executor: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return self._review(
             approval_id=approval_id,
             status="approved",
             reviewer=reviewer,
             note=note,
-            result={"mode": "simulated_send", "sent": True},
+            result={"mode": "simulated_send", "provider": "simulated", "sent": True},
+            executor=executor,
         )
 
     def reject(
@@ -107,6 +109,7 @@ class ApprovalStore:
         reviewer: str,
         note: str,
         result: dict[str, Any],
+        executor: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             items = self._load()
@@ -114,11 +117,12 @@ class ApprovalStore:
                 if item.get("approval_id") == approval_id:
                     if item.get("status") != "pending":
                         raise ValueError(f"approval {approval_id!r} is already {item.get('status')}")
+                    resolved_result = executor(dict(item)) if executor else result
                     item.update({
                         "status": status,
                         "reviewer": reviewer,
                         "review_note": note,
-                        "result": result,
+                        "result": resolved_result,
                         "updated_at": _utc_now(),
                     })
                     self._save(items)

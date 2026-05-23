@@ -92,6 +92,19 @@ APPROVAL_STORE_PATH = os.getenv(
     str(BASE_DIR / "data" / "approvals" / "pending_actions.json"),
 )
 
+# Approved mail execution. The default remains simulated; gmail creates a real
+# Gmail draft after human approval and never sends by default.
+MAIL_PROVIDER = os.getenv("MAIL_PROVIDER", "simulated").lower()
+GMAIL_CREDENTIALS_PATH = os.getenv("GMAIL_CREDENTIALS_PATH", str(BASE_DIR / "credentials" / "gmail_credentials.json"))
+GMAIL_TOKEN_PATH = os.getenv("GMAIL_TOKEN_PATH", str(BASE_DIR / "credentials" / "gmail_token.json"))
+GMAIL_SCOPES = [
+    item.strip()
+    for item in os.getenv("GMAIL_SCOPES", "https://www.googleapis.com/auth/gmail.compose").split(",")
+    if item.strip()
+]
+GMAIL_USER_ID = os.getenv("GMAIL_USER_ID", "me")
+ENABLE_REAL_EMAIL_SEND = os.getenv("ENABLE_REAL_EMAIL_SEND", "false").lower() == "true"
+
 # Agent trace events. Disabled by default to keep local unit tests and demos
 # quiet; enable when running evals or production-like debugging.
 ENABLE_AGENT_TRACE = os.getenv("ENABLE_AGENT_TRACE", "false").lower() == "true"

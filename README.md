@@ -3,7 +3,7 @@
 > **Author**: 赵伟鑫 (Yoimiya2627) — Agent 开发工程师 / 大模型应用开发工程师
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
-一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批和 EvalOps trace/report。
+一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批、Gmail draft-only provider 和 EvalOps trace/report/gate。
 
 这个项目的重点不是“调一个 LLM API”，而是把邮件 RAG 能力做成可编排、可评测、可回归、可审计的 Agent 工程系统。
 
@@ -30,11 +30,11 @@
 - **Function-calling Agent Loop**：`/chat/agent` 使用 DeepSeek 原生 tool calls，多轮执行 `plan -> tool_call -> observe -> re-plan`。
 - **MCP-ready Tool Backend**：工具定义集中在 `agents/tool_registry.py`，同源派生本地 function schema 和 FastMCP 注册。
 - **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache；MCP server 支持 allowed-tools 和 read-only 工具可见性策略。
-- **Human-in-the-loop 安全链路**：新增高风险 `send_email` 工具，但它只创建 pending approval，不会直接发信；人类通过 API approve/reject。
-- **Agent EvalOps**：54 条 agent 任务集覆盖多步、异常、歧义、权限和高风险发信；eval record 关联 `trace_id`，可输出失败归因和 Markdown 报告。
+- **Human-in-the-loop 安全链路**：高风险 `send_email` 只创建 pending approval；审批通过后默认 simulated，配置 `MAIL_PROVIDER=gmail` 时只创建 Gmail draft，不直接发送。
+- **Agent EvalOps**：100 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
 - **RAG 消融评测**：6 版 RAGAS-style 对比，量化 BM25、RRF、reranker、query rewrite 的 ROI。
 - **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断。
-- **118 个 pytest**：覆盖 RAG、pipeline、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、trace、EvalOps、agent loop、agent eval。
+- **128 个 pytest**：覆盖 RAG、pipeline、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
 
 ## Demo
 
@@ -46,14 +46,14 @@
 
 - 邮件问答：从 5000 封邮件中检索并回答事实问题。
 - 多步 Agent：例如“找出报销邮件并帮我起草回复”，agent 会自主 `search_emails -> get_email -> draft_reply`。
-- 人审发信：`send_email` 创建审批单，必须人类确认后才进入 simulated send。
+- 人审发信：`send_email` 创建审批单，必须人类确认后才执行；默认 simulated，Gmail 模式只创建 draft。
 - 批量摘要：按主题检索多封邮件并生成结构化摘要。
 - 回信草稿：针对检索到的邮件或指定 `email_id` 起草回复。
 - 统计分析：发件人 Top、标签分布、每日邮件量。
 - 多轮记忆：按 session 隔离，默认保留 5 轮滑窗。
 - SSE 真流式：worker 线程 + `asyncio.Queue` 桥接同步 LLM SDK 与 FastAPI SSE。
 - Self-RAG：LangGraph 状态机，检索结果不相关时 rewrite query，最多重试 2 次。
-- Agent EvalOps：`data/agent_testset.json` 维护 54 条带类型/风险/期望工具/禁用工具/成功标准的任务，eval 可生成 Markdown 报告。
+- Agent EvalOps：`data/agent_testset.json` 维护 100 条带类型/风险/期望工具/禁用工具/成功标准的任务，eval 可生成 Markdown 报告并通过 gate 脚本做阈值检查。
 
 ## 快速开始
 
@@ -108,6 +108,12 @@ make run
 | `MCP_ALLOWED_TOOLS` | 空 | 逗号分隔的 MCP 可见工具白名单；空表示全部可见 |
 | `MCP_READ_ONLY_MODE` | `false` | `true` 时 MCP server 只暴露 low-risk 且不需要人审的只读工具 |
 | `APPROVAL_STORE_PATH` | `./data/approvals/pending_actions.json` | 人审审批存储 |
+| `MAIL_PROVIDER` | `simulated` | 审批通过后的邮件执行 provider；`simulated` 或 `gmail` |
+| `GMAIL_CREDENTIALS_PATH` | `./credentials/gmail_credentials.json` | Gmail OAuth client secret 文件 |
+| `GMAIL_TOKEN_PATH` | `./credentials/gmail_token.json` | Gmail OAuth token 缓存 |
+| `GMAIL_SCOPES` | `https://www.googleapis.com/auth/gmail.compose` | Gmail draft-only scope |
+| `GMAIL_USER_ID` | `me` | Gmail API user id |
+| `ENABLE_REAL_EMAIL_SEND` | `false` | 保留开关；当前实现不默认真实发送 |
 | `ENABLE_AGENT_TRACE` | `false` | 是否记录 agent trace JSONL |
 | `AGENT_TRACE_LOG_PATH` | `./data/traces/agent_traces.jsonl` | trace 输出路径 |
 
@@ -164,7 +170,7 @@ agents/agent_loop.py
 | `get_email` | low | 否 | 按 `email_id` 获取完整邮件 |
 | `summarize_emails` | low | 否 | 检索并总结相关邮件 |
 | `draft_reply` | medium | 否 | 起草回信，不发送 |
-| `send_email` | high | 是 | 只创建 pending approval，不直接发信 |
+| `send_email` | high | 是 | 只创建 pending approval；审批通过后 simulated 或 Gmail draft-only |
 | `email_stats` | low | 否 | 邮件统计聚合 |
 
 `call_tool()` 会丢弃模型幻觉参数、检查必填参数、捕获工具异常并返回 `{"error": ...}`，让错误以 tool result 形式回灌给模型，而不是把 HTTP 请求打成 500。
@@ -224,10 +230,21 @@ MCP 暴露能力：
 | Method | Path | 说明 |
 |---|---|---|
 | `GET` | `/agent/approvals?status=pending` | 查看审批单 |
-| `POST` | `/agent/approvals/{approval_id}/approve` | 人工批准，当前为 simulated send |
+| `POST` | `/agent/approvals/{approval_id}/approve` | 人工批准；默认 simulated，`MAIL_PROVIDER=gmail` 时创建 Gmail draft |
 | `POST` | `/agent/approvals/{approval_id}/reject` | 人工拒绝 |
 
-当前实现是本地 JSON 文件存储，面试口径是“接口和边界已经打通，生产环境可把 `ApprovalStore` 换成 Redis/DB，并接企业邮箱 API”。
+当前实现是本地 JSON 文件存储。`ApprovalStore.approve()` 支持 provider executor：默认返回 simulated result；`MAIL_PROVIDER=gmail` 时通过 Gmail API `users.drafts.create` 创建草稿，返回 `draft_id/message_id`，并保持 `sent=false`。真实发送仍不默认开放。
+
+Gmail draft-only 配置示例：
+
+```env
+MAIL_PROVIDER=gmail
+GMAIL_CREDENTIALS_PATH=./credentials/gmail_credentials.json
+GMAIL_TOKEN_PATH=./credentials/gmail_token.json
+GMAIL_SCOPES=https://www.googleapis.com/auth/gmail.compose
+GMAIL_USER_ID=me
+ENABLE_REAL_EMAIL_SEND=false
+```
 
 ## Trace 与 Eval
 
@@ -256,7 +273,19 @@ Agent eval：
 .\.venv\Scripts\python.exe scripts\run_agent_eval.py --limit 8 --report-output data/eval_results/agent_eval_report.md
 ```
 
-`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate、forbidden_tool_violation_rate，并把每条记录关联 `trace_id`。任务集现在是 54 条元数据化 case，每条包含 `id`、`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；报告会给出 `failure_category`，用于区分 missing_expected_tool、forbidden_tool、tool_error、approval_required、max_steps 等问题。
+`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate、forbidden_tool_violation_rate，并把每条记录关联 `trace_id`。任务集现在是 100 条元数据化 case，每条包含 `id`、`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；报告会给出 `failure_category`，用于区分 missing_expected_tool、forbidden_tool、tool_error、approval_required、max_steps 等问题。
+
+离线 gate 不调用 LLM，只读取已有 `agent_eval.json`：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_agent_eval_gate.py `
+  --input data/eval_results/agent_eval.json `
+  --min-tasks 100 `
+  --min-task-success-rate 0.80 `
+  --min-tool-accuracy 0.80 `
+  --max-forbidden-tool-violation-rate 0.01 `
+  --max-max-steps-reached-rate 0.05
+```
 
 ## 评测结果
 
@@ -292,14 +321,14 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前回归结果：`118 passed`。
+当前回归结果：`128 passed`。
 
 覆盖重点：
 
 - RAG：chunker、retriever、pipeline、memory、coordinator、eval。
-- Agent：tool registry、tools、agent loop、agent eval、EvalOps failure attribution/report。
+- Agent：tool registry、tools、agent loop、agent eval、EvalOps failure attribution/report/gate。
 - MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL、tool policy、audit query API。
-- Safety：approval store、`send_email` pending approval、approve/reject。
+- Safety：approval store、`send_email` pending approval、approve/reject、Gmail draft provider。
 - Trace：JSONL recorder、agent trace metadata、trace summary。
 
 ## API 端点
@@ -335,6 +364,7 @@ agents/
   tools.py                     6 个工具实现和 call_tool 护栏
   mcp_adapter.py               MCP backend/client/audit
   approvals.py                 Human-in-the-loop approval store
+  mail_providers.py            Simulated/Gmail draft-only approval executor
   tracing.py                   Agent trace JSONL recorder
   coordinator.py               LLM 意图分类和固定路由
   graph_workflow.py            LangGraph Self-RAG
@@ -345,16 +375,17 @@ core/
 scripts/
   run_ragas_eval.py            RAGAS-style 消融评测
   run_agent_eval.py            Agent 任务评测
+  check_agent_eval_gate.py     Agent EvalOps 离线阈值 gate
   summarize_agent_traces.py    Trace 汇总
-tests/                         118 个单测
-docs/                          架构、评测、复盘和面经
+tests/                         128 个单测
+docs/                          架构、评测、复盘；docs/面经 为本地忽略目录
 ```
 
 ## 已知限制和下一步
 
 - 合成邮件数据不能代表真实企业邮箱分布；下一步接脱敏真实数据并标注 supporting chunks。
-- `send_email` 当前是 simulated send；生产要接企业邮箱 API、权限系统、审计和撤销策略。
+- `send_email` 已支持审批后 simulated 或 Gmail draft-only；真实发送、撤销策略和企业邮箱多用户授权仍是后续工作。
 - `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
 - MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
-- Agent eval 已扩到 54 条元数据化任务；下一步扩到 100+ 条并接入人工复核样本。
+- Agent eval 已扩到 100 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
 - 检索侧下一步优先换 cross-encoder reranker，减少 LLM reranker 延迟和飘分。

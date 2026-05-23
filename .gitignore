@@ -12,6 +12,7 @@ env/
 # Environment
 .env
 .env.local
+credentials/
 
 # ChromaDB persistence
 chroma_db/

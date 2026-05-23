@@ -1,4 +1,4 @@
-# 项目架构与流程
+﻿# 项目架构与流程
 
 > 本文档用 Mermaid 图描述系统的组件关系和关键流程。在 VS Code（带 Markdown Preview Mermaid Support 插件）或 GitHub 上可直接渲染查看。
 
@@ -452,7 +452,7 @@ function-calling 工具层；设置 `AGENT_TOOL_BACKEND=mcp` 后，`agents/mcp_a
 | `get_email` | low | 否 | 按 email_id 取整封邮件 |
 | `summarize_emails` | low | 否 | 检索 + 结构化摘要 |
 | `draft_reply` | medium | 否 | 起草回信，支持 email_id 精确定位（多步任务用） |
-| `send_email` | high | 是 | 只创建 pending approval，不直接发送 |
+| `send_email` | high | 是 | 只创建 pending approval；审批后 simulated 或 Gmail draft-only |
 | `email_stats` | low | 否 | 发件人 / 标签 / 每日量聚合统计 |
 
 同一批能力也由 `mcp_server.py` 暴露为：
@@ -493,7 +493,9 @@ flowchart LR
     Store --> Pending["status=pending"]
     Pending --> Approve["POST /agent/approvals/{id}/approve"]
     Pending --> Reject["POST /agent/approvals/{id}/reject"]
-    Approve --> Sim["simulated_send<br/>sent=true"]
+    Approve --> Provider["mail provider executor<br/>simulated / gmail"]
+    Provider --> Sim["simulated result<br/>sent=true"]
+    Provider --> Gmail["Gmail draft<br/>draft_id, sent=false"]
     Reject --> Block["blocked_by_human<br/>sent=false"]
 ```
 
@@ -504,11 +506,13 @@ flowchart LR
 tool_errors、approval_required、avg_tool_latency_ms。`scripts/run_agent_eval.py` 会把
 `trace_id` 写入每条评测记录，方便从 eval case 反查真实工具轨迹。
 
-`agents/evalops.py` 把 trace 和 eval record 连接起来：54 条 agent 任务集每条都带
+`agents/evalops.py` 把 trace 和 eval record 连接起来：100 条 agent 任务集每条都带
 `task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；
 评测记录会生成 `failure_category`，区分 forbidden_tool、missing_expected_tool、
 tool_error、approval_required、max_steps、judge_failed 等失败原因，并可输出
-`agent_eval_report.md` 供面试或回归复盘。
+`agent_eval_report.md` 供面试或回归复盘。`scripts/check_agent_eval_gate.py`
+可离线读取 `agent_eval.json`，按任务数、成功率、工具准确率、禁用工具违规率和
+max_steps 触发率做阈值 gate。
 
 **与 §六 固定路由的区别**：Coordinator 是"一次分类 → 一条固定链"；agent loop 是 LLM
 自主多轮规划，能把"找出 X 并逐封处理"这类任务拆成 `search → 逐个 draft` 的多步链。
@@ -540,6 +544,7 @@ E:/智能邮件agent/
 │   ├── evalops.py                # Agent eval 失败归因和报告生成
 │   ├── mcp_adapter.py            # MCP tools/list → function schema，tools/call → tool result + audit/cache
 │   ├── approvals.py              # Human-in-the-loop 审批存储
+│   ├── mail_providers.py          # simulated / Gmail draft-only 审批执行 provider
 │   ├── tracing.py                # Agent trace JSONL
 │   ├── tools.py                  # Agent 工具层（6 工具 + schema + dispatch）
 │   └── agent_loop.py             # function-calling agent 循环 + 护栏
@@ -560,6 +565,7 @@ E:/智能邮件agent/
 │   ├── generate_ragas_data.py    # 生成 RAGAS 测试集
 │   ├── run_ragas_eval.py         # 6 版本消融评测
 │   ├── run_agent_eval.py         # Agent 任务评测 + EvalOps report
+│   ├── check_agent_eval_gate.py   # Agent EvalOps 离线 gate
 │   ├── summarize_agent_traces.py # Trace 汇总
 │   └── debug_*.py                # 诊断 probe
 ├── langchain_version/rag_chain.py # LangChain 平行实现

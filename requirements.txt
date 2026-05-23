@@ -12,6 +12,11 @@ sseclient-py>=1.7.2
 pytest>=8.0.0
 mcp>=1.0.0
 
+# Optional Gmail Draft provider (only needed when MAIL_PROVIDER=gmail)
+google-api-python-client>=2.130.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+
 # Optional: LangChain version (Task 7)
 # langchain>=0.2.0
 # langchain-openai>=0.1.0

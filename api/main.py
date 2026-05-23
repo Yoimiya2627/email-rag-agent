@@ -31,6 +31,7 @@ from core.embedder import index_chunks, clear_collection, get_collection_stats
 from core.memory import ConversationMemory
 from agents.coordinator import route
 from agents.approvals import ApprovalStore
+from agents.mail_providers import MailProviderError, create_mail_provider_from_settings
 from agents.mcp_adapter import MCPAuditLogger
 import config.settings as cfg
 
@@ -245,15 +246,23 @@ async def approve_agent_action(
 ):
     """Approve a pending high-risk agent action.
 
-    The current portfolio implementation records a simulated send result; a
-    production deployment would hand off to SMTP/enterprise-mail APIs here.
+    The default implementation records a simulated result.  When MAIL_PROVIDER
+    is set to gmail, this endpoint creates a Gmail draft and does not send it.
     """
     try:
-        return ApprovalStore().approve(approval_id, reviewer=reviewer, note=note)
+        provider = create_mail_provider_from_settings()
+        return ApprovalStore().approve(
+            approval_id,
+            reviewer=reviewer,
+            note=note,
+            executor=provider.execute_approval,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except MailProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
 
 @app.post("/agent/approvals/{approval_id}/reject")
