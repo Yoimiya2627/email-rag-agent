@@ -6,7 +6,8 @@
         "ENABLE_BM25": false,
         "ENABLE_RRF": false,
         "ENABLE_RERANKER": false,
-        "ENABLE_QUERY_REWRITE": false
+        "ENABLE_QUERY_REWRITE": false,
+        "RERANKER_BACKEND": "llm"
       },
       "avg": {
         "answer_relevancy": 0.8667,
@@ -20,7 +21,8 @@
         "ENABLE_BM25": true,
         "ENABLE_RRF": true,
         "ENABLE_RERANKER": false,
-        "ENABLE_QUERY_REWRITE": false
+        "ENABLE_QUERY_REWRITE": false,
+        "RERANKER_BACKEND": "llm"
       },
       "avg": {
         "answer_relevancy": 0.9567,
@@ -34,7 +36,8 @@
         "ENABLE_BM25": true,
         "ENABLE_RRF": true,
         "ENABLE_RERANKER": true,
-        "ENABLE_QUERY_REWRITE": false
+        "ENABLE_QUERY_REWRITE": false,
+        "RERANKER_BACKEND": "llm"
       },
       "avg": {
         "answer_relevancy": 0.9333,
@@ -48,7 +51,8 @@
         "ENABLE_BM25": true,
         "ENABLE_RRF": true,
         "ENABLE_RERANKER": true,
-        "ENABLE_QUERY_REWRITE": true
+        "ENABLE_QUERY_REWRITE": true,
+        "RERANKER_BACKEND": "llm"
       },
       "avg": {
         "answer_relevancy": 0.9533,
@@ -62,7 +66,8 @@
         "ENABLE_BM25": true,
         "ENABLE_RRF": false,
         "ENABLE_RERANKER": true,
-        "ENABLE_QUERY_REWRITE": true
+        "ENABLE_QUERY_REWRITE": true,
+        "RERANKER_BACKEND": "llm"
       },
       "avg": {
         "answer_relevancy": 0.9467,
@@ -76,12 +81,28 @@
         "ENABLE_BM25": true,
         "ENABLE_RRF": true,
         "ENABLE_RERANKER": false,
-        "ENABLE_QUERY_REWRITE": true
+        "ENABLE_QUERY_REWRITE": true,
+        "RERANKER_BACKEND": "llm"
       },
       "avg": {
         "answer_relevancy": 0.96,
         "faithfulness": 0.8967,
         "context_precision": 0.605
+      }
+    },
+    {
+      "version": "V7",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": false,
+        "RERANKER_BACKEND": "cross_encoder"
+      },
+      "avg": {
+        "answer_relevancy": 0.975,
+        "faithfulness": 0.9267,
+        "context_precision": 0.6103
       }
     }
   ]

@@ -3,7 +3,7 @@
 > **Author**: 赵伟鑫 (Yoimiya2627) — Agent 开发工程师 / 大模型应用开发工程师
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
-一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批、Gmail draft-only provider 和 EvalOps trace/report/gate。
+一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF + 可选 Cross-Encoder reranker 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批、Gmail draft-only provider 和 EvalOps trace/report/gate。
 
 这个项目的重点不是“调一个 LLM API”，而是把邮件 RAG 能力做成可编排、可评测、可回归、可审计的 Agent 工程系统。
 
@@ -32,9 +32,9 @@
 - **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache；MCP server 支持 allowed-tools 和 read-only 工具可见性策略。
 - **Human-in-the-loop 安全链路**：高风险 `send_email` 只创建 pending approval；审批通过后默认 simulated，配置 `MAIL_PROVIDER=gmail` 时只创建 Gmail draft，不直接发送。
 - **Agent EvalOps**：100 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
-- **RAG 消融评测**：6 版 RAGAS-style 对比，量化 BM25、RRF、reranker、query rewrite 的 ROI。
-- **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断。
-- **128 个 pytest**：覆盖 RAG、pipeline、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
+- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI。
+- **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断、rerank 输入截断、生成上下文预算。
+- **133 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
 
 ## Demo
 
@@ -97,6 +97,12 @@ make run
 |---|---|---|
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 普通 RAG 生成、重排和打分模型 |
 | `AGENT_PLANNER_MODEL` | `deepseek-chat` | Agent planner，function calling 更轻更快 |
+| `RERANKER_BACKEND` | `cross_encoder` | `cross_encoder` 使用本地 Cross-Encoder；`llm` 兼容旧重排 |
+| `CROSS_ENCODER_MODEL` | `BAAI/bge-reranker-v2-m3` | Cross-Encoder reranker 模型 |
+| `CROSS_ENCODER_DEVICE` | `cpu` | Cross-Encoder 推理设备；有 CUDA 可改为 `cuda` |
+| `CROSS_ENCODER_MAX_LENGTH` | `512` | Cross-Encoder 单对输入最大长度 |
+| `RERANK_INPUT_CHAR_LIMIT` | `1200` | 送入 reranker 的单 chunk 字符上限，返回结果仍保留原文 |
+| `GENERATION_CONTEXT_CHAR_LIMIT` | `6000` | 拼接到生成 prompt 的上下文总字符预算 |
 | `AGENT_MAX_STEPS` | `6` | 单次 agent 任务最多工具轮数 |
 | `AGENT_MAX_REPEAT` | `2` | 同工具同参数重复超过后拦截 |
 | `AGENT_TOOL_OUTPUT_LIMIT` | `4000` | 单次工具结果最大字符数 |
@@ -123,7 +129,7 @@ Feature flags 默认是 V2 推荐配置：`BM25=true, RRF=true, RERANKER=false, 
 |---|---:|---|
 | `ENABLE_BM25` | true | 向量 + BM25 混检 |
 | `ENABLE_RRF` | true | Reciprocal Rank Fusion |
-| `ENABLE_RERANKER` | false | LLM reranker，质量可能提升但延迟高 |
+| `ENABLE_RERANKER` | false | 可选 reranker；由 `RERANKER_BACKEND` 决定 LLM 或 Cross-Encoder |
 | `ENABLE_QUERY_REWRITE` | false | LLM query rewrite |
 
 ## 系统架构
@@ -144,7 +150,7 @@ Core RAG
    |-- hybrid search: bge-m3 vector + BM25
    |-- RRF fusion
    |-- metadata post-filter
-   |-- optional reranker
+   |-- optional reranker: LLM scorer or Cross-Encoder
    |-- DeepSeek generation
 ```
 
@@ -296,21 +302,23 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe scripts\run_ragas_eval.py
 ```
 
-6 个版本：
+7 个版本：
 
-| Version | BM25 | RRF | Reranker | Rewrite |
-|---|---:|---:|---:|---:|
-| V1 | false | false | false | false |
-| V2 | true | true | false | false |
-| V3 | true | true | true | false |
-| V4 | true | true | true | true |
-| V5 | true | false | true | true |
-| V6 | true | true | false | true |
+| Version | BM25 | RRF | Reranker | Backend | Rewrite | answer_relevancy | faithfulness | context_precision |
+|---|---:|---:|---:|---|---:|---:|---:|---:|
+| V1 | false | false | false | llm | false | 0.8667 | 0.9233 | 0.5937 |
+| V2 | true | true | false | llm | false | 0.9567 | 0.9000 | 0.5713 |
+| V3 | true | true | true | llm | false | 0.9333 | 0.9017 | **0.7147** |
+| V4 | true | true | true | llm | true | 0.9533 | 0.8783 | 0.6427 |
+| V5 | true | false | true | llm | true | 0.9467 | 0.9083 | 0.6147 |
+| V6 | true | true | false | llm | true | 0.9600 | 0.8967 | 0.6050 |
+| V7 | true | true | true | cross_encoder | false | **0.9750** | **0.9267** | 0.6103 |
 
 当前结论：
 
-- V2 是默认推荐：相关性高、延迟最低，适合对话默认路径。
-- Reranker 对 precision 有帮助，但 LLM reranker 延迟和方差较高，下一步更适合换 cross-encoder。
+- V2 仍适合作为默认对话路径：组件少、延迟低，relevancy 处于第一梯队。
+- V7 验证了 Cross-Encoder 的工程价值：不再把 rerank 变成一次额外 LLM 评分调用，本次 30 题实测 relevancy / faithfulness 最高，precision 比 V2 有提升但低于旧 LLM V3。
+- V3 的旧 LLM reranker 仍拿到最高 context_precision，但代价是额外 LLM 延迟和评分方差；生产路径更适合作为可选高精度模式，而不是默认模式。
 - Query rewrite 在部分场景提升 relevancy，但需要更稳 benchmark 和真实数据集验证。
 
 详细数据见 [docs/evaluation.md](docs/evaluation.md)。
@@ -321,11 +329,11 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前回归结果：`128 passed`。
+当前回归结果：`133 passed`。
 
 覆盖重点：
 
-- RAG：chunker、retriever、pipeline、memory、coordinator、eval。
+- RAG：chunker、retriever、pipeline、Cross-Encoder reranker、generation context budget、memory、coordinator、eval。
 - Agent：tool registry、tools、agent loop、agent eval、EvalOps failure attribution/report/gate。
 - MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL、tool policy、audit query API。
 - Safety：approval store、`send_email` pending approval、approve/reject、Gmail draft provider。
@@ -371,13 +379,13 @@ agents/
 core/
   pipeline.py                  标准 RAG pipeline
   retriever.py                 向量 + BM25 + RRF
-  reranker.py                  LLM reranker + circuit breaker
+  reranker.py                  LLM / Cross-Encoder reranker + circuit breaker
 scripts/
   run_ragas_eval.py            RAGAS-style 消融评测
   run_agent_eval.py            Agent 任务评测
   check_agent_eval_gate.py     Agent EvalOps 离线阈值 gate
   summarize_agent_traces.py    Trace 汇总
-tests/                         128 个单测
+tests/                         133 个单测
 docs/                          架构、评测、复盘；docs/面经 为本地忽略目录
 ```
 
@@ -388,4 +396,4 @@ docs/                          架构、评测、复盘；docs/面经 为本地�
 - `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
 - MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
 - Agent eval 已扩到 100 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
-- 检索侧下一步优先换 cross-encoder reranker，减少 LLM reranker 延迟和飘分。
+- 检索侧已接入 Cross-Encoder reranker；下一步应补 rerank latency benchmark、真实邮箱 gold chunk 标注和 context_recall。

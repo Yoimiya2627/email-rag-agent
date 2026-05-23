@@ -33,12 +33,23 @@ def test_apply_flags_writes_back_to_cfg():
     assert cfg.ENABLE_RRF is True
     assert cfg.ENABLE_RERANKER is True
     assert cfg.ENABLE_QUERY_REWRITE is True
+    assert cfg.RERANKER_BACKEND == "llm"
 
     rev.apply_flags(rev.VERSION_FLAGS["V1"])
     assert cfg.ENABLE_BM25 is False
     assert cfg.ENABLE_RRF is False
     assert cfg.ENABLE_RERANKER is False
     assert cfg.ENABLE_QUERY_REWRITE is False
+    assert cfg.RERANKER_BACKEND == "llm"
+
+
+def test_v7_flags_use_cross_encoder_reranker():
+    rev.apply_flags(rev.VERSION_FLAGS["V7"])
+    assert cfg.ENABLE_BM25 is True
+    assert cfg.ENABLE_RRF is True
+    assert cfg.ENABLE_RERANKER is True
+    assert cfg.ENABLE_QUERY_REWRITE is False
+    assert cfg.RERANKER_BACKEND == "cross_encoder"
 
 
 def test_extract_json_obj_pulls_object_from_noisy_text():

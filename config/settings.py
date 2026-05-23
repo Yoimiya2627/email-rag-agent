@@ -31,6 +31,15 @@ TOP_K = int(os.getenv("TOP_K", "5"))
 VECTOR_WEIGHT = float(os.getenv("VECTOR_WEIGHT", "0.7"))
 BM25_WEIGHT = float(os.getenv("BM25_WEIGHT", "0.3"))
 RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "3"))
+RERANKER_BACKEND = os.getenv("RERANKER_BACKEND", "cross_encoder").lower()
+RERANK_INPUT_CHAR_LIMIT = int(os.getenv("RERANK_INPUT_CHAR_LIMIT", "1200"))
+GENERATION_CONTEXT_CHAR_LIMIT = int(os.getenv("GENERATION_CONTEXT_CHAR_LIMIT", "6000"))
+
+# Cross-encoder reranker. Loaded lazily only when
+# ENABLE_RERANKER=true and RERANKER_BACKEND=cross_encoder.
+CROSS_ENCODER_MODEL = os.getenv("CROSS_ENCODER_MODEL", "BAAI/bge-reranker-v2-m3")
+CROSS_ENCODER_DEVICE = os.getenv("CROSS_ENCODER_DEVICE", EMBEDDING_DEVICE)
+CROSS_ENCODER_MAX_LENGTH = int(os.getenv("CROSS_ENCODER_MAX_LENGTH", "512"))
 
 # Data
 EMAIL_DATA_PATH = os.getenv("EMAIL_DATA_PATH", str(BASE_DIR / "data" / "emails.json"))

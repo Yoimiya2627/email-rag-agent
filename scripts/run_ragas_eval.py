@@ -1,13 +1,14 @@
 """
-RAGAS-style ablation evaluation across 6 retrieval versions.
+RAGAS-style ablation evaluation across retrieval versions.
 
 Versions:
   V1: Vector only (no BM25, no RRF, no reranker, no query rewrite)
   V2: Vector + BM25 + RRF
-  V3: V2 + Reranker
-  V4: V3 + Query Rewrite  (full pipeline)
+  V3: V2 + LLM Reranker
+  V4: V3 + Query Rewrite  (full legacy pipeline)
   V5: V4 without RRF      (BM25 simple merge)
   V6: V4 without Reranker (to ablate reranker contribution)
+  V7: V2 + Cross-Encoder Reranker
 
 Metrics (implemented locally, no ragas package required):
   - Answer Relevancy: LLM scores how relevant the answer is to the question (0-1)
@@ -38,12 +39,13 @@ TESTSET_PATH = Path(__file__).parent.parent / "data" / "ragas_testset.json"
 RESULTS_DIR = Path(__file__).parent.parent / "data" / "eval_results"
 
 VERSION_FLAGS = {
-    "V1": dict(ENABLE_BM25=False, ENABLE_RRF=False, ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False),
-    "V2": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False),
-    "V3": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=False),
-    "V4": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True),
-    "V5": dict(ENABLE_BM25=True,  ENABLE_RRF=False, ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True),
-    "V6": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=True),
+    "V1": dict(ENABLE_BM25=False, ENABLE_RRF=False, ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="llm"),
+    "V2": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="llm"),
+    "V3": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="llm"),
+    "V4": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True,  RERANKER_BACKEND="llm"),
+    "V5": dict(ENABLE_BM25=True,  ENABLE_RRF=False, ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True,  RERANKER_BACKEND="llm"),
+    "V6": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=True,  RERANKER_BACKEND="llm"),
+    "V7": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="cross_encoder"),
 }
 
 
@@ -212,22 +214,23 @@ def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) ->
 
 
 def print_comparison_table(summaries: List[Dict]):
-    print("\n" + "=" * 70)
-    print(f"{'Version':<8} {'BM25':<6} {'RRF':<6} {'Rerank':<8} {'Rewrite':<8} "
+    print("\n" + "=" * 92)
+    print(f"{'Version':<8} {'BM25':<6} {'RRF':<6} {'Rerank':<8} {'Backend':<14} {'Rewrite':<8} "
           f"{'Relevancy':>10} {'Faithful':>10} {'Precision':>10}")
-    print("-" * 70)
+    print("-" * 92)
     for s in summaries:
         f = s["flags"]
         a = s["avg"]
         print(f"{s['version']:<8} {str(f.get('ENABLE_BM25','')):<6} {str(f.get('ENABLE_RRF','')):<6} "
-              f"{str(f.get('ENABLE_RERANKER','')):<8} {str(f.get('ENABLE_QUERY_REWRITE','')):<8} "
+              f"{str(f.get('ENABLE_RERANKER','')):<8} {str(f.get('RERANKER_BACKEND','')):<14} "
+              f"{str(f.get('ENABLE_QUERY_REWRITE','')):<8} "
               f"{a['answer_relevancy']:>10.4f} {a['faithfulness']:>10.4f} {a['context_precision']:>10.4f}")
-    print("=" * 70)
+    print("=" * 92)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--versions", default="V1,V2,V3,V4,V5,V6", help="Comma-separated versions to run")
+    parser.add_argument("--versions", default="V1,V2,V3,V4,V5,V6,V7", help="Comma-separated versions to run")
     parser.add_argument("--limit", type=int, default=30, help="Max test questions per version")
     parser.add_argument("--output", default=str(RESULTS_DIR / "comparison.json"))
     args = parser.parse_args()

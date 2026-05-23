@@ -26,7 +26,14 @@ def _get_client() -> OpenAI:
 
 def build_context(results: List[SearchResult]) -> str:
     parts = []
+    remaining_chars = int(getattr(cfg, "GENERATION_CONTEXT_CHAR_LIMIT", 6000))
     for i, r in enumerate(results):
+        content = r.content
+        if remaining_chars > 0:
+            content = content[:remaining_chars]
+            remaining_chars -= len(content)
+        elif remaining_chars == 0:
+            break
         m = r.metadata
         header = (
             f"【邮件{i + 1}】"
@@ -34,7 +41,7 @@ def build_context(results: List[SearchResult]) -> str:
             f"日期: {m.get('date', '?')} | "
             f"主题: {m.get('subject', '?')}"
         )
-        parts.append(f"{header}\n{r.content}")
+        parts.append(f"{header}\n{content}")
     separator = f"\n\n{'—' * 40}\n\n"
     return separator.join(parts)
 

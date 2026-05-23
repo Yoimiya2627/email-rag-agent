@@ -1,24 +1,26 @@
+from __future__ import annotations
+
 import json
 import logging
 from typing import List
 
 from openai import OpenAI
 
-from models.schemas import SearchResult
 import config.settings as cfg
+from models.schemas import SearchResult
 
 logger = logging.getLogger(__name__)
 
 _client = None
+_cross_encoder = None
 
-# Degradation level tracking (module-level, reset on process start)
+# Degradation level tracking (module-level, reset on process start).
 _consecutive_failures = 0
 _FAILURE_THRESHOLD = 3  # disable reranker after this many consecutive failures
 
 
 def reset_circuit_breaker() -> None:
-    """Reset failure counter — call between RAGAS ablation versions so a bad
-    run on V3 does not silently disable reranker for V4/V5/V6."""
+    """Reset failure counter between RAGAS ablation versions."""
     global _consecutive_failures
     _consecutive_failures = 0
 
@@ -30,15 +32,114 @@ def _get_client() -> OpenAI:
     return _client
 
 
-_RERANK_PROMPT = """你是一个文本相关性评分器。给定用户问题和若干候选段落，请为每个段落与问题的相关程度打分（0-10的整数）。
+def _get_cross_encoder():
+    """Lazy-load the local cross-encoder so normal imports stay lightweight."""
+    global _cross_encoder
+    if _cross_encoder is None:
+        from sentence_transformers import CrossEncoder
 
-用户问题：{query}
+        kwargs = {"device": cfg.CROSS_ENCODER_DEVICE}
+        max_length = getattr(cfg, "CROSS_ENCODER_MAX_LENGTH", None)
+        if max_length:
+            kwargs["max_length"] = max_length
+        try:
+            _cross_encoder = CrossEncoder(cfg.CROSS_ENCODER_MODEL, **kwargs)
+        except TypeError:
+            # Older sentence-transformers releases do not accept max_length in
+            # the constructor; the model still truncates internally.
+            kwargs.pop("max_length", None)
+            _cross_encoder = CrossEncoder(cfg.CROSS_ENCODER_MODEL, **kwargs)
+    return _cross_encoder
 
-候选段落（共{n}个）：
+
+def _truncate_for_rerank(text: str, limit: int = None) -> str:
+    limit = int(limit if limit is not None else getattr(cfg, "RERANK_INPUT_CHAR_LIMIT", 1200))
+    if limit <= 0:
+        return text
+    return text[:limit]
+
+
+def _to_float_scores(raw_scores) -> List[float]:
+    scores = raw_scores.tolist() if hasattr(raw_scores, "tolist") else raw_scores
+    return [float(score) for score in scores]
+
+
+def _copy_with_score(result: SearchResult, score: float) -> SearchResult:
+    return SearchResult(
+        chunk_id=result.chunk_id,
+        email_id=result.email_id,
+        content=result.content,
+        score=float(score),
+        metadata=result.metadata,
+    )
+
+
+def _extract_json_obj(text: str) -> str:
+    text = text.strip()
+    if "```" in text:
+        parts = text.split("```")
+        if len(parts) >= 2:
+            text = parts[1].lstrip("json").strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        return text[start:end]
+    return text
+
+
+_RERANK_PROMPT = """You are a text relevance scorer.
+Given a user query and candidate email chunks, score each chunk's relevance
+to the query with an integer from 0 to 10.
+
+User query:
+{query}
+
+Candidate chunks ({n}):
 {docs}
 
-请严格按JSON格式返回，格式：{{"scores": [分数1, 分数2, ...]}}
-只返回JSON，不要解释。"""
+Return strict JSON only:
+{{"scores": [score1, score2, ...]}}"""
+
+
+def _rerank_with_cross_encoder(query: str, results: List[SearchResult], top_n: int) -> List[SearchResult]:
+    model = _get_cross_encoder()
+    pairs = [(query, _truncate_for_rerank(r.content)) for r in results]
+    scores = _to_float_scores(model.predict(pairs))
+    if len(scores) != len(results):
+        raise ValueError(f"Score count mismatch: {len(scores)} vs {len(results)}")
+    scored = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
+    return [_copy_with_score(r, s) for r, s in scored[:top_n]]
+
+
+def _rerank_with_llm(query: str, results: List[SearchResult], top_n: int) -> List[SearchResult]:
+    docs_text = "\n\n".join(
+        f"[{i + 1}] {_truncate_for_rerank(r.content, 400)}" for i, r in enumerate(results)
+    )
+    prompt = _RERANK_PROMPT.format(query=query, n=len(results), docs=docs_text)
+
+    resp = _get_client().chat.completions.create(
+        model=cfg.DEEPSEEK_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        max_tokens=3000,
+        timeout=cfg.LLM_TIMEOUT,
+    )
+    choice = resp.choices[0]
+    raw = (choice.message.content or "").strip()
+    if not raw:
+        reasoning = getattr(choice.message, "reasoning_content", None) or ""
+        if reasoning and "{" in reasoning and "}" in reasoning:
+            raw = reasoning.strip()
+        else:
+            raise ValueError(f"Empty rerank response (finish_reason={choice.finish_reason!r})")
+
+    data = json.loads(_extract_json_obj(raw))
+    scores = data.get("scores", [])
+    if len(scores) != len(results):
+        raise ValueError(f"Score count mismatch: {len(scores)} vs {len(results)}")
+
+    scored = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
+    return [_copy_with_score(r, s) for r, s in scored[:top_n]]
 
 
 def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[SearchResult]:
@@ -50,62 +151,27 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
     if len(results) <= 1:
         return results[:top_n]
 
-    docs_text = "\n\n".join(
-        f"[{i + 1}] {r.content[:400]}" for i, r in enumerate(results)
-    )
-    prompt = _RERANK_PROMPT.format(query=query, n=len(results), docs=docs_text)
-
     global _consecutive_failures
-    # Circuit breaker: if too many consecutive failures, skip reranking
     if _consecutive_failures >= _FAILURE_THRESHOLD:
-        logger.warning("Reranker circuit breaker open, skipping LLM rerank")
+        logger.warning("Reranker circuit breaker open, skipping rerank")
         return results[:top_n]
 
     try:
-        client = _get_client()
-        resp = client.chat.completions.create(
-            model=cfg.DEEPSEEK_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            # DEEPSEEK_MODEL=deepseek-v4-flash 是推理模型，先输出 reasoning_content
-            # 再输出 content。reranker 同时给多个候选打分，推理量大（实测 2000+），
-            # 1500 偶发不够；3000 留充足余量。
-            max_tokens=3000,
-            timeout=cfg.LLM_TIMEOUT,
-        )
-        choice = resp.choices[0]
-        raw = (choice.message.content or "").strip()
-        if not raw:
-            rc = getattr(choice.message, "reasoning_content", None) or ""
-            if rc and "{" in rc and "}" in rc:
-                raw = rc.strip()
-            else:
-                raise ValueError(f"Empty rerank response (finish_reason={choice.finish_reason!r})")
-        if "```" in raw:
-            raw = raw.split("```")[1].lstrip("json").strip()
-        # 推理模型有时会在 content/reasoning 中夹杂解释文本，抽出最后一个 JSON 对象
-        s, e = raw.find("{"), raw.rfind("}") + 1
-        if s >= 0 and e > s:
-            raw = raw[s:e]
-        data = json.loads(raw)
-        scores = data.get("scores", [])
-
-        if len(scores) != len(results):
-            raise ValueError(f"Score count mismatch: {len(scores)} vs {len(results)}")
-
-        _consecutive_failures = 0  # reset on success
-        scored = sorted(zip(results, scores), key=lambda x: x[1], reverse=True)
-        return [
-            SearchResult(
-                chunk_id=r.chunk_id,
-                email_id=r.email_id,
-                content=r.content,
-                score=float(s),
-                metadata=r.metadata,
-            )
-            for r, s in scored[:top_n]
-        ]
+        backend = getattr(cfg, "RERANKER_BACKEND", "cross_encoder").lower()
+        if backend == "cross_encoder":
+            reranked = _rerank_with_cross_encoder(query, results, top_n)
+        elif backend == "llm":
+            reranked = _rerank_with_llm(query, results, top_n)
+        else:
+            logger.warning("Unknown reranker backend %r, falling back to LLM rerank", backend)
+            reranked = _rerank_with_llm(query, results, top_n)
+        _consecutive_failures = 0
+        return reranked
     except Exception as exc:
         _consecutive_failures += 1
-        logger.warning(f"Reranker failed ({exc}), consecutive={_consecutive_failures}, returning original order")
+        logger.warning(
+            "Reranker failed (%s), consecutive=%s, returning original order",
+            exc,
+            _consecutive_failures,
+        )
         return results[:top_n]

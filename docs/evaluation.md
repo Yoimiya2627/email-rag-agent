@@ -144,3 +144,47 @@ data/eval_results/comparison.json  # 三维度均值汇总
 ```
 
 评测脚本会自动应用每版的 `ENABLE_*` flag、重置 reranker 熔断器（避免上一版的失败计数泄漏到下一版，详见 [`docs/technical_retrospective.md`](technical_retrospective.md) §4）、把 LLM 打分失败的样本降级到向量相似度。
+
+---
+
+## 8. V7：Cross-Encoder Reranker 更新
+
+### 为什么新增 V7
+
+V1-V6 里的 `ENABLE_RERANKER=true` 使用的是 LLM scorer：把多个候选 chunk 拼成 prompt，让 DeepSeek 输出 `{"scores": [...]}`。这个方案能做语义重排，但工程上有三个问题：
+
+1. **延迟高**：每次 rerank 都多一次 LLM 调用，V3/V4/V5 的端到端耗时明显高于 V2/V6。
+2. **方差高**：LLM scorer 受输出格式、reasoning token、API 抖动影响，虽然已有 JSON 兜底和熔断，但仍不是检索链路里最稳定的部件。
+3. **成本不适合默认路径**：默认对话路径更需要稳定低延迟；重排如果要常开，更适合本地 Cross-Encoder。
+
+V7 保留 V2 的 `BM25 + RRF` 基线，只把 reranker backend 切到 `cross_encoder`，用于隔离观察 Cross-Encoder 的贡献。
+
+### V1-V7 最新 30 题结果
+
+| Version | BM25 | RRF | Reranker | Backend | Rewrite | answer_relevancy | faithfulness | context_precision |
+|---|---:|---:|---:|---|---:|---:|---:|---:|
+| V1 | false | false | false | llm | false | 0.8667 | 0.9233 | 0.5937 |
+| V2 | true | true | false | llm | false | 0.9567 | 0.9000 | 0.5713 |
+| V3 | true | true | true | llm | false | 0.9333 | 0.9017 | **0.7147** |
+| V4 | true | true | true | llm | true | 0.9533 | 0.8783 | 0.6427 |
+| V5 | true | false | true | llm | true | 0.9467 | 0.9083 | 0.6147 |
+| V6 | true | true | false | llm | true | 0.9600 | 0.8967 | 0.6050 |
+| V7 | true | true | true | cross_encoder | false | **0.9750** | **0.9267** | 0.6103 |
+
+### 解读
+
+- V7 在本次 30 题重跑里拿到最高 `answer_relevancy` 和 `faithfulness`，说明 Cross-Encoder 把更适合生成回答的 chunk 推到了前面。
+- `context_precision` 从 V2 的 0.5713 提升到 0.6103，但没有超过旧 LLM reranker V3 的 0.7147。面试里不要说“Cross-Encoder 全面碾压”，更准确的说法是：**Cross-Encoder 让重排从 LLM 调用变成本地确定性模型调用，提升了回答相关性和有据性，同时把成本/稳定性拉回可控范围；如果业务目标是人工复核 top-K 干净度，旧 V3 仍是一个高精度对照组。**
+- 本次 V7 运行时发现 `HF_ENDPOINT=https://hf-mirror.com` 对 `BAAI/bge-reranker-v2-m3` 拉取不稳定；正式复现命令使用 `HF_ENDPOINT=https://huggingface.co`，并已把 `.env.example` 更新为官方端点优先。
+
+复现：
+
+```powershell
+$env:HF_ENDPOINT='https://huggingface.co'
+.\.venv\Scripts\python.exe scripts\run_ragas_eval.py --versions V7 --limit 30 --output data\eval_results\comparison_v7.json
+```
+
+正式汇总文件：
+
+- `data/eval_results/V7.json`
+- `data/eval_results/comparison.json`

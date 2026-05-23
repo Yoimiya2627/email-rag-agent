@@ -35,7 +35,7 @@ flowchart TB
         LOAD["loader / cleaner / chunker"]
         EMB["embedder<br/>(bge-m3)"]
         RET["retriever<br/>(Vector ⊕ BM25 + RRF)"]
-        RR["reranker<br/>(LLM + 熔断器)"]
+        RR["reranker<br/>(LLM / Cross-Encoder + 熔断器)"]
         GEN["generator<br/>(DeepSeek + stream)"]
         MEM["memory<br/>(线程安全滑窗)"]
     end
@@ -173,12 +173,15 @@ sequenceDiagram
     rect rgb(220, 240, 245)
     Note over RA,RR: 重排
     RA->>RR: rerank(query, candidates, top_n=3)
-    alt 熔断器关闭
+    alt Cross-Encoder backend
+        RR->>RR: 本地 Cross-Encoder pair scoring
+        RR-->>RA: top-3 重排
+    else LLM backend
         RR->>DS: LLM 打分 (max_tokens=3000)
         DS-->>RR: scores
         RR-->>RA: top-3 重排
     else 熔断器打开
-        RR-->>RA: 跳过 LLM，返回前 3
+        RR-->>RA: 跳过 rerank，返回前 3
     end
     end
 
@@ -195,8 +198,8 @@ sequenceDiagram
     API-->>U: 200 OK + JSON
 ```
 
-**链路总耗时**：默认 V2 配置约 8.7s（mean）/ 14.4s（p95）；全开 V4 配置约 24s。
-**LLM 调用清单**：意图分类 → 改写 → 过滤抽取 → 重排打分 → 生成答案 = 最多 5 次。
+**链路总耗时**：默认 V2 配置约 8.7s（mean）/ 14.4s（p95）；全开 V4 配置约 24s；V7 把重排从额外 LLM 调用切到本地 Cross-Encoder。
+**LLM 调用清单**：意图分类 → 改写 → 过滤抽取 → 生成答案 = 常规最多 4 次；只有 LLM reranker backend 才会额外增加一次重排打分。
 **真正的检索（向量 + BM25）只占 ~30ms**——瓶颈在 LLM 调用次数，详见 [`docs/evaluation.md`](evaluation.md)。
 
 ---
@@ -216,7 +219,7 @@ flowchart LR
 
     RRF --> M20["融合 Top-20"]
     M20 --> F["后过滤<br/>(sender/date/labels)"]
-    F --> R["LLM Reranker<br/>(0~10 打分)"]
+    F --> R["Reranker<br/>(LLM scorer 或 Cross-Encoder)"]
     R --> T3["最终 Top-3"]
 
     style V fill:#ffe4b5
@@ -353,7 +356,7 @@ flowchart LR
     subgraph 各调用点的降级
         Rerank["reranker 失败"] --> R1["返回原始向量排序"]
         R1 --> R2{连续 3 次失败}
-        R2 -->|是| R3["熔断器 open<br/>本进程后续直接跳过 LLM"]
+        R2 -->|是| R3["熔断器 open<br/>本进程后续直接跳过 rerank"]
 
         Rewrite["rewrite_query 失败"] --> RW1["回退原 query"]
         Filter["filter 抽取失败"] --> F1["回退空过滤器（全部通过）"]
@@ -391,7 +394,7 @@ flowchart LR
 
 具体处理：
 - 普通调用 `max_tokens=1500`（够 reasoning + 短结构化输出）
-- 高推理量调用（reranker、三维度评分）`max_tokens=3000`
+- 高推理量调用（LLM reranker、三维度评分）`max_tokens=3000`
 - 所有结构化输出（JSON / 数组）调用都加 `reasoning_content` 兜底解析
 - 所有调用都加 `timeout=cfg.LLM_TIMEOUT`（默认 60s，留足余量）
 
@@ -555,15 +558,15 @@ E:/智能邮件agent/
 │   ├── embedder.py               # bge-m3 嵌入 + ChromaDB 读写
 │   ├── retriever.py              # Vector + BM25 + RRF（带缓存）
 │   ├── pipeline.py               # 统一检索链路 retrieve()（agent/eval 共用）
-│   ├── reranker.py               # LLM 重排（带熔断器）
-│   ├── generator.py              # 答案生成（含流式）
+│   ├── reranker.py               # LLM / Cross-Encoder 重排（带熔断器）
+│   ├── generator.py              # 答案生成（含上下文预算和流式）
 │   └── memory.py                 # 多轮对话滑窗（线程安全）
 ├── config/settings.py            # 配置 + .env 加载
 ├── models/schemas.py             # Pydantic schemas + IntentType 枚举
 ├── scripts/
 │   ├── generate_emails.py        # LLM 生成 5000 封测试邮件
 │   ├── generate_ragas_data.py    # 生成 RAGAS 测试集
-│   ├── run_ragas_eval.py         # 6 版本消融评测
+│   ├── run_ragas_eval.py         # 7 版本消融评测
 │   ├── run_agent_eval.py         # Agent 任务评测 + EvalOps report
 │   ├── check_agent_eval_gate.py   # Agent EvalOps 离线 gate
 │   ├── summarize_agent_traces.py # Trace 汇总
@@ -576,7 +579,7 @@ E:/智能邮件agent/
 │   └── eval_results/
 ├── docs/
 │   ├── architecture.md             # 本文
-│   ├── evaluation.md               # RAGAS 6 版评测 + 业务选型
+│   ├── evaluation.md               # RAGAS 7 版评测 + 业务选型
 │   ├── technical_retrospective.md  # 工程问题复盘
 │   └── engineering_pitfalls.md     # 完整问题清单 + 调试方法论
 ├── Dockerfile + docker-compose.yml
