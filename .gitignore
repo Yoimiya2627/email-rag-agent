@@ -44,6 +44,7 @@ data/traces/
 docs/interview_*
 docs/*_private.*
 docs/_html_style.css
+docs/面经/
 
 # Private workspace — job hunting plans, drafts, anything not for public repo
 _private/
