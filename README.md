@@ -3,7 +3,7 @@
 > **Author**: 赵伟鑫 (Yoimiya2627) — Agent 开发工程师 / 大模型应用开发工程师
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
-一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF + 可选 Cross-Encoder reranker 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批、Gmail draft-only provider 和 EvalOps trace/report/gate。
+一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF + 可选 Cross-Encoder reranker 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批、Gmail draft-only provider、Gmail read-only 增量同步和 EvalOps trace/report/gate。
 
 这个项目的重点不是“调一个 LLM API”，而是把邮件 RAG 能力做成可编排、可评测、可回归、可审计的 Agent 工程系统。
 
@@ -18,6 +18,7 @@
 - [Agent 工具层](#agent-工具层)
 - [MCP Server](#mcp-server)
 - [Human-in-the-loop](#human-in-the-loop)
+- [Gmail Read-only Sync](#gmail-read-only-sync)
 - [Trace 与 Eval](#trace-与-eval)
 - [评测结果](#评测结果)
 - [测试](#测试)
@@ -31,10 +32,11 @@
 - **MCP-ready Tool Backend**：工具定义集中在 `agents/tool_registry.py`，同源派生本地 function schema 和 FastMCP 注册。
 - **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache；MCP server 支持 allowed-tools 和 read-only 工具可见性策略。
 - **Human-in-the-loop 安全链路**：高风险 `send_email` 只创建 pending approval；审批通过后默认 simulated，配置 `MAIL_PROVIDER=gmail` 时只创建 Gmail draft，不直接发送。
+- **真实邮箱 read-only 接入**：Gmail read-only provider 使用独立只读 OAuth scope，把真实邮件增量同步到本地忽略 JSON，再复用清洗、切分、embedding 索引链路。
 - **Agent EvalOps**：105 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
-- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI。
+- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI；新增 gold chunk 模板和 `context_recall` 确定性评测脚本。
 - **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断、rerank 输入截断、生成上下文预算。
-- **140 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、reranker serving policy、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
+- **146 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、reranker serving policy、Gmail read-only sync、context_recall eval、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
 
 ## Demo
 
@@ -120,6 +122,12 @@ make run
 | `GMAIL_SCOPES` | `https://www.googleapis.com/auth/gmail.compose` | Gmail draft-only scope |
 | `GMAIL_USER_ID` | `me` | Gmail API user id |
 | `ENABLE_REAL_EMAIL_SEND` | `false` | 保留开关；当前实现不默认真实发送 |
+| `GMAIL_READONLY_TOKEN_PATH` | `./credentials/gmail_readonly_token.json` | Gmail read-only OAuth token 缓存 |
+| `GMAIL_READONLY_SCOPES` | `https://www.googleapis.com/auth/gmail.readonly` | Gmail read-only sync scope，和 draft scope 分离 |
+| `GMAIL_SYNC_QUERY` | `newer_than:30d` | Gmail 同步查询条件 |
+| `GMAIL_SYNC_MAX_RESULTS` | `100` | 单次 read-only 同步最多拉取消息数 |
+| `GMAIL_SYNC_OUTPUT_PATH` | `./data/real_emails/gmail_emails.json` | 同步后的本地 JSON；已 gitignore |
+| `GMAIL_SYNC_STATE_PATH` | `./data/mail_sync/gmail_sync_state.json` | 增量同步状态；已 gitignore |
 | `ENABLE_AGENT_TRACE` | `false` | 是否记录 agent trace JSONL |
 | `AGENT_TRACE_LOG_PATH` | `./data/traces/agent_traces.jsonl` | trace 输出路径 |
 
@@ -252,6 +260,25 @@ GMAIL_USER_ID=me
 ENABLE_REAL_EMAIL_SEND=false
 ```
 
+## Gmail Read-only Sync
+
+Phase 9 新增 Gmail 只读同步，不复用 draft-only scope，也不请求发送权限。同步结果写到 `data/real_emails/`，增量状态写到 `data/mail_sync/`，两个目录都已加入 `.gitignore`，避免真实邮箱内容入库。
+
+```env
+GMAIL_CREDENTIALS_PATH=./credentials/gmail_credentials.json
+GMAIL_READONLY_TOKEN_PATH=./credentials/gmail_readonly_token.json
+GMAIL_READONLY_SCOPES=https://www.googleapis.com/auth/gmail.readonly
+GMAIL_SYNC_QUERY=newer_than:30d
+GMAIL_SYNC_MAX_RESULTS=100
+```
+
+```powershell
+.\.venv\Scripts\python.exe scripts\sync_gmail_readonly.py
+.\.venv\Scripts\python.exe scripts\sync_gmail_readonly.py --index
+```
+
+同步脚本会把 Gmail message 映射成现有 `Email` schema：`id/subject/sender/recipients/date/body/labels/thread_id`。增量逻辑使用本地 `seen_message_ids` 跳过已同步消息；`--index` 会继续复用现有 cleaner、chunker、embedder 和 BM25 cache invalidation。
+
 ## Trace 与 Eval
 
 开启 trace：
@@ -302,6 +329,8 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe scripts\run_ragas_eval.py
 .\.venv\Scripts\python.exe scripts\measure_latency.py --limit 10
 .\.venv\Scripts\python.exe scripts\measure_reranker_latency.py --versions V2,V7
+.\.venv\Scripts\python.exe scripts\evaluate_context_recall.py --init-template --gold data\gold_chunks.json --limit 30
+.\.venv\Scripts\python.exe scripts\evaluate_context_recall.py --gold data\gold_chunks.json --versions V2,V7
 ```
 
 7 个版本：
@@ -322,6 +351,7 @@ RAG 消融脚本：
 - V7 验证了 Cross-Encoder 的工程价值：不再把 rerank 变成一次额外 LLM 评分调用，本次 30 题实测 relevancy / faithfulness 最高，precision 比 V2 有提升但低于旧 LLM V3。
 - V3 的旧 LLM reranker 仍拿到最高 context_precision，但代价是额外 LLM 延迟和评分方差；生产路径更适合作为可选高精度模式，而不是默认模式。
 - Phase 8 已补 `core.reranker_policy` 和 `scripts/measure_reranker_latency.py`：默认对话仍选 V2；质量优先选 V7；需要高 precision 且允许额外 LLM scorer 时才把 V3 当对照。
+- Phase 10 已补 `scripts/evaluate_context_recall.py`：可从 RAGAS testset 生成人工 gold chunk 模板，并用 `gold_chunk_ids` 对 V2/V7 等版本计算确定性的 `context_recall`。
 - Query rewrite 在部分场景提升 relevancy，但需要更稳 benchmark 和真实数据集验证。
 
 详细数据见 [docs/evaluation.md](docs/evaluation.md)。
@@ -332,14 +362,14 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前回归结果：`140 passed`。
+当前回归结果：`146 passed`。
 
 覆盖重点：
 
-- RAG：chunker、retriever、pipeline、Cross-Encoder reranker、reranker serving policy、generation context budget、memory、coordinator、eval。
+- RAG：chunker、retriever、pipeline、Cross-Encoder reranker、reranker serving policy、gold chunk context_recall、generation context budget、memory、coordinator、eval。
 - Agent：tool registry、tools、agent loop、agent eval、EvalOps failure attribution/report/gate。
 - MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL、tool policy、audit query API。
-- Safety：approval store、`send_email` pending approval、approve/reject、Gmail draft provider。
+- Safety / Mail：approval store、`send_email` pending approval、approve/reject、Gmail draft provider、Gmail read-only sync。
 - Trace：JSONL recorder、agent trace metadata、trace summary。
 
 ## API 端点
@@ -376,6 +406,7 @@ agents/
   mcp_adapter.py               MCP backend/client/audit
   approvals.py                 Human-in-the-loop approval store
   mail_providers.py            Simulated/Gmail draft-only approval executor
+  gmail_readonly.py            Gmail read-only provider + MIME -> Email schema
   tracing.py                   Agent trace JSONL recorder
   coordinator.py               LLM 意图分类和固定路由
   graph_workflow.py            LangGraph Self-RAG
@@ -388,18 +419,20 @@ scripts/
   run_ragas_eval.py            RAGAS-style 消融评测
   measure_latency.py           端到端 RAG latency benchmark
   measure_reranker_latency.py  Reranker-only latency benchmark
+  evaluate_context_recall.py   Gold chunk 模板和 context_recall 评测
+  sync_gmail_readonly.py       Gmail read-only 增量同步到本地 JSON/索引
   run_agent_eval.py            Agent 任务评测
   check_agent_eval_gate.py     Agent EvalOps 离线阈值 gate
   summarize_agent_traces.py    Trace 汇总
-tests/                         140 个单测
+tests/                         146 个单测
 docs/                          架构、评测、复盘；docs/面经 为本地忽略目录
 ```
 
 ## 已知限制和下一步
 
-- 合成邮件数据不能代表真实企业邮箱分布；下一步接脱敏真实数据并标注 supporting chunks。
+- Gmail read-only provider 已能把真实邮件增量同步到本地忽略 JSON；下一步是在个人/脱敏邮箱上实际跑同步、清洗质量抽检，并标注 supporting chunks。
 - `send_email` 已支持审批后 simulated 或 Gmail draft-only；真实发送、撤销策略和企业邮箱多用户授权仍是后续工作。
 - `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
 - MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
 - Agent eval 已扩到 105 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
-- 检索侧已接入 Cross-Encoder reranker，并补了 rerank-only benchmark harness 与 serving policy；下一步是在真实模型环境跑 30+ 题 × 多轮 latency、加 batch 推理、真实邮箱 gold chunk 标注和 context_recall。
+- 检索侧已接入 Cross-Encoder reranker，并补了 rerank-only benchmark harness、serving policy 和 context_recall harness；下一步是在真实模型环境跑 30+ 题 × 多轮 latency、加 batch 推理，并基于真实邮箱 gold chunk 产出正式 recall 数据。

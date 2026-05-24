@@ -1,4 +1,4 @@
-.PHONY: help install index api ui run mcp eval agent-eval trace-summary eval-all latency reranker-latency test clean
+.PHONY: help install index api ui run mcp eval agent-eval trace-summary eval-all latency reranker-latency gmail-sync context-recall test clean
 
 # Prefer the project venv if present. Override with `make PYTHON=python3 install`.
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
@@ -18,6 +18,8 @@ help:
 	@echo "  make eval-all    run all 7 ablation versions (~30 min)"
 	@echo "  make latency     measure end-to-end latency"
 	@echo "  make reranker-latency measure reranker-only latency"
+	@echo "  make gmail-sync  sync Gmail read-only messages to local ignored JSON"
+	@echo "  make context-recall evaluate retrieval against gold chunk labels"
 	@echo "  make test        run unit tests"
 	@echo "  make clean       remove chroma_db and __pycache__ (model + eval results kept)"
 
@@ -61,6 +63,12 @@ latency:
 
 reranker-latency:
 	$(PYTHON) scripts/measure_reranker_latency.py
+
+gmail-sync:
+	$(PYTHON) scripts/sync_gmail_readonly.py
+
+context-recall:
+	$(PYTHON) scripts/evaluate_context_recall.py
 
 test:
 	$(PYTHON) -m pytest tests/ -v

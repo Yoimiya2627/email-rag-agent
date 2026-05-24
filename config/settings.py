@@ -114,6 +114,28 @@ GMAIL_SCOPES = [
 GMAIL_USER_ID = os.getenv("GMAIL_USER_ID", "me")
 ENABLE_REAL_EMAIL_SEND = os.getenv("ENABLE_REAL_EMAIL_SEND", "false").lower() == "true"
 
+# Gmail read-only ingestion. Kept separate from the draft provider so read-only
+# sync never needs compose/send scopes.
+GMAIL_READONLY_TOKEN_PATH = os.getenv(
+    "GMAIL_READONLY_TOKEN_PATH",
+    str(BASE_DIR / "credentials" / "gmail_readonly_token.json"),
+)
+GMAIL_READONLY_SCOPES = [
+    item.strip()
+    for item in os.getenv("GMAIL_READONLY_SCOPES", "https://www.googleapis.com/auth/gmail.readonly").split(",")
+    if item.strip()
+]
+GMAIL_SYNC_QUERY = os.getenv("GMAIL_SYNC_QUERY", "newer_than:30d")
+GMAIL_SYNC_MAX_RESULTS = int(os.getenv("GMAIL_SYNC_MAX_RESULTS", "100"))
+GMAIL_SYNC_OUTPUT_PATH = os.getenv(
+    "GMAIL_SYNC_OUTPUT_PATH",
+    str(BASE_DIR / "data" / "real_emails" / "gmail_emails.json"),
+)
+GMAIL_SYNC_STATE_PATH = os.getenv(
+    "GMAIL_SYNC_STATE_PATH",
+    str(BASE_DIR / "data" / "mail_sync" / "gmail_sync_state.json"),
+)
+
 # Agent trace events. Disabled by default to keep local unit tests and demos
 # quiet; enable when running evals or production-like debugging.
 ENABLE_AGENT_TRACE = os.getenv("ENABLE_AGENT_TRACE", "false").lower() == "true"

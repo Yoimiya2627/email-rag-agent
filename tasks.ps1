@@ -36,6 +36,8 @@ function Show-Help {
     Write-Host "  .\tasks.ps1 eval-all    run all 7 ablation versions (~30 min)"
     Write-Host "  .\tasks.ps1 latency     measure end-to-end latency"
     Write-Host "  .\tasks.ps1 reranker-latency measure reranker-only latency"
+    Write-Host "  .\tasks.ps1 gmail-sync  sync Gmail read-only messages to local ignored JSON"
+    Write-Host "  .\tasks.ps1 context-recall evaluate retrieval against gold chunk labels"
     Write-Host "  .\tasks.ps1 test        run unit tests"
     Write-Host "  .\tasks.ps1 clean       remove chroma_db and __pycache__"
 }
@@ -112,6 +114,14 @@ function Invoke-RerankerLatency {
     & $Python scripts/measure_reranker_latency.py
 }
 
+function Invoke-GmailSync {
+    & $Python scripts/sync_gmail_readonly.py
+}
+
+function Invoke-ContextRecall {
+    & $Python scripts/evaluate_context_recall.py
+}
+
 function Invoke-Test {
     & $Python -m pytest tests/ -v
 }
@@ -144,6 +154,8 @@ switch ($Cmd.ToLower()) {
     "eval-all" { Invoke-EvalAll }
     "latency"  { Invoke-Latency }
     "reranker-latency" { Invoke-RerankerLatency }
+    "gmail-sync" { Invoke-GmailSync }
+    "context-recall" { Invoke-ContextRecall }
     "test"     { Invoke-Test }
     "clean"    { Invoke-Clean }
     default {

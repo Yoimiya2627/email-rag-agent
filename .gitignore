@@ -36,6 +36,8 @@ Thumbs.db
 data/audit/
 data/approvals/
 data/traces/
+data/mail_sync/
+data/real_emails/
 .pytest_tmp*/
 
 # Claude Code local settings

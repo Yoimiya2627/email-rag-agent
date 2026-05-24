@@ -499,8 +499,12 @@ flowchart LR
     Approve --> Provider["mail provider executor<br/>simulated / gmail"]
     Provider --> Sim["simulated result<br/>sent=true"]
     Provider --> Gmail["Gmail draft<br/>draft_id, sent=false"]
-    Reject --> Block["blocked_by_human<br/>sent=false"]
+Reject --> Block["blocked_by_human<br/>sent=false"]
 ```
+
+**Gmail read-only ingestion（Phase 9）**：
+
+`agents/gmail_readonly.py` 使用独立 `GMAIL_READONLY_SCOPES=https://www.googleapis.com/auth/gmail.readonly`，只读取邮件，不复用 draft-only compose scope。`scripts/sync_gmail_readonly.py` 将 Gmail `messages.list/get` 结果解析成现有 `Email` schema，写入本地忽略目录 `data/real_emails/`，并用 `data/mail_sync/gmail_sync_state.json` 的 `seen_message_ids` 做增量去重。加 `--index` 时继续复用 cleaner、chunker、embedder 和 BM25 cache invalidation。
 
 **Agent trace + EvalOps**：
 
@@ -531,6 +535,8 @@ RAG 侧的版本评测由 `scripts/run_ragas_eval.py` 负责，端到端 latency
 只测 rerank step，避免把 generation/API 抖动误归因给 Cross-Encoder。上线策略由
 `core.reranker_policy.choose_reranker_policy()` 统一表达：默认对话/低延迟预算走 V2，
 质量优先走 V7，高 precision 且显式允许额外 LLM scorer 时才把 V3 当对照。
+Phase 10 新增 `scripts/evaluate_context_recall.py`，从人工标注的 `gold_chunk_ids`
+计算确定性 `context_recall`、chunk hit rate 和 perfect recall rate。
 
 ---
 
@@ -554,6 +560,7 @@ E:/智能邮件agent/
 │   ├── mcp_adapter.py            # MCP tools/list → function schema，tools/call → tool result + audit/cache
 │   ├── approvals.py              # Human-in-the-loop 审批存储
 │   ├── mail_providers.py          # simulated / Gmail draft-only 审批执行 provider
+│   ├── gmail_readonly.py          # Gmail read-only 同步 provider + MIME 解析
 │   ├── tracing.py                # Agent trace JSONL
 │   ├── tools.py                  # Agent 工具层（6 工具 + schema + dispatch）
 │   └── agent_loop.py             # function-calling agent 循环 + 护栏
@@ -576,6 +583,8 @@ E:/智能邮件agent/
 │   ├── run_ragas_eval.py         # 7 版本消融评测
 │   ├── measure_latency.py        # 端到端 RAG latency benchmark
 │   ├── measure_reranker_latency.py # rerank-only latency benchmark + policy output
+│   ├── evaluate_context_recall.py # gold chunk 模板 + context_recall
+│   ├── sync_gmail_readonly.py    # Gmail read-only 增量同步
 │   ├── run_agent_eval.py         # Agent 任务评测 + EvalOps report
 │   ├── check_agent_eval_gate.py   # Agent EvalOps 离线 gate
 │   ├── summarize_agent_traces.py # Trace 汇总
