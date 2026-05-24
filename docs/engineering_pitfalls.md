@@ -102,7 +102,7 @@ _consecutive_failures = 0
 _FAILURE_THRESHOLD = 3
 ```
 
-V1~V6 共用一个 Python 进程、共用这个变量。一旦在 V3 累积了 3 次失败，后续版本一进来就直接走 `circuit breaker open` 分支返回原始排序——**reranker 实际被禁用了，但日志里看到的还是"V4 ENABLE_RERANKER=True"**，得到的对比表完全失真。
+V1~V7 共用一个 Python 进程、共用这个变量。一旦在 V3 累积了 3 次失败，后续版本一进来就直接走 `circuit breaker open` 分支返回原始排序——**reranker 实际被禁用了，但日志里看到的还是"V4 ENABLE_RERANKER=True"**，得到的对比表完全失真。
 
 ### 修复
 
@@ -470,7 +470,7 @@ choice.message.refusal # 拒答字段（部分模型）
 
 ## 十一、RAGAS 全量评测结果与反直觉发现
 
-修完上面那一堆 max_tokens / 熔断器 / 流式 / LangGraph / BM25 缓存的问题之后，我在 5000 封邮件 / 100 题测试集上跑了完整的 6 版本消融实验。结果让我重新理解了"加更多组件就一定更好"这个错觉。
+修完上面那一堆 max_tokens / 熔断器 / 流式 / LangGraph / BM25 缓存的问题之后，我在 5000 封邮件 / 100 题测试集上跑了完整的 RAGAS-style 消融实验；后来又补了 V7 Cross-Encoder reranker。结果让我重新理解了"加更多组件就一定更好"这个错觉。
 
 ### 评测配置
 
@@ -481,7 +481,7 @@ choice.message.refusal # 拒答字段（部分模型）
 
 ### 完整评测结果
 
-**6 版消融的完整方法、数据表、业务选型，见 [`evaluation.md`](evaluation.md)——那是评测结论的唯一权威出处，这里不再复制一份。**
+**V1-V7 消融的完整方法、数据表、业务选型，见 [`evaluation.md`](evaluation.md)——那是评测结论的唯一权威出处，这里不再复制一份。**
 
 > 早期这份文档抄过一份结果表。后来评测脚本修了 Bug（后过滤漏应用）、重跑后数字变了，两处就 drift 了——和上文提到的"检索 pipeline 三处重复"是同一类问题：**结论只该有一个来源**。所以这里只保留与具体数字无关、跨重跑都成立的几条教训。
 
@@ -489,12 +489,13 @@ choice.message.refusal # 拒答字段（部分模型）
 
 1. **没有评测就没有改进**——"项目里加了 Reranker 和 Rewrite"听上去很完整，但只有把每个组件的 ROI 量化出来，才知道"全开"未必最优。
 2. **要怀疑自己的评测**——这套消融跑过两次，"三个指标的赢家分散、不存在全场最优"这个**模式**两次都成立；但具体哪一版赢哪个指标变了。单次、小样本（每版 30 题）、LLM 当裁判跑出来的精确排名不是定论——跑两次做对比，才分得清信号和噪声。
-3. **LLM 当 Reranker 的工程取舍**——LLM 打分方差大、延迟高（单次 reranker 调用就吃掉约 12s）；cross-encoder 是更稳的工程默认。
+3. **LLM 当 Reranker 的工程取舍**——LLM 打分方差大、延迟高（单次 reranker 调用就吃掉约 12s）；现在 V7 已接入 Cross-Encoder，把重排改成本地确定性 pair scoring，但仍需要补同口径 latency benchmark。
 4. **数据集偏置要承认**——结论是在"LLM 合成邮件 + LLM 生成测试题"上跑出来的，换真实业务数据可能反转。
 
 ### 改进方向（按 ROI 排序）
 
-- [ ] 把 Reranker 从 LLM 换成 `bge-reranker-v2-m3`（cross-encoder）——毫秒级、确定性打分
+- [x] 把 Reranker 从 LLM scorer 扩展为 `llm|cross_encoder` 双 backend，并新增 V7（`bge-reranker-v2-m3`）消融
+- [ ] 补 Cross-Encoder reranker latency benchmark，决定是否适合默认开启
 - [ ] Query Rewrite 改成"原 query + 改写 query"双路检索取并集
 - [ ] RAGAS testset 从每版 30 题加大到 100 题 × 多次取均值，压低评测噪声
 - [ ] 用真实业务邮件（脱敏）跑一遍，看结论是否一致

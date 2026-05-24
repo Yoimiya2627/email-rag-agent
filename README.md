@@ -31,7 +31,7 @@
 - **MCP-ready Tool Backend**：工具定义集中在 `agents/tool_registry.py`，同源派生本地 function schema 和 FastMCP 注册。
 - **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache；MCP server 支持 allowed-tools 和 read-only 工具可见性策略。
 - **Human-in-the-loop 安全链路**：高风险 `send_email` 只创建 pending approval；审批通过后默认 simulated，配置 `MAIL_PROVIDER=gmail` 时只创建 Gmail draft，不直接发送。
-- **Agent EvalOps**：100 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
+- **Agent EvalOps**：105 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
 - **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI。
 - **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断、rerank 输入截断、生成上下文预算。
 - **133 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
@@ -53,7 +53,7 @@
 - 多轮记忆：按 session 隔离，默认保留 5 轮滑窗。
 - SSE 真流式：worker 线程 + `asyncio.Queue` 桥接同步 LLM SDK 与 FastAPI SSE。
 - Self-RAG：LangGraph 状态机，检索结果不相关时 rewrite query，最多重试 2 次。
-- Agent EvalOps：`data/agent_testset.json` 维护 100 条带类型/风险/期望工具/禁用工具/成功标准的任务，eval 可生成 Markdown 报告并通过 gate 脚本做阈值检查。
+- Agent EvalOps：`data/agent_testset.json` 维护 105 条带类型/风险/期望工具/禁用工具/成功标准的任务，eval 可生成 Markdown 报告并通过 gate 脚本做阈值检查；离线 gate 的最低任务数门槛仍是 `>=100`。
 
 ## 快速开始
 
@@ -279,7 +279,7 @@ Agent eval：
 .\.venv\Scripts\python.exe scripts\run_agent_eval.py --limit 8 --report-output data/eval_results/agent_eval_report.md
 ```
 
-`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate、forbidden_tool_violation_rate，并把每条记录关联 `trace_id`。任务集现在是 100 条元数据化 case，每条包含 `id`、`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；报告会给出 `failure_category`，用于区分 missing_expected_tool、forbidden_tool、tool_error、approval_required、max_steps 等问题。
+`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate、forbidden_tool_violation_rate，并把每条记录关联 `trace_id`。任务集现在是 105 条元数据化 case（gate 门槛 `>=100`），每条包含 `id`、`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；报告会给出 `failure_category`，用于区分 missing_expected_tool、forbidden_tool、tool_error、approval_required、max_steps 等问题。
 
 离线 gate 不调用 LLM，只读取已有 `agent_eval.json`：
 
@@ -395,5 +395,5 @@ docs/                          架构、评测、复盘；docs/面经 为本地�
 - `send_email` 已支持审批后 simulated 或 Gmail draft-only；真实发送、撤销策略和企业邮箱多用户授权仍是后续工作。
 - `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
 - MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
-- Agent eval 已扩到 100 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
+- Agent eval 已扩到 105 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
 - 检索侧已接入 Cross-Encoder reranker；下一步应补 rerank latency benchmark、真实邮箱 gold chunk 标注和 context_recall。

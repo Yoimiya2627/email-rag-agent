@@ -509,7 +509,7 @@ flowchart LR
 tool_errors、approval_required、avg_tool_latency_ms。`scripts/run_agent_eval.py` 会把
 `trace_id` 写入每条评测记录，方便从 eval case 反查真实工具轨迹。
 
-`agents/evalops.py` 把 trace 和 eval record 连接起来：100 条 agent 任务集每条都带
+`agents/evalops.py` 把 trace 和 eval record 连接起来：当前 105 条 agent 任务集每条都带
 `task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；
 评测记录会生成 `failure_category`，区分 forbidden_tool、missing_expected_tool、
 tool_error、approval_required、max_steps、judge_failed 等失败原因，并可输出
