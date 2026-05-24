@@ -490,13 +490,13 @@ choice.message.refusal # 拒答字段（部分模型）
 1. **没有评测就没有改进**——"项目里加了 Reranker 和 Rewrite"听上去很完整，但只有把每个组件的 ROI 量化出来，才知道"全开"未必最优。
 2. **要怀疑自己的评测**——这套消融跑过两次，"三个指标的赢家分散、不存在全场最优"这个**模式**两次都成立；但具体哪一版赢哪个指标变了。单次、小样本（每版 30 题）、LLM 当裁判跑出来的精确排名不是定论——跑两次做对比，才分得清信号和噪声。
 3. **LLM 当 Reranker 的工程取舍**——LLM 打分方差大、延迟高（单次 reranker 调用就吃掉约 12s）；现在 V7 已接入 Cross-Encoder，把重排改成本地确定性 pair scoring，Phase 8 又补了 rerank-only benchmark harness 和 serving policy，但正式端到端 latency 仍要在真实模型环境多轮复测。
-4. **数据集偏置要承认**——结论是在"LLM 合成邮件 + LLM 生成测试题"上跑出来的，换真实业务数据可能反转。Phase 9/10 已补 Gmail read-only 同步和 context_recall harness，下一步要把这个风险变成可验证数据。
+4. **数据集偏置要承认**——结论是在"LLM 合成邮件 + LLM 生成测试题"上跑出来的，换真实业务数据可能反转。Phase 9/10 已补 Gmail read-only 同步、synthetic gold chunk baseline 和 context_recall harness；当前 V7 在前 30 题上把 `mean_context_recall` 从 V2 的 0.6167 提到 0.8000。下一步要把这个流程迁移到个人/脱敏真实邮箱。
 
 ### 改进方向（按 ROI 排序）
 
 - [x] 把 Reranker 从 LLM scorer 扩展为 `llm|cross_encoder` 双 backend，并新增 V7（`bge-reranker-v2-m3`）消融
 - [x] 补 Cross-Encoder reranker latency benchmark harness 和 V2/V3/V7 serving policy
-- [x] 补 Gmail read-only 增量同步和 gold chunk `context_recall` 评测脚本
+- [x] 补 Gmail read-only 增量同步、synthetic gold chunk baseline 和 `context_recall` 评测结果
 - [ ] 在真实模型环境跑 30+ 题 × 多轮 latency，决定是否适合默认开启
 - [ ] 在个人/脱敏真实邮箱上完成 gold chunk 标注，产出正式 context_recall 数据
 - [ ] Query Rewrite 改成"原 query + 改写 query"双路检索取并集

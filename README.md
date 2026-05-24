@@ -34,7 +34,7 @@
 - **Human-in-the-loop 安全链路**：高风险 `send_email` 只创建 pending approval；审批通过后默认 simulated，配置 `MAIL_PROVIDER=gmail` 时只创建 Gmail draft，不直接发送。
 - **真实邮箱 read-only 接入**：Gmail read-only provider 使用独立只读 OAuth scope，把真实邮件增量同步到本地忽略 JSON，再复用清洗、切分、embedding 索引链路。
 - **Agent EvalOps**：105 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
-- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI；新增 gold chunk 模板和 `context_recall` 确定性评测脚本。
+- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI；新增 synthetic gold chunk baseline 和 `context_recall` 确定性评测，V7 在 30 题上达到 `mean_context_recall=0.8000`。
 - **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断、rerank 输入截断、生成上下文预算。
 - **146 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、reranker serving policy、Gmail read-only sync、context_recall eval、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
 
@@ -345,13 +345,20 @@ RAG 消融脚本：
 | V6 | true | true | false | llm | true | 0.9600 | 0.8967 | 0.6050 |
 | V7 | true | true | true | cross_encoder | false | **0.9750** | **0.9267** | 0.6103 |
 
+确定性 context_recall（`data/gold_chunks.json`，前 30 题 synthetic gold chunks）：
+
+| Version | n | mean_context_recall | chunk_hit_rate | perfect_recall_rate |
+|---|---:|---:|---:|---:|
+| V2 | 30 | 0.6167 | 0.6333 | 0.6000 |
+| V7 | 30 | **0.8000** | **0.8000** | **0.8000** |
+
 当前结论：
 
 - V2 仍适合作为默认对话路径：组件少、延迟低，relevancy 处于第一梯队。
-- V7 验证了 Cross-Encoder 的工程价值：不再把 rerank 变成一次额外 LLM 评分调用，本次 30 题实测 relevancy / faithfulness 最高，precision 比 V2 有提升但低于旧 LLM V3。
+- V7 验证了 Cross-Encoder 的工程价值：不再把 rerank 变成一次额外 LLM 评分调用，本次 30 题实测 relevancy / faithfulness 最高，precision 比 V2 有提升但低于旧 LLM V3；在同一批 gold chunks 上，`mean_context_recall` 从 V2 的 0.6167 提升到 0.8000。
 - V3 的旧 LLM reranker 仍拿到最高 context_precision，但代价是额外 LLM 延迟和评分方差；生产路径更适合作为可选高精度模式，而不是默认模式。
 - Phase 8 已补 `core.reranker_policy` 和 `scripts/measure_reranker_latency.py`：默认对话仍选 V2；质量优先选 V7；需要高 precision 且允许额外 LLM scorer 时才把 V3 当对照。
-- Phase 10 已补 `scripts/evaluate_context_recall.py`：可从 RAGAS testset 生成人工 gold chunk 模板，并用 `gold_chunk_ids` 对 V2/V7 等版本计算确定性的 `context_recall`。
+- Phase 10 已补 `scripts/evaluate_context_recall.py`、`data/gold_chunks.json` 和 `data/eval_results/context_recall.json`：可从 RAGAS testset 生成人工 gold chunk 模板，并用 `gold_chunk_ids` 对 V2/V7 等版本计算确定性的 `context_recall`。
 - Query rewrite 在部分场景提升 relevancy，但需要更稳 benchmark 和真实数据集验证。
 
 详细数据见 [docs/evaluation.md](docs/evaluation.md)。
@@ -435,4 +442,4 @@ docs/                          架构、评测、复盘；docs/面经 为本地�
 - `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
 - MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
 - Agent eval 已扩到 105 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
-- 检索侧已接入 Cross-Encoder reranker，并补了 rerank-only benchmark harness、serving policy 和 context_recall harness；下一步是在真实模型环境跑 30+ 题 × 多轮 latency、加 batch 推理，并基于真实邮箱 gold chunk 产出正式 recall 数据。
+- 检索侧已接入 Cross-Encoder reranker，并补了 rerank-only benchmark harness、serving policy 和 synthetic gold context_recall baseline；下一步是在真实模型环境跑 30+ 题 × 多轮 latency、加 batch 推理，并基于真实邮箱 gold chunk 产出正式 recall 数据。

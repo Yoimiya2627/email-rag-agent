@@ -535,8 +535,10 @@ RAG 侧的版本评测由 `scripts/run_ragas_eval.py` 负责，端到端 latency
 只测 rerank step，避免把 generation/API 抖动误归因给 Cross-Encoder。上线策略由
 `core.reranker_policy.choose_reranker_policy()` 统一表达：默认对话/低延迟预算走 V2，
 质量优先走 V7，高 precision 且显式允许额外 LLM scorer 时才把 V3 当对照。
-Phase 10 新增 `scripts/evaluate_context_recall.py`，从人工标注的 `gold_chunk_ids`
-计算确定性 `context_recall`、chunk hit rate 和 perfect recall rate。
+Phase 10 新增 `scripts/evaluate_context_recall.py`，从 `gold_chunk_ids`
+计算确定性 `context_recall`、chunk hit rate 和 perfect recall rate。当前 synthetic
+gold baseline 已写入 `data/gold_chunks.json`，V2/V7 结果见
+`data/eval_results/context_recall.json`（V7 `mean_context_recall=0.8000`）。
 
 ---
 
