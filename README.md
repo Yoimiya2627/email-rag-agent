@@ -34,7 +34,7 @@
 - **Agent EvalOps**：105 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
 - **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI。
 - **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断、rerank 输入截断、生成上下文预算。
-- **133 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
+- **140 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、reranker serving policy、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
 
 ## Demo
 
@@ -300,6 +300,8 @@ RAG 消融脚本：
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_ragas_eval.py --versions V2
 .\.venv\Scripts\python.exe scripts\run_ragas_eval.py
+.\.venv\Scripts\python.exe scripts\measure_latency.py --limit 10
+.\.venv\Scripts\python.exe scripts\measure_reranker_latency.py --versions V2,V7
 ```
 
 7 个版本：
@@ -319,6 +321,7 @@ RAG 消融脚本：
 - V2 仍适合作为默认对话路径：组件少、延迟低，relevancy 处于第一梯队。
 - V7 验证了 Cross-Encoder 的工程价值：不再把 rerank 变成一次额外 LLM 评分调用，本次 30 题实测 relevancy / faithfulness 最高，precision 比 V2 有提升但低于旧 LLM V3。
 - V3 的旧 LLM reranker 仍拿到最高 context_precision，但代价是额外 LLM 延迟和评分方差；生产路径更适合作为可选高精度模式，而不是默认模式。
+- Phase 8 已补 `core.reranker_policy` 和 `scripts/measure_reranker_latency.py`：默认对话仍选 V2；质量优先选 V7；需要高 precision 且允许额外 LLM scorer 时才把 V3 当对照。
 - Query rewrite 在部分场景提升 relevancy，但需要更稳 benchmark 和真实数据集验证。
 
 详细数据见 [docs/evaluation.md](docs/evaluation.md)。
@@ -329,11 +332,11 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前回归结果：`133 passed`。
+当前回归结果：`140 passed`。
 
 覆盖重点：
 
-- RAG：chunker、retriever、pipeline、Cross-Encoder reranker、generation context budget、memory、coordinator、eval。
+- RAG：chunker、retriever、pipeline、Cross-Encoder reranker、reranker serving policy、generation context budget、memory、coordinator、eval。
 - Agent：tool registry、tools、agent loop、agent eval、EvalOps failure attribution/report/gate。
 - MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL、tool policy、audit query API。
 - Safety：approval store、`send_email` pending approval、approve/reject、Gmail draft provider。
@@ -378,14 +381,17 @@ agents/
   graph_workflow.py            LangGraph Self-RAG
 core/
   pipeline.py                  标准 RAG pipeline
+  reranker_policy.py           Reranker serving policy：V2/V3/V7 业务选型
   retriever.py                 向量 + BM25 + RRF
   reranker.py                  LLM / Cross-Encoder reranker + circuit breaker
 scripts/
   run_ragas_eval.py            RAGAS-style 消融评测
+  measure_latency.py           端到端 RAG latency benchmark
+  measure_reranker_latency.py  Reranker-only latency benchmark
   run_agent_eval.py            Agent 任务评测
   check_agent_eval_gate.py     Agent EvalOps 离线阈值 gate
   summarize_agent_traces.py    Trace 汇总
-tests/                         133 个单测
+tests/                         140 个单测
 docs/                          架构、评测、复盘；docs/面经 为本地忽略目录
 ```
 
@@ -396,4 +402,4 @@ docs/                          架构、评测、复盘；docs/面经 为本地�
 - `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
 - MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
 - Agent eval 已扩到 105 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
-- 检索侧已接入 Cross-Encoder reranker；下一步应补 rerank latency benchmark、真实邮箱 gold chunk 标注和 context_recall。
+- 检索侧已接入 Cross-Encoder reranker，并补了 rerank-only benchmark harness 与 serving policy；下一步是在真实模型环境跑 30+ 题 × 多轮 latency、加 batch 推理、真实邮箱 gold chunk 标注和 context_recall。

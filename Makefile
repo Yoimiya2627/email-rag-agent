@@ -1,4 +1,4 @@
-.PHONY: help install index api ui run mcp eval agent-eval trace-summary eval-all latency test clean
+.PHONY: help install index api ui run mcp eval agent-eval trace-summary eval-all latency reranker-latency test clean
 
 # Prefer the project venv if present. Override with `make PYTHON=python3 install`.
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
@@ -15,8 +15,9 @@ help:
 	@echo "  make eval        run RAGAS on V2 only (~3 min, recommended config)"
 	@echo "  make agent-eval  run agent task evaluation"
 	@echo "  make trace-summary summarize agent trace JSONL"
-	@echo "  make eval-all    run all 6 ablation versions (~30 min)"
+	@echo "  make eval-all    run all 7 ablation versions (~30 min)"
 	@echo "  make latency     measure end-to-end latency"
+	@echo "  make reranker-latency measure reranker-only latency"
 	@echo "  make test        run unit tests"
 	@echo "  make clean       remove chroma_db and __pycache__ (model + eval results kept)"
 
@@ -57,6 +58,9 @@ eval-all:
 
 latency:
 	$(PYTHON) scripts/measure_latency.py
+
+reranker-latency:
+	$(PYTHON) scripts/measure_reranker_latency.py
 
 test:
 	$(PYTHON) -m pytest tests/ -v

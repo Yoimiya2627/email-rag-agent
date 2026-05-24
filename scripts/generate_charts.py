@@ -6,7 +6,7 @@ Reads:
 
 Writes:
   docs/charts/v1-v6-radar.png
-  docs/charts/v1-v6-latency.png
+  docs/charts/v1-v7-latency.png
 
 Re-run after re-running run_ragas_eval.py / measure_latency.py to refresh charts.
 """
@@ -162,7 +162,7 @@ def make_latency(latency_results):
     ax.grid(True, axis="y", alpha=0.3)
     ax.set_axisbelow(True)
 
-    out = OUT_DIR / "v1-v6-latency.png"
+    out = OUT_DIR / "v1-v7-latency.png"
     fig.savefig(out, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return out

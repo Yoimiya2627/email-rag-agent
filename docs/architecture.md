@@ -198,7 +198,7 @@ sequenceDiagram
     API-->>U: 200 OK + JSON
 ```
 
-**链路总耗时**：默认 V2 配置约 8.7s（mean）/ 14.4s（p95）；全开 V4 配置约 24s；V7 把重排从额外 LLM 调用切到本地 Cross-Encoder。
+**链路总耗时**：默认 V2 配置约 8.7s（mean）/ 14.4s（p95）；全开 V4 配置约 24s；V7 把重排从额外 LLM 调用切到本地 Cross-Encoder。Phase 8 新增 `scripts/measure_reranker_latency.py` 隔离测 rerank step，并用 `core.reranker_policy` 固化 V2/V3/V7 的 serving 取舍。
 **LLM 调用清单**：意图分类 → 改写 → 过滤抽取 → 生成答案 = 常规最多 4 次；只有 LLM reranker backend 才会额外增加一次重排打分。
 **真正的检索（向量 + BM25）只占 ~30ms**——瓶颈在 LLM 调用次数，详见 [`docs/evaluation.md`](evaluation.md)。
 
@@ -526,6 +526,12 @@ max_steps 触发率做阈值 gate。
 `data/eval_results/agent_eval.json`，报告可写到
 `data/eval_results/agent_eval_report.md`。
 
+RAG 侧的版本评测由 `scripts/run_ragas_eval.py` 负责，端到端 latency 由
+`scripts/measure_latency.py` 负责；Phase 8 新增 `scripts/measure_reranker_latency.py`
+只测 rerank step，避免把 generation/API 抖动误归因给 Cross-Encoder。上线策略由
+`core.reranker_policy.choose_reranker_policy()` 统一表达：默认对话/低延迟预算走 V2，
+质量优先走 V7，高 precision 且显式允许额外 LLM scorer 时才把 V3 当对照。
+
 ---
 
 ## 十一、目录结构
@@ -558,6 +564,7 @@ E:/智能邮件agent/
 │   ├── embedder.py               # bge-m3 嵌入 + ChromaDB 读写
 │   ├── retriever.py              # Vector + BM25 + RRF（带缓存）
 │   ├── pipeline.py               # 统一检索链路 retrieve()（agent/eval 共用）
+│   ├── reranker_policy.py        # V2/V3/V7 reranker serving policy
 │   ├── reranker.py               # LLM / Cross-Encoder 重排（带熔断器）
 │   ├── generator.py              # 答案生成（含上下文预算和流式）
 │   └── memory.py                 # 多轮对话滑窗（线程安全）
@@ -567,6 +574,8 @@ E:/智能邮件agent/
 │   ├── generate_emails.py        # LLM 生成 5000 封测试邮件
 │   ├── generate_ragas_data.py    # 生成 RAGAS 测试集
 │   ├── run_ragas_eval.py         # 7 版本消融评测
+│   ├── measure_latency.py        # 端到端 RAG latency benchmark
+│   ├── measure_reranker_latency.py # rerank-only latency benchmark + policy output
 │   ├── run_agent_eval.py         # Agent 任务评测 + EvalOps report
 │   ├── check_agent_eval_gate.py   # Agent EvalOps 离线 gate
 │   ├── summarize_agent_traces.py # Trace 汇总

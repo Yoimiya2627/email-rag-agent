@@ -3,12 +3,12 @@
 
 设计取舍：
   - 复用 run_ragas_eval.py 的 VERSION_FLAGS，只测延迟不打 RAGAS 分数（省一次 LLM 调用）。
-  - 默认 N=5，全 6 版在含 reranker 的版本上仍要 ~10 分钟，按需用 --limit 调整。
+  - 默认 N=5，全 7 版在含 reranker 的版本上仍要较久，按需用 --limit 调整。
   - 只测 retriever + rerank + generate 这条主链路（不含意图分类/Self-RAG），与 evaluation.md 第 3 节延迟列对应。
   - 对每题记录 wall-clock 时间，剔除最高最低后取均值（小样本下抗 API 抖动）。
 
 用法:
-  python scripts/measure_latency.py                       # 默认 6 版 × 5 题
+  python scripts/measure_latency.py                       # 默认 7 版 × 5 题
   python scripts/measure_latency.py --versions V2,V4 --limit 10
   python scripts/measure_latency.py --output data/eval_results/latency.json
 """
@@ -80,7 +80,7 @@ def measure_version(version: str, questions: list) -> dict:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--versions", default="V1,V2,V3,V4,V5,V6")
+    parser.add_argument("--versions", default="V1,V2,V3,V4,V5,V6,V7")
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--output", default=str(OUTPUT_PATH))
     args = parser.parse_args()

@@ -33,8 +33,9 @@ function Show-Help {
     Write-Host "  .\tasks.ps1 eval        run RAGAS on V2 only (~3 min, recommended config)"
     Write-Host "  .\tasks.ps1 agent-eval run agent task evaluation"
     Write-Host "  .\tasks.ps1 trace-summary summarize agent trace JSONL"
-    Write-Host "  .\tasks.ps1 eval-all    run all 6 ablation versions (~30 min)"
+    Write-Host "  .\tasks.ps1 eval-all    run all 7 ablation versions (~30 min)"
     Write-Host "  .\tasks.ps1 latency     measure end-to-end latency"
+    Write-Host "  .\tasks.ps1 reranker-latency measure reranker-only latency"
     Write-Host "  .\tasks.ps1 test        run unit tests"
     Write-Host "  .\tasks.ps1 clean       remove chroma_db and __pycache__"
 }
@@ -107,6 +108,10 @@ function Invoke-Latency {
     & $Python scripts/measure_latency.py
 }
 
+function Invoke-RerankerLatency {
+    & $Python scripts/measure_reranker_latency.py
+}
+
 function Invoke-Test {
     & $Python -m pytest tests/ -v
 }
@@ -138,6 +143,7 @@ switch ($Cmd.ToLower()) {
     "trace-summary" { Invoke-TraceSummary }
     "eval-all" { Invoke-EvalAll }
     "latency"  { Invoke-Latency }
+    "reranker-latency" { Invoke-RerankerLatency }
     "test"     { Invoke-Test }
     "clean"    { Invoke-Clean }
     default {

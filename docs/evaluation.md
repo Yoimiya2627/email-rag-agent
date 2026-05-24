@@ -56,7 +56,7 @@ Q1 OKR 回顾会议定于什么时间、在哪个地点举行？     → 单邮�
 
 ## 3. 7 版配置 × 三指标 × 延迟
 
-每版评测的具体源数据：`data/eval_results/V{1..7}.json`（含 30 条逐题记录）；汇总：`data/eval_results/comparison.json`。延迟表目前来自 `data/eval_results/latency.json` 的 V1-V6 历史重跑；V7 已完成质量评测，后续需单独补 Cross-Encoder latency benchmark。
+每版评测的具体源数据：`data/eval_results/V{1..7}.json`（含 30 条逐题记录）；汇总：`data/eval_results/comparison.json`。端到端延迟表目前来自 `data/eval_results/latency.json` 的 V1-V6 历史重跑；V7 已完成质量评测，Phase 8 已补 `scripts/measure_reranker_latency.py` 做 rerank-only benchmark 和 `core.reranker_policy` 做上线策略，但 V7 的正式端到端延迟仍需在真实模型环境补跑。
 
 | 版本 | BM25 | RRF | Reranker | Backend | Rewrite | answer_relevancy | faithfulness | context_precision | 端到端延迟 mean / p95（s） |
 |---|---|---|---|---|---|---|---|---|---|
@@ -66,15 +66,15 @@ Q1 OKR 回顾会议定于什么时间、在哪个地点举行？     → 单邮�
 | V4 | ✅ | ✅ | ✅ | llm | ✅ | 0.9533 | 0.8783 | 0.6427 | 24.2 / 38.0 |
 | V5 | ✅ | ❌ | ✅ | llm | ✅ | 0.9467 | 0.9083 | 0.6147 | 24.4 / 34.8 |
 | V6 | ✅ | ✅ | ❌ | llm | ✅ | 0.9600 | 0.8967 | 0.6050 | 11.0 / 14.8 |
-| **V7** | ✅ | ✅ | ✅ | cross_encoder | ❌ | **0.9750** | **0.9267** | 0.6103 | 待补 |
+| **V7** | ✅ | ✅ | ✅ | cross_encoder | ❌ | **0.9750** | **0.9267** | 0.6103 | 端到端待补；rerank-only 已有脚本 |
 
-> **延迟口径说明**：度量的是 **RAG 主链路** —— `query rewrite → filter 抽取 → hybrid_search → rerank → generate`，不包含 Coordinator 意图分类、Self-RAG 反思循环、SSE 前端渲染、HTTP 请求链路。数字是 **10 题/版** 跑出的 **trimmed mean**（去掉最高最低后均值，抗 API 抖动）和 **p95**，源数据 `data/eval_results/latency.json`，复现脚本 `scripts/measure_latency.py --limit 10`。**由于每版仅 10 题，p95 在该样本量下接近最大值**，主要用于观察尾部延迟风险，正式 benchmark 应跑 30+ 题让 p95 真正反映 95 分位。V1 p95 33s 是冷启动（首题模型加载）造成的离群点，trimmed mean 7.6s 是稳态。绝对值会随 DeepSeek API 抖动浮动 ±20%，但版本间相对差距稳定。
+> **延迟口径说明**：度量的是 **RAG 主链路** —— `query rewrite → filter 抽取 → hybrid_search → rerank → generate`，不包含 Coordinator 意图分类、Self-RAG 反思循环、SSE 前端渲染、HTTP 请求链路。数字是 **10 题/版** 跑出的 **trimmed mean**（去掉最高最低后均值，抗 API 抖动）和 **p95**，源数据 `data/eval_results/latency.json`，复现脚本 `scripts/measure_latency.py --limit 10`。**由于每版仅 10 题，p95 在该样本量下接近最大值**，主要用于观察尾部延迟风险，正式 benchmark 应跑 30+ 题让 p95 真正反映 95 分位。V1 p95 33s 是冷启动（首题模型加载）造成的离群点，trimmed mean 7.6s 是稳态。绝对值会随 DeepSeek API 抖动浮动 ±20%，但版本间相对差距稳定。Phase 8 新增的 `scripts/measure_reranker_latency.py` 只测 rerank step，用于隔离 V2/V3/V7 的重排成本；`--mock-cross-encoder` 只能作为 CI smoke，不可当成真实延迟数字发布。
 
 ### 逐组件看：单个 delta 的方向并不稳定
 
 很容易给每个组件配一个"单维度故事"——加 BM25+RRF 让某指标涨、加 reranker 让 precision 涨之类。但把这套消融**跑两次对比**就会发现：**单个组件对单个指标的影响方向，并不都稳定**。比如"加 query rewrite 对 faithfulness 是正还是负"，两次跑给出的方向就不一致。
 
-能稳的只有两类信息：① **延迟差异**（旧 LLM reranker / rewrite 各引入一次 LLM 调用，这是确定的——见上表延迟列，LLM reranker 单组件就吃掉 ~12s；Cross-Encoder 已把 V7 的重排改成本地模型调用，但仍需补正式 latency benchmark）；② **跨多次都成立的模式**（见 §4）。单个 RAGAS delta 的正负不要过度解读——n=30 + LLM 打分的方差足以翻转它。
+能稳的只有两类信息：① **延迟差异**（旧 LLM reranker / rewrite 各引入一次 LLM 调用，这是确定的——见上表延迟列，LLM reranker 单组件就吃掉 ~12s；Cross-Encoder 已把 V7 的重排改成本地模型调用，Phase 8 已补 rerank-only benchmark harness，但正式端到端 latency 还要在真实模型环境补跑）；② **跨多次都成立的模式**（见 §4）。单个 RAGAS delta 的正负不要过度解读——n=30 + LLM 打分的方差足以翻转它。
 
 ---
 
@@ -114,7 +114,7 @@ Q1 OKR 回顾会议定于什么时间、在哪个地点举行？     → 单邮�
 
 ### 默认上线选 V2
 
-V2 的理由不靠"它精确排第一"，而靠两个**够稳的**事实：① 不带 reranker/rewrite，链路最短、失败面最小；② 历史 latency benchmark 中 mean 8.7s，是当前有正式延迟数据的最低延迟路径之一。V7 已证明 Cross-Encoder 在质量上值得接入，但默认是否打开还需要补 latency benchmark 和业务 SLA 取舍。组件不是越多越好。
+V2 的理由不靠"它精确排第一"，而靠两个**够稳的**事实：① 不带 reranker/rewrite，链路最短、失败面最小；② 历史 latency benchmark 中 mean 8.7s，是当前有正式延迟数据的最低延迟路径之一。V7 已证明 Cross-Encoder 在质量上值得接入；Phase 8 进一步把选择逻辑沉淀成 `choose_reranker_policy()`：默认对话/低延迟预算选 V2，质量优先选 V7，高 precision 且允许额外 LLM scorer 时才把 V3 当对照。组件不是越多越好。
 
 V6（V4 去掉 reranker）也值得记一下：延迟 mean 11s，跟 V2 几乎平齐，三维指标也都接近——说明 reranker 那 ~12s 是 V3/V4 延迟的主要来源。
 
@@ -125,7 +125,7 @@ V6（V4 去掉 reranker）也值得记一下：延迟 mean 11s，跟 V2 几乎�
 1. **30 题样本，方差较大**：正式 benchmark 应跑 100 题 × 3 次取均值。当前数据足以揭示"赢家分散"这个**模式**，但版本间精确排名会随重跑变动（§4 给了两次跑的对比），不要把单次排名当定论。
 2. **合成数据偏向"单邮件可答"**：testset 由 LLM 基于单封邮件生成 QA 对，跨邮件多跳推理题占比低。这是 rewrite 在合成数据上 ROI 偏低的可能原因之一；真实邮箱（多线程对话、跨邮件主题串联）上 rewrite 价值可能反转。
 3. **缺 context_recall**：合成 testset 没有人工标注的"应召回 chunk id"，无法测召回率。
-4. **Cross-Encoder 已接入但延迟 benchmark 未补齐**：旧 LLM reranker 的延迟和方差问题已经通过 V7 的 `RERANKER_BACKEND=cross_encoder` 路径缓解；下一步要补同口径 latency benchmark、真实邮箱 gold chunk 标注和 `context_recall`，再决定是否默认开启 reranker。
+4. **Cross-Encoder benchmark 已有 harness，但正式数字未补齐**：旧 LLM reranker 的延迟和方差问题已经通过 V7 的 `RERANKER_BACKEND=cross_encoder` 路径缓解；Phase 8 增加了 `scripts/measure_reranker_latency.py` 隔离测 V2/V3/V7 的 rerank step，并把上线策略写进 `core.reranker_policy`。下一步要在真实模型环境跑 30+ 题 × 多轮 latency、真实邮箱 gold chunk 标注和 `context_recall`，再决定是否默认开启 reranker。
 5. **延迟样本仍偏小**：当前数字是 10 题/版的 trimmed mean + p95，足以做相对排序；正式上线前应跑 30+ 题 × 多次取均值，并在不同时段重复以观测 API 抖动方差。源数据 `data/eval_results/latency.json`，复现 `python scripts/measure_latency.py --limit 10`。
 
 ---
@@ -139,9 +139,16 @@ python scripts/run_ragas_eval.py
 # 只跑指定版本
 python scripts/run_ragas_eval.py --versions V1,V2,V7 --limit 30
 
+# 端到端延迟：默认 V1-V7；发布数字前建议 limit>=30 且多轮
+python scripts/measure_latency.py --limit 10
+
+# Phase 8：只测 rerank step，隔离 V2/V3/V7 重排成本
+python scripts/measure_reranker_latency.py --versions V2,V7 --limit 30 --runs 3
+
 # 输出
 data/eval_results/V{1..7}.json     # 每版逐题记录（含 answer / contexts）
 data/eval_results/comparison.json  # 三维度均值汇总
+data/eval_results/reranker_latency.json  # Phase 8 rerank-only latency
 ```
 
 评测脚本会自动应用每版的 `ENABLE_*` flag、重置 reranker 熔断器（避免上一版的失败计数泄漏到下一版，详见 [`docs/technical_retrospective.md`](technical_retrospective.md) §4）、把 LLM 打分失败的样本降级到向量相似度。
@@ -178,11 +185,20 @@ V7 保留 V2 的 `BM25 + RRF` 基线，只把 reranker backend 切到 `cross_enc
 - `context_precision` 从 V2 的 0.5713 提升到 0.6103，但没有超过旧 LLM reranker V3 的 0.7147。面试里不要说“Cross-Encoder 全面碾压”，更准确的说法是：**Cross-Encoder 让重排从 LLM 调用变成本地确定性模型调用，提升了回答相关性和有据性，同时把成本/稳定性拉回可控范围；如果业务目标是人工复核 top-K 干净度，旧 V3 仍是一个高精度对照组。**
 - 本次 V7 运行时发现 `HF_ENDPOINT=https://hf-mirror.com` 对 `BAAI/bge-reranker-v2-m3` 拉取不稳定；正式复现命令使用 `HF_ENDPOINT=https://huggingface.co`，并已把 `.env.example` 更新为官方端点优先。
 
+### Phase 8：Reranker benchmark 与 serving policy
+
+V7 证明质量收益后，Phase 8 补的是工程化闭环：不是直接把 Cross-Encoder 默认打开，而是先把"什么时候开"和"开了要付多少 rerank 成本"做成可验证对象。
+
+- `scripts/measure_reranker_latency.py`：只测 `core.reranker.rerank()`，把 generation 和 DeepSeek 回答耗时排除出去；支持 V2（无 rerank）、V3（LLM scorer）和 V7（Cross-Encoder）对比。
+- `core.reranker_policy.choose_reranker_policy()`：把当前评测结论固化为 serving 决策。默认 conversation / 低延迟预算走 V2；quality / faithfulness / relevancy 走 V7；precision 场景默认走 V7，只有 `allow_llm_reranker=true` 时才把 V3 当高 precision 对照。
+- `--mock-cross-encoder`：用于 CI smoke，确保脚本入口、candidate 构造、summary 计算和输出 JSON 都能跑通；这类 mock 结果不能写进正式 benchmark 表。
+
 复现：
 
 ```powershell
 $env:HF_ENDPOINT='https://huggingface.co'
 .\.venv\Scripts\python.exe scripts\run_ragas_eval.py --versions V7 --limit 30 --output data\eval_results\comparison_v7.json
+.\.venv\Scripts\python.exe scripts\measure_reranker_latency.py --versions V2,V7 --limit 30 --runs 3
 ```
 
 正式汇总文件：
