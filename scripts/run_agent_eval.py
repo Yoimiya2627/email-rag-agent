@@ -125,6 +125,17 @@ def aggregate(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def load_testset(path: str | Path = TESTSET_PATH, limit: int | None = None) -> List[Dict[str, Any]]:
+    """Load an agent eval taskset from the given JSON path."""
+    with Path(path).open(encoding="utf-8") as f:
+        testset = json.load(f)
+    if not isinstance(testset, list):
+        raise ValueError(f"{path} must contain a JSON array")
+    if limit:
+        return testset[:limit]
+    return testset
+
+
 def load_completed_records(output_path: str | Path) -> List[Dict[str, Any]]:
     """Load completed eval records from a previous checkpoint."""
     path = Path(output_path)
@@ -209,16 +220,14 @@ def write_eval_outputs(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Max tasks to run")
+    parser.add_argument("--testset-path", default=str(TESTSET_PATH), help="Path to agent testset JSON")
     parser.add_argument("--output", default=str(RESULTS_DIR / "agent_eval.json"))
     parser.add_argument("--report-output", default=None, help="Optional Markdown EvalOps report path")
     parser.add_argument("--trace-input", default=None, help="Optional trace JSONL path for failure attribution")
     parser.add_argument("--resume", action="store_true", help="Resume from existing output records")
     args = parser.parse_args()
 
-    with open(TESTSET_PATH, encoding="utf-8") as f:
-        testset = json.load(f)
-    if args.limit:
-        testset = testset[: args.limit]
+    testset = load_testset(args.testset_path, args.limit)
 
     records: List[Dict[str, Any]] = load_completed_records(args.output) if args.resume else []
     if args.resume and records:

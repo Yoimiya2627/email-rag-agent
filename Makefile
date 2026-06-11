@@ -1,4 +1,4 @@
-.PHONY: help install install-lock index api ui run mcp eval agent-eval agent-eval-smoke agent-eval-full trace-summary eval-all latency reranker-latency gmail-preflight gmail-sync gmail-sync-index gmail-gold-template gmail-gold-quality context-recall context-recall-real test compile verify clean
+.PHONY: help install install-lock index api ui run mcp eval agent-eval agent-eval-smoke agent-eval-full gmail-agent-testset agent-eval-real agent-eval-real-gate trace-summary eval-all latency reranker-latency gmail-preflight gmail-sync gmail-sync-index gmail-gold-template gmail-gold-quality context-recall context-recall-real test compile verify clean
 
 # Prefer the project venv if present. Override with `make PYTHON=python3 install`.
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
@@ -17,6 +17,9 @@ help:
 	@echo "  make agent-eval  run agent task evaluation"
 	@echo "  make agent-eval-smoke run offline gate for current smoke eval results"
 	@echo "  make agent-eval-full  run strict 100+ task offline gate"
+	@echo "  make gmail-agent-testset build private real Gmail agent testset"
+	@echo "  make agent-eval-real run private real Gmail agent task evaluation"
+	@echo "  make agent-eval-real-gate run offline gate for real Gmail agent eval"
 	@echo "  make trace-summary summarize agent trace JSONL"
 	@echo "  make eval-all    run all 7 ablation versions (~30 min)"
 	@echo "  make latency     measure end-to-end latency"
@@ -69,6 +72,15 @@ agent-eval-smoke:
 
 agent-eval-full:
 	$(PYTHON) scripts/check_agent_eval_gate.py --input data/eval_results/agent_eval.json --min-tasks 100 --min-task-success-rate 0.80 --min-tool-accuracy 0.80 --max-forbidden-tool-violation-rate 0.01 --max-max-steps-reached-rate 0.05
+
+gmail-agent-testset:
+	$(PYTHON) scripts/build_real_agent_testset.py --gold data/real_emails/gold_chunks.real.json --output data/real_emails/agent_testset.real.json --limit 30
+
+agent-eval-real:
+	ENABLE_AGENT_TRACE=true AGENT_TRACE_LOG_PATH=data/traces/agent_traces.real.jsonl $(PYTHON) scripts/run_agent_eval.py --testset-path data/real_emails/agent_testset.real.json --output data/eval_results/agent_eval.real.json --report-output data/eval_results/agent_eval.real_report.md --trace-input data/traces/agent_traces.real.jsonl
+
+agent-eval-real-gate:
+	$(PYTHON) scripts/check_agent_eval_gate.py --input data/eval_results/agent_eval.real.json --min-tasks 30 --min-task-success-rate 0.75 --min-tool-accuracy 0.80 --max-forbidden-tool-violation-rate 0.00 --max-max-steps-reached-rate 0.05
 
 trace-summary:
 	$(PYTHON) scripts/summarize_agent_traces.py

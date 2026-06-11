@@ -40,6 +40,9 @@ function Show-Help {
     Write-Host "  .\tasks.ps1 agent-eval run agent task evaluation"
     Write-Host "  .\tasks.ps1 agent-eval-smoke run offline gate for current smoke eval results"
     Write-Host "  .\tasks.ps1 agent-eval-full  run strict 100+ task offline gate"
+    Write-Host "  .\tasks.ps1 gmail-agent-testset build private real Gmail agent testset"
+    Write-Host "  .\tasks.ps1 agent-eval-real run private real Gmail agent task evaluation"
+    Write-Host "  .\tasks.ps1 agent-eval-real-gate run offline gate for real Gmail agent eval"
     Write-Host "  .\tasks.ps1 trace-summary summarize agent trace JSONL"
     Write-Host "  .\tasks.ps1 eval-all    run all 7 ablation versions (~30 min)"
     Write-Host "  .\tasks.ps1 latency     measure end-to-end latency"
@@ -146,6 +149,36 @@ function Invoke-AgentEvalFull {
     Assert-LastCommandSucceeded "agent eval full gate failed"
 }
 
+function Invoke-GmailAgentTestset {
+    & $Python scripts/build_real_agent_testset.py `
+        --gold data/real_emails/gold_chunks.real.json `
+        --output data/real_emails/agent_testset.real.json `
+        --limit 30
+    Assert-LastCommandSucceeded "real Gmail agent testset generation failed"
+}
+
+function Invoke-AgentEvalReal {
+    $env:ENABLE_AGENT_TRACE = "true"
+    $env:AGENT_TRACE_LOG_PATH = "data/traces/agent_traces.real.jsonl"
+    & $Python scripts/run_agent_eval.py `
+        --testset-path data/real_emails/agent_testset.real.json `
+        --output data/eval_results/agent_eval.real.json `
+        --report-output data/eval_results/agent_eval.real_report.md `
+        --trace-input data/traces/agent_traces.real.jsonl
+    Assert-LastCommandSucceeded "real Gmail agent eval failed"
+}
+
+function Invoke-AgentEvalRealGate {
+    & $Python scripts/check_agent_eval_gate.py `
+        --input data/eval_results/agent_eval.real.json `
+        --min-tasks 30 `
+        --min-task-success-rate 0.75 `
+        --min-tool-accuracy 0.80 `
+        --max-forbidden-tool-violation-rate 0.00 `
+        --max-max-steps-reached-rate 0.05
+    Assert-LastCommandSucceeded "real Gmail agent eval gate failed"
+}
+
 function Invoke-TraceSummary {
     & $Python scripts/summarize_agent_traces.py
     Assert-LastCommandSucceeded "trace summary failed"
@@ -250,6 +283,9 @@ switch ($Cmd.ToLower()) {
     "agent-eval" { Invoke-AgentEval }
     "agent-eval-smoke" { Invoke-AgentEvalSmoke }
     "agent-eval-full" { Invoke-AgentEvalFull }
+    "gmail-agent-testset" { Invoke-GmailAgentTestset }
+    "agent-eval-real" { Invoke-AgentEvalReal }
+    "agent-eval-real-gate" { Invoke-AgentEvalRealGate }
     "trace-summary" { Invoke-TraceSummary }
     "eval-all" { Invoke-EvalAll }
     "latency"  { Invoke-Latency }

@@ -310,6 +310,9 @@ GMAIL_REAL_GOLD_PATH=./data/real_emails/gold_chunks.real.json
 .\tasks.ps1 gmail-gold-template
 .\tasks.ps1 gmail-gold-quality
 .\tasks.ps1 context-recall-real
+.\tasks.ps1 gmail-agent-testset
+.\tasks.ps1 agent-eval-real
+.\tasks.ps1 agent-eval-real-gate
 ```
 
 `gmail-preflight` 只做本地检查，不触网；它会区分 OAuth client 缺失、read-only token 缺失、真实邮箱 JSON 缺失、同步 state 缺失和真实 gold template 缺失。同步脚本会把 Gmail message 映射成现有 `Email` schema：`id/subject/sender/recipients/date/body/labels/thread_id`。增量逻辑使用本地 `seen_message_ids` 跳过已同步消息；`gmail-sync-index` 会继续复用现有 cleaner、chunker、embedder 和 BM25 cache invalidation。
@@ -317,6 +320,8 @@ GMAIL_REAL_GOLD_PATH=./data/real_emails/gold_chunks.real.json
 `gmail-gold-template` 从已同步的真实 Gmail JSON 生成 `gmail_*_chunk_*` 标注模板，默认会按 `gold_chunk_ids` 保留已有标签，只为新 chunk 补空模板。`gmail-gold-quality` 会阻断未标注、重复 chunk id、`????`/替换字符、问题泄漏 chunk 位置等质量问题，并报告本地标注比例。需要补齐并通过 quality gate 后，再运行 `context-recall-real`。当前真实邮箱 gate 固定为 `V2 --top-n 10 --fetch-k 80`，把长邮件多 chunk 的召回窗口扩大到 recall@10，以 `data/eval_results/context_recall.real.json` 记录本地忽略报告。因此只有 `gmail-preflight` 通过、真实同步产物存在、真实 gold labels 已填好、quality gate 通过并跑过 `context-recall-real`，才应该对外说“真实邮箱数据已经正式评测过”。
 
 本机 2026-06-10 真实邮箱 gate 已覆盖 52 封 Gmail、112 个索引 chunks、100 条已标注 gold cases；`gmail-gold-quality` 通过并提示 100 条为本地质量标注，建议继续人工抽检；`context-recall-real` 结果为 `V2 n=100 mean_context_recall=0.9700 hit_rate=0.9700 perfect=0.9700`，miss case ids 为 `real_gold_003/019/066`。报告文件和真实邮件正文均在 ignored 路径下，不进入仓库。
+
+`gmail-agent-testset` 会把上述真实 gold labels 转换为本地忽略的 `data/real_emails/agent_testset.real.json`。`agent-eval-real` 复用 Agent EvalOps runner，但读取真实任务集并写入 `data/eval_results/agent_eval.real.json` / `agent_eval.real_report.md`。运行前必须让 Chroma 索引指向真实 Gmail corpus，例如先执行 `gmail-sync-index` 或 `scripts/index_emails.py --data-path data/real_emails/gmail_emails.json --clear`；否则会出现任务集和索引语料不匹配。`agent-eval-real-gate` 当前门槛是 30 条、success `>=0.75`、tool accuracy `>=0.80`、forbidden tool `0`、max steps `<=0.05`。
 
 ## Trace 与 Eval
 

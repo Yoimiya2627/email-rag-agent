@@ -32,6 +32,18 @@ def test_aggregate_handles_empty_records():
     assert out["task_success_rate"] == 0
 
 
+def test_load_testset_reads_custom_path_and_applies_limit(tmp_path):
+    path = tmp_path / "real_agent_testset.json"
+    path.write_text(
+        '[{"id": "real-1", "task": "one"}, {"id": "real-2", "task": "two"}]',
+        encoding="utf-8",
+    )
+
+    out = ae.load_testset(path, limit=1)
+
+    assert out == [{"id": "real-1", "task": "one"}]
+
+
 def test_pending_items_skips_completed_record_ids():
     testset = [{"id": "case-1"}, {"id": "case-2"}, {"id": "case-3"}]
     completed = [{"id": "case-2"}, {"id": ""}, {"id": "old-case"}]

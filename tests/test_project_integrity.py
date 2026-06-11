@@ -47,7 +47,15 @@ def test_task_shortcuts_expose_smoke_and_full_eval_gates():
     makefile = _read("Makefile")
     tasks = _read("tasks.ps1")
 
-    for command in ("agent-eval-smoke", "agent-eval-full", "gmail-gold-quality", "verify"):
+    for command in (
+        "agent-eval-smoke",
+        "agent-eval-full",
+        "agent-eval-real",
+        "agent-eval-real-gate",
+        "gmail-agent-testset",
+        "gmail-gold-quality",
+        "verify",
+    ):
         assert command in makefile
         assert command in tasks
 
@@ -82,6 +90,7 @@ def test_ignore_files_exclude_local_browser_profiles_and_private_outputs():
         "_private/",
         "*.log",
         "data/eval_results/*.real*.json",
+        "data/eval_results/*.real*.md",
     ):
         assert pattern in gitignore
         assert pattern in dockerignore

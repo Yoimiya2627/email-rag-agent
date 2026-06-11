@@ -180,6 +180,14 @@ $env:AGENT_TRACE_LOG_PATH='data/traces/agent_traces_full.jsonl'
 python scripts/run_agent_eval.py --output data/eval_results/agent_eval.json --report-output data/eval_results/agent_eval_report.md --trace-input data/traces/agent_traces_full.jsonl
 python scripts/check_agent_eval_gate.py --input data/eval_results/agent_eval.json --min-tasks 100 --min-task-success-rate 0.80 --min-tool-accuracy 0.80 --max-forbidden-tool-violation-rate 0.01 --max-max-steps-reached-rate 0.05
 
+# Real Gmail Agent EvalOps：使用真实 gold labels 生成私有任务集
+python scripts/build_real_agent_testset.py --gold data/real_emails/gold_chunks.real.json --output data/real_emails/agent_testset.real.json --limit 30
+python scripts/index_emails.py --data-path data/real_emails/gmail_emails.json --clear
+$env:ENABLE_AGENT_TRACE='true'
+$env:AGENT_TRACE_LOG_PATH='data/traces/agent_traces.real.jsonl'
+python scripts/run_agent_eval.py --testset-path data/real_emails/agent_testset.real.json --output data/eval_results/agent_eval.real.json --report-output data/eval_results/agent_eval.real_report.md --trace-input data/traces/agent_traces.real.jsonl
+python scripts/check_agent_eval_gate.py --input data/eval_results/agent_eval.real.json --min-tasks 30 --min-task-success-rate 0.75 --min-tool-accuracy 0.80 --max-forbidden-tool-violation-rate 0.00 --max-max-steps-reached-rate 0.05
+
 # 输出
 data/eval_results/V{1..7}.json     # 每版逐题记录（含 answer / contexts）
 data/eval_results/comparison.json  # 三维度均值汇总
@@ -188,6 +196,9 @@ data/gold_chunks.json              # Phase 10 synthetic gold chunk labels
 data/eval_results/context_recall.json    # Phase 10 gold chunk recall
 data/eval_results/agent_eval.json         # Agent EvalOps full run records
 data/eval_results/agent_eval_report.md    # Agent EvalOps Markdown report
+data/real_emails/agent_testset.real.json  # ignored private real Gmail agent taskset
+data/eval_results/agent_eval.real.json    # ignored private real Gmail agent eval
+data/eval_results/agent_eval.real_report.md
 ```
 
 评测脚本会自动应用每版的 `ENABLE_*` flag、重置 reranker 熔断器（避免上一版的失败计数泄漏到下一版，详见 [`docs/technical_retrospective.md`](technical_retrospective.md) §4）、把 LLM 打分失败的样本降级到向量相似度。

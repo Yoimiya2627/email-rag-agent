@@ -45,6 +45,7 @@ data/traces/
 data/mail_sync/
 data/real_emails/
 data/eval_results/*.real*.json
+data/eval_results/*.real*.md
 .pytest_tmp*/
 
 # Claude Code local settings
