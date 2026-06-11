@@ -12,6 +12,7 @@ the lower-level retrieval pieces directly.
 """
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import List
 
@@ -128,6 +129,32 @@ def extract_filters(query: str) -> dict:
 
 # ── Post-filters ────────────────────────────────────────────────────────────
 
+_FROM_ABOUT_RE = re.compile(
+    r"\bfrom\s+(?P<sender>\S+)\s+about\s+\"(?P<subject>[^\"]+)\"",
+    re.IGNORECASE,
+)
+
+
+def augment_filters_from_query(query: str, filters: dict) -> dict:
+    """Deterministically recover sender/subject hints from common query wording."""
+    out = dict(filters or {})
+    match = _FROM_ABOUT_RE.search(query or "")
+    if not match:
+        return out
+
+    sender = match.group("sender").strip().strip(".,;:")
+    subject = match.group("subject").strip()
+    if sender and not out.get("sender"):
+        out["sender"] = sender
+    if subject:
+        current_query = str(out.get("query") or "").strip()
+        normalized_current = _normalize_metadata_text(current_query)
+        normalized_subject = _normalize_metadata_text(subject)
+        if normalized_subject and normalized_subject not in normalized_current:
+            out["query"] = f"{subject} {current_query}".strip()
+    return out
+
+
 def _apply_sender_filter(results, sender_kw: str):
     kw = (sender_kw or "").strip().lower()
     if not kw:
@@ -210,6 +237,57 @@ def apply_post_filters(results, filters: dict):
 
 # ── Full pipeline ───────────────────────────────────────────────────────────
 
+def _normalize_metadata_text(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", (value or "").lower()))
+
+
+def _metadata_boost_score(result: SearchResult, query: str, filters: dict) -> float:
+    q = _normalize_metadata_text(query)
+    subject = _normalize_metadata_text(result.metadata.get("subject", ""))
+    sender = _normalize_metadata_text(result.metadata.get("sender", ""))
+    sender_filter = _normalize_metadata_text(filters.get("sender", ""))
+    boost = 0.0
+
+    if subject and len(subject) >= 8 and subject in q:
+        boost += 0.08
+    elif subject:
+        subject_terms = {term for term in subject.split() if len(term) >= 4}
+        if subject_terms:
+            matched = sum(1 for term in subject_terms if term in q)
+            if matched >= max(2, len(subject_terms) // 2):
+                boost += 0.04
+
+    if sender and sender in q:
+        boost += 0.05
+    elif sender_filter and sender_filter in sender:
+        boost += 0.04
+
+    return boost
+
+
+def apply_metadata_boost(
+    results: List[SearchResult],
+    query: str,
+    filters: dict,
+) -> List[SearchResult]:
+    """Prefer candidates whose stable email metadata exactly matches the query."""
+    if not results:
+        return results
+
+    boosted = []
+    for idx, result in enumerate(results):
+        boost = _metadata_boost_score(result, query, filters)
+        boosted.append(
+            (
+                result.score + boost,
+                -idx,
+                result.model_copy(update={"score": result.score + boost}) if boost else result,
+            )
+        )
+    boosted.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in boosted]
+
+
 def retrieve(query: str, *, top_n: int = None, fetch_k: int = None) -> List[SearchResult]:
     """Full retrieval pipeline: rewrite → extract filters → hybrid search →
     post-filter → rerank.
@@ -226,8 +304,10 @@ def retrieve(query: str, *, top_n: int = None, fetch_k: int = None) -> List[Sear
 
     rewritten = rewrite_query(query)
     filters = extract_filters(rewritten)
+    filters = augment_filters_from_query(query, filters)
     search_query = filters.get("query") or rewritten
 
     results = hybrid_search(search_query, top_k=fetch_k)
+    results = apply_metadata_boost(results, query, filters)
     results = apply_post_filters(results, filters)
     return rerank(query, results, top_n=top_n)

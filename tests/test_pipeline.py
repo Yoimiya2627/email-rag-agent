@@ -2,7 +2,12 @@
 from datetime import datetime, timedelta
 
 import core.pipeline as pipeline_mod
-from core.pipeline import apply_post_filters, retrieve
+from core.pipeline import (
+    apply_metadata_boost,
+    apply_post_filters,
+    augment_filters_from_query,
+    retrieve,
+)
 
 
 def test_apply_post_filters_passthrough_when_filters_empty(make_search_result):
@@ -51,6 +56,44 @@ def test_apply_post_filters_date_window(make_search_result):
     assert [r.chunk_id for r in out] == ["recent"]
 
 
+def test_apply_metadata_boost_prefers_exact_subject_and_sender(make_search_result):
+    generic = make_search_result(
+        "generic",
+        score=1.0,
+        metadata={"subject": "Weekly AI digest", "sender": "news@example.com"},
+    )
+    target = make_search_result(
+        "target",
+        score=0.95,
+        metadata={
+            "subject": "Gemini API billing alert",
+            "sender": "alerts@example.com",
+        },
+    )
+
+    out = apply_metadata_boost(
+        [generic, target],
+        'What did alerts@example.com say about "Gemini API billing alert"?',
+        {"sender": "alerts@example.com", "labels": [], "date_hint": ""},
+    )
+
+    assert [r.chunk_id for r in out] == ["target", "generic"]
+    assert out[0].score > target.score
+
+
+def test_augment_filters_from_query_extracts_sender_and_subject():
+    filters = {"query": "96 Let's get yo", "sender": "", "labels": [], "date_hint": ""}
+
+    out = augment_filters_from_query(
+        'What does the email from login@example.com about "Secure link to log in" say?',
+        filters,
+    )
+
+    assert out["sender"] == "login@example.com"
+    assert out["query"].startswith("Secure link to log in")
+    assert "96 Let's get yo" in out["query"]
+
+
 def test_retrieve_runs_full_pipeline_in_order(monkeypatch, make_search_result):
     """retrieve() must: search with filters['query'], rerank against the
     ORIGINAL query, and apply the post-filters."""
@@ -60,6 +103,7 @@ def test_retrieve_runs_full_pipeline_in_order(monkeypatch, make_search_result):
         pipeline_mod, "extract_filters",
         lambda q: {"query": "SEARCH_Q", "sender": "alice", "labels": [], "date_hint": ""},
     )
+    monkeypatch.setattr(pipeline_mod, "augment_filters_from_query", lambda q, f: f)
     raw = [
         make_search_result("a", metadata={"sender": "alice@corp.com"}),
         make_search_result("b", metadata={"sender": "bob@corp.com"}),
@@ -75,6 +119,7 @@ def test_retrieve_runs_full_pipeline_in_order(monkeypatch, make_search_result):
         return results[:top_n]
 
     monkeypatch.setattr(pipeline_mod, "hybrid_search", fake_hybrid)
+    monkeypatch.setattr(pipeline_mod, "apply_metadata_boost", lambda rs, q, f: rs)
     monkeypatch.setattr(pipeline_mod, "rerank", fake_rerank)
 
     out = retrieve("ORIGINAL", top_n=5, fetch_k=20)
@@ -93,6 +138,7 @@ def test_retrieve_search_query_falls_back_to_rewritten(monkeypatch, make_search_
         pipeline_mod, "extract_filters",
         lambda q: {"sender": "", "labels": [], "date_hint": ""},  # no 'query' key
     )
+    monkeypatch.setattr(pipeline_mod, "augment_filters_from_query", lambda q, f: f)
     monkeypatch.setattr(
         pipeline_mod, "hybrid_search",
         lambda q, top_k=None: calls.__setitem__("hybrid_q", q) or [],

@@ -16,23 +16,23 @@
 
 | 维度 | 当前结果 |
 |---|---|
-| 单元/集成测试 | `195 passed` |
+| 单元/集成测试 | `197 passed` |
 | Synthetic Agent EvalOps | 105 tasks，gate PASS |
 | Synthetic Agent task success | `0.8095` |
 | Synthetic Agent tool accuracy | `0.8857` |
 | Synthetic Agent forbidden tool violation | `0.0000` |
 | Real Gmail Agent EvalOps | 30 tasks，gate PASS |
-| Real Gmail Agent task success | `0.9667` |
+| Real Gmail Agent task success | `0.9333` |
 | Real Gmail Agent tool accuracy | `1.0000` |
 | Real Gmail Agent max steps reached | `0.0000` |
-| Real Gmail retrieval recall | 100 gold cases，V2 recall@10 `0.9700` |
+| Real Gmail retrieval recall | 100 gold cases，V2 recall@10 `0.9900` |
 | MCP / approval / Gmail / EvalOps | 已有测试和任务入口 |
 
 核心质量指标快照：
 
 | 指标 | Synthetic full | Real Gmail |
 |---|---:|---:|
-| Agent task success | `0.8095` `[################----]` | `0.9667` `[###################-]` |
+| Agent task success | `0.8095` `[################----]` | `0.9333` `[###################-]` |
 | Agent tool accuracy | `0.8857` `[##################--]` | `1.0000` `[####################]` |
 | Forbidden tool violation | `0.0000` `[clear]` | `0.0000` `[clear]` |
 
@@ -145,7 +145,7 @@ Core RAG
    |-- vector search: bge-m3 + ChromaDB
    |-- BM25 lexical search
    |-- RRF fusion
-   |-- metadata post-filter
+   |-- metadata post-filter + metadata-aware boost
    |-- optional reranker: LLM scorer or Cross-Encoder
    |-- DeepSeek generation
 ```
@@ -335,14 +335,14 @@ Real Gmail eval 前必须保证 Chroma 索引和 real taskset 使用同一份真
 | Dataset | Tasks | Success | Tool accuracy | Avg steps | Max steps | Forbidden tool | Gate |
 |---|---:|---:|---:|---:|---:|---:|---|
 | Synthetic full | 105 | 0.8095 | 0.8857 | 2.68 | 0.0190 | 0.0000 | PASS |
-| Real Gmail | 30 | 0.9667 | 1.0000 | 2.47 | 0.0000 | 0.0000 | PASS |
+| Real Gmail | 30 | 0.9333 | 1.0000 | 2.23 | 0.0000 | 0.0000 | PASS |
 
 可视化对比：
 
 ```text
 Task success
 Synthetic full  0.8095 | ################----
-Real Gmail      0.9667 | ###################-
+Real Gmail      0.9333 | ###################-
 
 Tool accuracy
 Synthetic full  0.8857 | ##################--
@@ -355,14 +355,20 @@ Real Gmail      1.0000 | ####################
 |---|---|---:|---|---:|---:|---:|
 | Synthetic gold chunks | V2 | 30 | top 5 | 0.6167 | 0.6333 | 0.6000 |
 | Synthetic gold chunks | V7 | 30 | top 5 | 0.8000 | 0.8000 | 0.8000 |
-| Real Gmail gold | V2 | 100 | top 10 / fetch 80 | 0.9700 | 0.9700 | 0.9700 |
+| Real Gmail gold | V2 | 100 | top 10 / fetch 80 | 0.9900 | 0.9900 | 0.9900 |
 
 ```text
 Mean context recall
 Synthetic V2     0.6167 | ############--------
 Synthetic V7     0.8000 | ################----
-Real Gmail V2    0.9700 | ###################-
+Real Gmail V2    0.9900 | ####################
 ```
+
+Real Gmail V2 的最新提升来自两处低风险检索改动：
+- 对 subject/sender 等稳定 metadata 做候选内 boost，减少同主题营销邮件、登录邮件之间的错排。
+- 对 `from <sender> about "<subject>"` 这类查询做确定性 hint 兜底，降低 LLM filter extraction 抖动。
+
+本轮也验证过更激进的数据清洗和自然边界重切分：真实 Gmail 索引从 112 chunks 变为 106 chunks 后，旧 gold chunk id 被部分失效，context recall 从 0.9700 降到 0.9000，因此未采用。下一步如果要继续调整 chunk/cleaner，需要先把 gold 迁移到内容哈希或重新人工标注，而不是直接替换切分策略。
 
 ### RAG Ablation
 
