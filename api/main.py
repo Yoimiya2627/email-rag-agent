@@ -4,7 +4,7 @@ import logging
 import sys
 import os
 import threading
-from collections import defaultdict
+import time
 
 # Ensure project root is on path when running as `python api/main.py`
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,9 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from models.schemas import (
     AgentRequest,
@@ -28,7 +28,7 @@ from core.loader import load_emails
 from core.cleaner import clean_email
 from core.chunker import chunk_email
 from core.embedder import index_chunks, clear_collection, get_collection_stats
-from core.memory import ConversationMemory
+from core.session_store import create_session_store_from_settings
 from agents.coordinator import route
 from agents.approvals import ApprovalStore
 from agents.mail_providers import MailProviderError, create_mail_provider_from_settings
@@ -46,17 +46,49 @@ logger = logging.getLogger(__name__)
 # defaultdict.__getitem__ creates entries non-atomically across threads, so
 # requests for an unseen session_id can race and clobber each other's memory.
 # Wrap with a lock for the lookup-or-create path.
-_sessions: dict[str, ConversationMemory] = {}
-_sessions_lock = threading.Lock()
+_session_store = create_session_store_from_settings()
+_PUBLIC_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
 
 
-def _get_session(session_id: str) -> ConversationMemory:
-    with _sessions_lock:
-        memory = _sessions.get(session_id)
-        if memory is None:
-            memory = ConversationMemory()
-            _sessions[session_id] = memory
-        return memory
+class FixedWindowRateLimiter:
+    def __init__(self):
+        self._buckets: dict[tuple[str, str], tuple[int, int]] = {}
+        self._lock = threading.Lock()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._buckets.clear()
+
+    def allow(self, key: str, limit: int, window_seconds: int) -> bool:
+        current_window = int(time.time() // max(window_seconds, 1))
+        bucket_key = (key, str(current_window))
+        with self._lock:
+            count, _ = self._buckets.get(bucket_key, (0, current_window))
+            if count >= limit:
+                return False
+            self._buckets[bucket_key] = (count + 1, current_window)
+            return True
+
+
+_rate_limiter = FixedWindowRateLimiter()
+
+
+def _get_session(session_id: str, tenant_id: str | None = None):
+    return _session_store.get(tenant_id or cfg.DEFAULT_TENANT_ID, session_id)
+
+
+def _tenant_id_from_request(request: Request) -> str:
+    tenant_id = request.headers.get("X-Tenant-ID", "").strip()
+    return tenant_id or cfg.DEFAULT_TENANT_ID
+
+
+def _auth_identity(request: Request) -> str:
+    auth = request.headers.get("Authorization", "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    if request.client:
+        return request.client.host
+    return "anonymous"
 
 
 @asynccontextmanager
@@ -75,10 +107,29 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cfg.CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def production_guardrails(request: Request, call_next):
+    request.state.tenant_id = _tenant_id_from_request(request)
+    if request.url.path in _PUBLIC_PATHS:
+        return await call_next(request)
+
+    if cfg.API_AUTH_TOKEN:
+        expected = f"Bearer {cfg.API_AUTH_TOKEN}"
+        if request.headers.get("Authorization", "") != expected:
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+    if cfg.RATE_LIMIT_ENABLED:
+        key = f"{request.state.tenant_id}:{_auth_identity(request)}"
+        if not _rate_limiter.allow(key, cfg.RATE_LIMIT_REQUESTS, cfg.RATE_LIMIT_WINDOW_SECONDS):
+            return JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
+
+    return await call_next(request)
 
 
 @app.get("/health")
@@ -132,10 +183,10 @@ async def index_status():
 
 
 @app.post("/chat", response_model=AgentResponse)
-async def chat(request: AgentRequest):
+async def chat(request: AgentRequest, http_request: Request):
     try:
         session_id = request.session_id or "default"
-        memory = _get_session(session_id)
+        memory = _get_session(session_id, http_request.state.tenant_id)
         response = route(request, memory=memory)
         memory.add("user", request.query)
         memory.add("assistant", response.answer)
@@ -146,7 +197,7 @@ async def chat(request: AgentRequest):
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: AgentRequest):
+async def chat_stream(request: AgentRequest, http_request: Request):
     """SSE streaming chat — yields tokens as `data: <token>\\n\\n` events.
 
     Routes through the Coordinator's intent classifier so summarize/write/
@@ -161,7 +212,7 @@ async def chat_stream(request: AgentRequest):
     from models.schemas import IntentType
 
     session_id = request.session_id or "default"
-    memory = _get_session(session_id)
+    memory = _get_session(session_id, http_request.state.tenant_id)
     history = memory.to_messages()
 
     async def event_generator():
@@ -224,23 +275,21 @@ async def chat_stream(request: AgentRequest):
 
 
 @app.delete("/chat/history")
-async def clear_history(session_id: str = "default"):
-    with _sessions_lock:
-        memory = _sessions.get(session_id)
-    if memory is not None:
-        memory.clear()
-    return {"success": True, "session_id": session_id}
+async def clear_history(request: Request, session_id: str = "default"):
+    _session_store.clear(request.state.tenant_id, session_id)
+    return {"success": True, "session_id": session_id, "tenant_id": request.state.tenant_id}
 
 
 @app.get("/agent/approvals")
-async def list_agent_approvals(status: Optional[str] = None):
+async def list_agent_approvals(request: Request, status: Optional[str] = None):
     """List pending/approved/rejected high-risk agent actions."""
-    return {"approvals": ApprovalStore().list(status=status)}
+    return {"approvals": ApprovalStore(tenant_id=request.state.tenant_id).list(status=status)}
 
 
 @app.post("/agent/approvals/{approval_id}/approve")
 async def approve_agent_action(
     approval_id: str,
+    request: Request,
     reviewer: str = Body("human"),
     note: str = Body(""),
 ):
@@ -251,7 +300,7 @@ async def approve_agent_action(
     """
     try:
         provider = create_mail_provider_from_settings()
-        return ApprovalStore().approve(
+        return ApprovalStore(tenant_id=request.state.tenant_id).approve(
             approval_id,
             reviewer=reviewer,
             note=note,
@@ -268,12 +317,17 @@ async def approve_agent_action(
 @app.post("/agent/approvals/{approval_id}/reject")
 async def reject_agent_action(
     approval_id: str,
+    request: Request,
     reviewer: str = Body("human"),
     note: str = Body(""),
 ):
     """Reject a pending high-risk agent action."""
     try:
-        return ApprovalStore().reject(approval_id, reviewer=reviewer, note=note)
+        return ApprovalStore(tenant_id=request.state.tenant_id).reject(
+            approval_id,
+            reviewer=reviewer,
+            note=note,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -292,12 +346,12 @@ async def list_mcp_audit_events(
 
 
 @app.post("/chat/graph", response_model=AgentResponse)
-async def chat_graph(request: AgentRequest):
+async def chat_graph(request: AgentRequest, http_request: Request):
     """Self-RAG workflow via LangGraph-style state machine."""
     from agents.graph_workflow import run_graph
     try:
         session_id = request.session_id or "default"
-        memory = _get_session(session_id)
+        memory = _get_session(session_id, http_request.state.tenant_id)
         response = run_graph(request, memory=memory)
         memory.add("user", request.query)
         memory.add("assistant", response.answer)
@@ -308,13 +362,13 @@ async def chat_graph(request: AgentRequest):
 
 
 @app.post("/chat/agent", response_model=AgentResponse)
-async def chat_agent(request: AgentRequest):
+async def chat_agent(request: AgentRequest, http_request: Request):
     """Function-calling agent loop — the planner LLM autonomously selects and
     chains tools (search / get / summarize / draft / stats) to fulfil the query."""
     from agents.agent_loop import run_agent_loop
     try:
         session_id = request.session_id or "default"
-        memory = _get_session(session_id)
+        memory = _get_session(session_id, http_request.state.tenant_id)
         response = run_agent_loop(request, memory=memory)
         memory.add("user", request.query)
         memory.add("assistant", response.answer)

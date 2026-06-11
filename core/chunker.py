@@ -66,15 +66,27 @@ def chunk_text(
 
 
 def chunk_email(email: Email) -> List[EmailChunk]:
-    text = f"Subject: {email.subject}\n\n{email.body}"
-    parts = chunk_text(text)
+    labels_text = ", ".join(email.labels)
+    recipients_text = ", ".join(email.recipients)
+    header_lines = [
+        f"Subject: {email.subject}",
+        f"From: {email.sender}",
+        f"To: {recipients_text}",
+        f"Date: {email.date}",
+        f"Labels: {labels_text}",
+        f"Thread-ID: {email.thread_id or ''}",
+    ]
+    header = "\n".join(header_lines)
+    parts = chunk_text(email.body)
+    if not parts and email.subject:
+        parts = [email.subject]
     chunks = []
     for i, part in enumerate(parts):
         chunks.append(
             EmailChunk(
                 chunk_id=f"{email.id}_chunk_{i}",
                 email_id=email.id,
-                content=part,
+                content=f"{header}\n\nBody:\n{part}",
                 chunk_index=i,
                 metadata={
                     "subject": email.subject,

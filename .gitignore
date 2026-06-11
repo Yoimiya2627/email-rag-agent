@@ -14,6 +14,12 @@ env/
 .env.local
 credentials/
 
+# Local browser/test profiles
+.edge-tmp/
+.chrome_pdf_profile*/
+tmp_ascii/
+edge-netlog.json
+
 # ChromaDB persistence
 chroma_db/
 
@@ -38,6 +44,7 @@ data/approvals/
 data/traces/
 data/mail_sync/
 data/real_emails/
+data/eval_results/*.real*.json
 .pytest_tmp*/
 
 # Claude Code local settings
@@ -52,3 +59,8 @@ docs/面经/
 # Private workspace — job hunting plans, drafts, anything not for public repo
 _private/
 README_draft.md
+
+# Local generated images / personal resume exports
+resume_agent_long.png
+*_Agent开发工程师_长图.png
+*简历.png

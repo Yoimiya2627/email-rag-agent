@@ -125,22 +125,109 @@ def aggregate(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def load_completed_records(output_path: str | Path) -> List[Dict[str, Any]]:
+    """Load completed eval records from a previous checkpoint."""
+    path = Path(output_path)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    records = payload.get("records", [])
+    return records if isinstance(records, list) else []
+
+
+def pending_items(
+    testset: List[Dict[str, Any]],
+    completed_records: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return testset items whose ids are not already present in completed records."""
+    completed_ids = {str(record.get("id") or "") for record in completed_records if record.get("id")}
+    return [item for item in testset if str(item.get("id") or "") not in completed_ids]
+
+
+def sync_record_metadata(
+    records: List[Dict[str, Any]],
+    testset: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Refresh eval-record metadata from the current testset and recompute tool flags."""
+    cases_by_id = {str(item.get("id") or ""): item for item in testset if item.get("id")}
+    synced: List[Dict[str, Any]] = []
+    for record in records:
+        item = dict(record)
+        case = cases_by_id.get(str(item.get("id") or ""))
+        if case:
+            for key in ("task_type", "risk_level", "success_criteria"):
+                item[key] = case.get(key, item.get(key))
+            item["expected_tools"] = list(case.get("expected_tools", []) or [])
+            item["forbidden_tools"] = list(case.get("forbidden_tools", []) or [])
+        actual = list(item.get("actual_tools", []) or [])
+        expected = list(item.get("expected_tools", []) or [])
+        forbidden = list(item.get("forbidden_tools", []) or [])
+        item["tool_accuracy"] = tool_accuracy(expected, actual)
+        item["forbidden_tool_violation"] = bool(set(forbidden) & set(actual))
+        synced.append(item)
+    return synced
+
+
+def _payload_with_trace_categories(
+    records: List[Dict[str, Any]],
+    trace_events: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    traces = events_by_trace_id(trace_events)
+    enriched: List[Dict[str, Any]] = []
+    for record in records:
+        item = dict(record)
+        if item.get("failure_category") != "exception":
+            item["failure_category"] = classify_eval_record(
+                item,
+                traces.get(item.get("trace_id", ""), []),
+            )
+        enriched.append(item)
+    return {"summary": aggregate(enriched), "records": enriched}
+
+
+def write_eval_outputs(
+    records: List[Dict[str, Any]],
+    output_path: str | Path,
+    report_output: str | Path | None = None,
+    trace_input: str | Path | None = None,
+) -> Dict[str, Any]:
+    """Write eval JSON and optional Markdown report for the current checkpoint."""
+    trace_events = load_events(trace_input) if trace_input else []
+    payload = _payload_with_trace_categories(records, trace_events)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    if report_output:
+        write_eval_report(payload, report_output, trace_events)
+    return payload
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Max tasks to run")
     parser.add_argument("--output", default=str(RESULTS_DIR / "agent_eval.json"))
     parser.add_argument("--report-output", default=None, help="Optional Markdown EvalOps report path")
     parser.add_argument("--trace-input", default=None, help="Optional trace JSONL path for failure attribution")
+    parser.add_argument("--resume", action="store_true", help="Resume from existing output records")
     args = parser.parse_args()
 
     with open(TESTSET_PATH, encoding="utf-8") as f:
         testset = json.load(f)
     if args.limit:
         testset = testset[: args.limit]
+
+    records: List[Dict[str, Any]] = load_completed_records(args.output) if args.resume else []
+    if args.resume and records:
+        records = sync_record_metadata(records, testset)
+        testset = pending_items(testset, records)
+        logger.info(f"Resuming from {len(records)} completed records")
     logger.info(f"Running {len(testset)} agent tasks")
 
     client = OpenAI(api_key=cfg.DEEPSEEK_API_KEY, base_url=cfg.DEEPSEEK_BASE_URL)
-    records: List[Dict[str, Any]] = []
     for i, item in enumerate(testset):
         logger.info(f"[{i + 1}/{len(testset)}] {item['task'][:50]}")
         try:
@@ -162,24 +249,11 @@ def main():
                 "trace_id": "",
                 "failure_category": "exception",
             })
+        write_eval_outputs(records, args.output, args.report_output, args.trace_input)
         time.sleep(0.3)
 
-    trace_events = load_events(args.trace_input) if args.trace_input else []
-    if trace_events:
-        traces = events_by_trace_id(trace_events)
-        for record in records:
-            record["failure_category"] = classify_eval_record(
-                record,
-                traces.get(record.get("trace_id", ""), []),
-            )
-
-    summary = aggregate(records)
-    payload = {"summary": summary, "records": records}
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    if args.report_output:
-        write_eval_report(payload, args.report_output, trace_events)
+    payload = write_eval_outputs(records, args.output, args.report_output, args.trace_input)
+    summary = payload["summary"]
 
     print("\n" + "=" * 60)
     print("Agent evaluation")

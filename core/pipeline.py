@@ -6,7 +6,9 @@ Before this module the pipeline (rewrite → extract filters → hybrid search �
 post-filter → rerank) was re-implemented in three places (RetrieverAgent,
 run_ragas_eval, measure_latency), and two of them silently skipped the
 sender/date/label post-filters — so the RAGAS evaluation was not measuring the
-pipeline the product actually serves.  Everything now goes through `retrieve()`.
+standard RAG pipeline the product serves.  RetrieverAgent and the evaluation
+scripts now go through `retrieve()`; experimental graph/agent paths may reuse
+the lower-level retrieval pieces directly.
 """
 import json
 import logging

@@ -8,6 +8,10 @@ BASE_DIR = Path(__file__).parent.parent
 # Load .env from project root if present (no-op if missing)
 load_dotenv(BASE_DIR / ".env")
 
+
+def _csv_env(name: str, default: str) -> list[str]:
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
 # DeepSeek API (called via OpenAI SDK)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -47,6 +51,18 @@ EMAIL_DATA_PATH = os.getenv("EMAIL_DATA_PATH", str(BASE_DIR / "data" / "emails.j
 # API server
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+CORS_ORIGINS = _csv_env("CORS_ORIGINS", "*")
+DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "default")
+APP_SQLITE_PATH = os.getenv(
+    "APP_SQLITE_PATH",
+    str(BASE_DIR / "data" / "app" / "app_state.sqlite3"),
+)
+SESSION_STORE_BACKEND = os.getenv("SESSION_STORE_BACKEND", "memory").lower()
+SESSION_MAX_TURNS = int(os.getenv("SESSION_MAX_TURNS", "5"))
+API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "")
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "false").lower() == "true"
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 
 # Frontend
 API_URL = os.getenv("API_URL", "http://localhost:8000")
@@ -96,6 +112,7 @@ MCP_ALLOWED_TOOLS = [
 MCP_READ_ONLY_MODE = os.getenv("MCP_READ_ONLY_MODE", "false").lower() == "true"
 
 # Human-in-the-loop approval store for high-risk tools.
+APPROVAL_STORE_BACKEND = os.getenv("APPROVAL_STORE_BACKEND", "json").lower()
 APPROVAL_STORE_PATH = os.getenv(
     "APPROVAL_STORE_PATH",
     str(BASE_DIR / "data" / "approvals" / "pending_actions.json"),
@@ -106,11 +123,7 @@ APPROVAL_STORE_PATH = os.getenv(
 MAIL_PROVIDER = os.getenv("MAIL_PROVIDER", "simulated").lower()
 GMAIL_CREDENTIALS_PATH = os.getenv("GMAIL_CREDENTIALS_PATH", str(BASE_DIR / "credentials" / "gmail_credentials.json"))
 GMAIL_TOKEN_PATH = os.getenv("GMAIL_TOKEN_PATH", str(BASE_DIR / "credentials" / "gmail_token.json"))
-GMAIL_SCOPES = [
-    item.strip()
-    for item in os.getenv("GMAIL_SCOPES", "https://www.googleapis.com/auth/gmail.compose").split(",")
-    if item.strip()
-]
+GMAIL_SCOPES = _csv_env("GMAIL_SCOPES", "https://www.googleapis.com/auth/gmail.compose")
 GMAIL_USER_ID = os.getenv("GMAIL_USER_ID", "me")
 ENABLE_REAL_EMAIL_SEND = os.getenv("ENABLE_REAL_EMAIL_SEND", "false").lower() == "true"
 
@@ -120,11 +133,7 @@ GMAIL_READONLY_TOKEN_PATH = os.getenv(
     "GMAIL_READONLY_TOKEN_PATH",
     str(BASE_DIR / "credentials" / "gmail_readonly_token.json"),
 )
-GMAIL_READONLY_SCOPES = [
-    item.strip()
-    for item in os.getenv("GMAIL_READONLY_SCOPES", "https://www.googleapis.com/auth/gmail.readonly").split(",")
-    if item.strip()
-]
+GMAIL_READONLY_SCOPES = _csv_env("GMAIL_READONLY_SCOPES", "https://www.googleapis.com/auth/gmail.readonly")
 GMAIL_SYNC_QUERY = os.getenv("GMAIL_SYNC_QUERY", "newer_than:30d")
 GMAIL_SYNC_MAX_RESULTS = int(os.getenv("GMAIL_SYNC_MAX_RESULTS", "100"))
 GMAIL_SYNC_OUTPUT_PATH = os.getenv(
@@ -134,6 +143,10 @@ GMAIL_SYNC_OUTPUT_PATH = os.getenv(
 GMAIL_SYNC_STATE_PATH = os.getenv(
     "GMAIL_SYNC_STATE_PATH",
     str(BASE_DIR / "data" / "mail_sync" / "gmail_sync_state.json"),
+)
+GMAIL_REAL_GOLD_PATH = os.getenv(
+    "GMAIL_REAL_GOLD_PATH",
+    str(BASE_DIR / "data" / "real_emails" / "gold_chunks.real.json"),
 )
 
 # Agent trace events. Disabled by default to keep local unit tests and demos

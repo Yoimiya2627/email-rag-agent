@@ -136,6 +136,17 @@ def test_loop_can_use_configured_mcp_tool_backend(monkeypatch):
     assert out.metadata["steps"] == [{"tool": "email_stats", "arguments": {}}]
 
 
+def test_loop_filters_tools_by_requested_skill(monkeypatch):
+    client = _ScriptedClient([_response(content="只查邮件")])
+    _use_client(monkeypatch, client)
+
+    out = run_agent_loop(AgentRequest(query="帮我查一下预算邮件", context={"skill": "mail_search"}))
+    tool_names = {schema["function"]["name"] for schema in client.calls[0]["tools"]}
+
+    assert tool_names == {"search_emails", "get_email", "email_stats"}
+    assert out.metadata["skill"] == "mail_search"
+
+
 def test_loop_stops_at_max_steps(monkeypatch):
     """A model that always asks for a tool must not loop forever."""
     always_tool = [

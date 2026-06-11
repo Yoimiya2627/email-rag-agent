@@ -55,6 +55,65 @@ def test_get_session_isolates_session_ids_and_returns_same_instance():
     assert a is not b, "Different session_ids must yield different memory instances"
 
 
+def test_sqlite_session_store_persists_across_instances(tmp_path):
+    from core.session_store import SQLiteSessionMemoryStore
+
+    db_path = tmp_path / "app_state.sqlite3"
+    store = SQLiteSessionMemoryStore(db_path, max_turns=5)
+    memory = store.get("tenant-a", "session-a")
+    memory.add("user", "hello")
+    memory.add("assistant", "hi")
+
+    reopened = SQLiteSessionMemoryStore(db_path, max_turns=5)
+
+    assert reopened.get("tenant-a", "session-a").to_messages() == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ]
+
+
+def test_sqlite_session_store_isolates_tenant_and_session(tmp_path):
+    from core.session_store import SQLiteSessionMemoryStore
+
+    store = SQLiteSessionMemoryStore(tmp_path / "app_state.sqlite3", max_turns=5)
+    store.get("tenant-a", "session-a").add("user", "a")
+    store.get("tenant-a", "session-b").add("user", "b")
+    store.get("tenant-b", "session-a").add("user", "c")
+
+    assert store.get("tenant-a", "session-a").to_messages()[0]["content"] == "a"
+    assert store.get("tenant-a", "session-b").to_messages()[0]["content"] == "b"
+    assert store.get("tenant-b", "session-a").to_messages()[0]["content"] == "c"
+
+
+def test_sqlite_session_store_trims_to_sliding_window(tmp_path):
+    from core.session_store import SQLiteSessionMemoryStore
+
+    store = SQLiteSessionMemoryStore(tmp_path / "app_state.sqlite3", max_turns=1)
+    memory = store.get("tenant-a", "session-a")
+    memory.add("user", "u1")
+    memory.add("assistant", "a1")
+    memory.add("user", "u2")
+    memory.add("assistant", "a2")
+
+    assert memory.to_messages() == [
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+
+
+def test_sqlite_session_store_clear_removes_persisted_messages(tmp_path):
+    from core.session_store import SQLiteSessionMemoryStore
+
+    store = SQLiteSessionMemoryStore(tmp_path / "app_state.sqlite3", max_turns=5)
+    memory = store.get("tenant-a", "session-a")
+    memory.add("user", "hello")
+    memory.clear()
+
+    reopened = SQLiteSessionMemoryStore(tmp_path / "app_state.sqlite3", max_turns=5)
+
+    assert reopened.get("tenant-a", "session-a").to_messages() == []
+
+
 def test_concurrent_add_does_not_lose_messages():
     mem = ConversationMemory(max_turns=10000)  # window large enough so nothing trims
     threads = []

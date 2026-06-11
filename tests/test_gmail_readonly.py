@@ -9,6 +9,10 @@ def _b64url(text: str) -> str:
     return base64.urlsafe_b64encode(text.encode("utf-8")).decode("utf-8").rstrip("=")
 
 
+def _b64url_bytes(payload: bytes) -> str:
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
 class FakeExecute:
     def __init__(self, payload):
         self.payload = payload
@@ -51,6 +55,33 @@ class FakeGmailReadService:
 
     def users(self):
         return FakeUsers(self.pages, self.messages, self.calls)
+
+
+class FakeHttpResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class FakeAuthorizedSession:
+    def __init__(self, pages, messages):
+        self.pages = pages
+        self.messages = messages
+        self.calls = []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append((url, params, timeout))
+        params = params or {}
+        if url.endswith("/messages"):
+            token = params.get("pageToken") or "first"
+            return FakeHttpResponse(self.pages[token])
+        message_id = url.rsplit("/", 1)[-1]
+        return FakeHttpResponse(self.messages[message_id])
 
 
 def _message(message_id: str, body: str = "plain body") -> dict:
@@ -110,6 +141,45 @@ def test_gmail_readonly_provider_lists_pages_and_fetches_messages():
     )
 
 
+def test_gmail_readonly_provider_uses_authorized_session_for_real_api_calls():
+    from agents.gmail_readonly import GmailReadOnlyProvider
+
+    session = FakeAuthorizedSession(
+        pages={
+            "first": {"messages": [{"id": "m1"}], "nextPageToken": "next"},
+            "next": {"messages": [{"id": "m2"}]},
+        },
+        messages={"m1": _message("m1"), "m2": _message("m2", body="second")},
+    )
+    provider = GmailReadOnlyProvider(session=session, user_id="me", request_timeout=12)
+
+    message_ids = provider.list_message_ids(query="newer_than:7d", max_results=10)
+    email = provider.get_email(message_ids[0])
+
+    assert message_ids == ["m1", "m2"]
+    assert email.id == "gmail_m1"
+    assert session.calls[0] == (
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        {"q": "newer_than:7d", "maxResults": 10, "includeSpamTrash": False},
+        12,
+    )
+    assert session.calls[1] == (
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        {
+            "q": "newer_than:7d",
+            "maxResults": 10,
+            "includeSpamTrash": False,
+            "pageToken": "next",
+        },
+        12,
+    )
+    assert session.calls[2] == (
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/m1",
+        {"format": "full"},
+        12,
+    )
+
+
 def test_gmail_readonly_provider_falls_back_to_html_body():
     from agents.gmail_readonly import gmail_message_to_email
 
@@ -121,6 +191,24 @@ def test_gmail_readonly_provider_falls_back_to_html_body():
     email = gmail_message_to_email(raw)
 
     assert email.body == "Hello team"
+
+
+def test_gmail_message_to_email_decodes_part_charset_from_content_type():
+    from agents.gmail_readonly import gmail_message_to_email
+
+    text = "中文通知：预算已经批准"
+    raw = _message("m1")
+    raw["payload"]["parts"] = [
+        {
+            "mimeType": "text/plain",
+            "headers": [{"name": "Content-Type", "value": "text/plain; charset=gb18030"}],
+            "body": {"data": _b64url_bytes(text.encode("gb18030"))},
+        }
+    ]
+
+    email = gmail_message_to_email(raw)
+
+    assert email.body == text
 
 
 def test_sync_gmail_to_json_skips_seen_messages_and_persists_state(tmp_path: Path):

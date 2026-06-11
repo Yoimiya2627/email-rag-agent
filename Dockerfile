@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies first (cache layer)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock requirements.txt pyproject.toml ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # Copy project
 COPY . .
@@ -25,4 +25,14 @@ EXPOSE 8000
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8000
 
+FROM runtime AS api
+
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+FROM runtime AS frontend
+
+EXPOSE 8501
+
+CMD ["streamlit", "run", "frontend/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+
+FROM api AS production

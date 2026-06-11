@@ -1,0 +1,19 @@
+# Direct dependency lock for CI/Docker reproducibility.
+# Keep requirements.txt as the broad compatibility file for local iteration.
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
+openai==2.32.0
+chromadb==1.5.8
+sentence-transformers==5.4.1
+rank-bm25==0.2.2
+streamlit==1.56.0
+requests==2.33.1
+python-dotenv==1.2.2
+sseclient-py==1.9.0
+pytest==9.0.3
+mcp==1.27.1
+langgraph==1.1.10
+google-api-python-client==2.130.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0

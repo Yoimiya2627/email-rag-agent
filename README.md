@@ -29,14 +29,15 @@
 ## 核心亮点
 
 - **Function-calling Agent Loop**：`/chat/agent` 使用 DeepSeek 原生 tool calls，多轮执行 `plan -> tool_call -> observe -> re-plan`。
+- **Agent Skill Profiles**：`agents/skills.py` 在工具层之上增加任务型 Skill，按 `mail_search`、`reply_drafting`、`mail_digest` 等场景收敛可见工具和 planner 指令。
 - **MCP-ready Tool Backend**：工具定义集中在 `agents/tool_registry.py`，同源派生本地 function schema 和 FastMCP 注册。
 - **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache；MCP server 支持 allowed-tools 和 read-only 工具可见性策略。
 - **Human-in-the-loop 安全链路**：高风险 `send_email` 只创建 pending approval；审批通过后默认 simulated，配置 `MAIL_PROVIDER=gmail` 时只创建 Gmail draft，不直接发送。
 - **真实邮箱 read-only 接入**：Gmail read-only provider 使用独立只读 OAuth scope，把真实邮件增量同步到本地忽略 JSON，再复用清洗、切分、embedding 索引链路。
-- **Agent EvalOps**：105 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
-- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI；新增 synthetic gold chunk baseline 和 `context_recall` 确定性评测，V7 在 30 题上达到 `mean_context_recall=0.8000`。
+- **Agent EvalOps**：105 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；2026-06-11 已完成 full LLM run 并通过 strict gate（task_success_rate `0.8095`、tool_accuracy `0.8857`、forbidden `0.0000`、max_steps `0.0190`）。
+- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI；新增 synthetic gold chunk baseline 和 `context_recall` 确定性评测，V7 在 30 题 synthetic gold 上达到 `mean_context_recall=0.8000`，真实 Gmail 100-case quality gate 后的 V2 recall@10 达到 `0.9700`。
 - **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断、rerank 输入截断、生成上下文预算。
-- **146 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、reranker serving policy、Gmail read-only sync、context_recall eval、generation context budget、tools、tool registry、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
+- **190 个 pytest**：覆盖 RAG、pipeline、Cross-Encoder reranker、reranker serving policy、Gmail read-only sync、Gmail charset 解码、真实 gold quality gate、Phase 2A real-data preflight、context_recall eval、generation context budget、tools、tool registry、Agent Skill、MCP adapter/server/production/policy/audit API、approval、mail providers、trace、EvalOps、eval gate、agent loop、agent eval。
 
 ## Demo
 
@@ -48,14 +49,15 @@
 
 - 邮件问答：从 5000 封邮件中检索并回答事实问题。
 - 多步 Agent：例如“找出报销邮件并帮我起草回复”，agent 会自主 `search_emails -> get_email -> draft_reply`。
+- Skill 模式：可通过 `context.skill` 指定 `mail_search`、`reply_drafting`、`mail_digest` 等任务型 Skill，让 planner 只看到当前任务需要的工具集合。
 - 人审发信：`send_email` 创建审批单，必须人类确认后才执行；默认 simulated，Gmail 模式只创建 draft。
 - 批量摘要：按主题检索多封邮件并生成结构化摘要。
 - 回信草稿：针对检索到的邮件或指定 `email_id` 起草回复。
 - 统计分析：发件人 Top、标签分布、每日邮件量。
-- 多轮记忆：按 session 隔离，默认保留 5 轮滑窗。
+- 多轮记忆：按 tenant + session 隔离，默认保留 5 轮滑窗；可选 SQLite 持久化。
 - SSE 真流式：worker 线程 + `asyncio.Queue` 桥接同步 LLM SDK 与 FastAPI SSE。
 - Self-RAG：LangGraph 状态机，检索结果不相关时 rewrite query，最多重试 2 次。
-- Agent EvalOps：`data/agent_testset.json` 维护 105 条带类型/风险/期望工具/禁用工具/成功标准的任务，eval 可生成 Markdown 报告并通过 gate 脚本做阈值检查；离线 gate 的最低任务数门槛仍是 `>=100`。
+- Agent EvalOps：`data/agent_testset.json` 维护 105 条带类型/风险/期望工具/禁用工具/成功标准的任务；full eval 生成 `agent_eval.json` 和 Markdown 报告，离线 strict gate 的最低任务数门槛是 `>=100`。
 
 ## 快速开始
 
@@ -115,7 +117,16 @@ make run
 | `MCP_AUDIT_LOG_PATH` | `./data/audit/mcp_audit.jsonl` | MCP 审计日志 |
 | `MCP_ALLOWED_TOOLS` | 空 | 逗号分隔的 MCP 可见工具白名单；空表示全部可见 |
 | `MCP_READ_ONLY_MODE` | `false` | `true` 时 MCP server 只暴露 low-risk 且不需要人审的只读工具 |
-| `APPROVAL_STORE_PATH` | `./data/approvals/pending_actions.json` | 人审审批存储 |
+| `DEFAULT_TENANT_ID` | `default` | 未传 `X-Tenant-ID` 时使用的默认租户 |
+| `APP_SQLITE_PATH` | `./data/app/app_state.sqlite3` | SQLite 状态库路径，用于生产化审批/会话存储 |
+| `SESSION_STORE_BACKEND` | `memory` | 会话存储 backend：`memory` 或 `sqlite` |
+| `SESSION_MAX_TURNS` | `5` | 每个 session 保留的对话轮数 |
+| `API_AUTH_TOKEN` | 空 | 填写后 API 受保护端点要求 `Authorization: Bearer ...` |
+| `RATE_LIMIT_ENABLED` | `false` | 是否启用基础固定窗口限流 |
+| `RATE_LIMIT_REQUESTS` | `60` | 每个窗口允许的请求数 |
+| `RATE_LIMIT_WINDOW_SECONDS` | `60` | 限流窗口长度 |
+| `APPROVAL_STORE_BACKEND` | `json` | 人审审批存储 backend：`json` 或 `sqlite` |
+| `APPROVAL_STORE_PATH` | `./data/approvals/pending_actions.json` | JSON 人审审批存储路径 |
 | `MAIL_PROVIDER` | `simulated` | 审批通过后的邮件执行 provider；`simulated` 或 `gmail` |
 | `GMAIL_CREDENTIALS_PATH` | `./credentials/gmail_credentials.json` | Gmail OAuth client secret 文件 |
 | `GMAIL_TOKEN_PATH` | `./credentials/gmail_token.json` | Gmail OAuth token 缓存 |
@@ -128,6 +139,7 @@ make run
 | `GMAIL_SYNC_MAX_RESULTS` | `100` | 单次 read-only 同步最多拉取消息数 |
 | `GMAIL_SYNC_OUTPUT_PATH` | `./data/real_emails/gmail_emails.json` | 同步后的本地 JSON；已 gitignore |
 | `GMAIL_SYNC_STATE_PATH` | `./data/mail_sync/gmail_sync_state.json` | 增量同步状态；已 gitignore |
+| `GMAIL_REAL_GOLD_PATH` | `./data/real_emails/gold_chunks.real.json` | 真实邮箱 context recall 人工标注模板；已 gitignore |
 | `ENABLE_AGENT_TRACE` | `false` | 是否记录 agent trace JSONL |
 | `AGENT_TRACE_LOG_PATH` | `./data/traces/agent_traces.jsonl` | trace 输出路径 |
 
@@ -172,6 +184,7 @@ agents/tool_registry.py
 agents/agent_loop.py
    |-- AGENT_TOOL_BACKEND=local -> in-process call_tool()
    |-- AGENT_TOOL_BACKEND=mcp   -> tools/list + tools/call via Streamable HTTP
+   |-- agents/skills.py         -> skill-specific tool filtering + planner instruction
 ```
 
 完整架构见 [docs/architecture.md](docs/architecture.md)。
@@ -188,6 +201,24 @@ agents/agent_loop.py
 | `email_stats` | low | 否 | 邮件统计聚合 |
 
 `call_tool()` 会丢弃模型幻觉参数、检查必填参数、捕获工具异常并返回 `{"error": ...}`，让错误以 tool result 形式回灌给模型，而不是把 HTTP 请求打成 500。
+
+Agent Skill 是工具之上的任务型能力层，不新增底层工具，只控制当前任务暴露哪些工具和给 planner 哪段指令：
+
+| Skill | 允许工具 | 适用场景 |
+|---|---|---|
+| `general` | 全部 6 个工具 | 默认通用 Agent |
+| `mail_search` | `search_emails`、`get_email`、`email_stats` | 只读查询、事实问答、统计 |
+| `reply_drafting` | `search_emails`、`get_email`、`draft_reply`、`send_email` | 找邮件、起草回复、提交发信审批 |
+| `mail_digest` | `search_emails`、`summarize_emails`、`email_stats` | 主题摘要、批量汇总 |
+
+请求示例：
+
+```json
+{
+  "query": "帮我查一下 Q3 预算会议是谁发的",
+  "context": {"skill": "mail_search"}
+}
+```
 
 ## MCP Server
 
@@ -247,7 +278,7 @@ MCP 暴露能力：
 | `POST` | `/agent/approvals/{approval_id}/approve` | 人工批准；默认 simulated，`MAIL_PROVIDER=gmail` 时创建 Gmail draft |
 | `POST` | `/agent/approvals/{approval_id}/reject` | 人工拒绝 |
 
-当前实现是本地 JSON 文件存储。`ApprovalStore.approve()` 支持 provider executor：默认返回 simulated result；`MAIL_PROVIDER=gmail` 时通过 Gmail API `users.drafts.create` 创建草稿，返回 `draft_id/message_id`，并保持 `sent=false`。真实发送仍不默认开放。
+`ApprovalStore` 支持 `json` 与 `sqlite` 两种 backend，并按 `tenant_id` 隔离审批单。`ApprovalStore.approve()` 支持 provider executor：默认返回 simulated result；`MAIL_PROVIDER=gmail` 时通过 Gmail API `users.drafts.create` 创建草稿，返回 `draft_id/message_id`，并保持 `sent=false`。真实发送仍不默认开放。
 
 Gmail draft-only 配置示例：
 
@@ -270,14 +301,22 @@ GMAIL_READONLY_TOKEN_PATH=./credentials/gmail_readonly_token.json
 GMAIL_READONLY_SCOPES=https://www.googleapis.com/auth/gmail.readonly
 GMAIL_SYNC_QUERY=newer_than:30d
 GMAIL_SYNC_MAX_RESULTS=100
+GMAIL_REAL_GOLD_PATH=./data/real_emails/gold_chunks.real.json
 ```
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\sync_gmail_readonly.py
-.\.venv\Scripts\python.exe scripts\sync_gmail_readonly.py --index
+.\tasks.ps1 gmail-preflight
+.\tasks.ps1 gmail-sync-index
+.\tasks.ps1 gmail-gold-template
+.\tasks.ps1 gmail-gold-quality
+.\tasks.ps1 context-recall-real
 ```
 
-同步脚本会把 Gmail message 映射成现有 `Email` schema：`id/subject/sender/recipients/date/body/labels/thread_id`。增量逻辑使用本地 `seen_message_ids` 跳过已同步消息；`--index` 会继续复用现有 cleaner、chunker、embedder 和 BM25 cache invalidation。
+`gmail-preflight` 只做本地检查，不触网；它会区分 OAuth client 缺失、read-only token 缺失、真实邮箱 JSON 缺失、同步 state 缺失和真实 gold template 缺失。同步脚本会把 Gmail message 映射成现有 `Email` schema：`id/subject/sender/recipients/date/body/labels/thread_id`。增量逻辑使用本地 `seen_message_ids` 跳过已同步消息；`gmail-sync-index` 会继续复用现有 cleaner、chunker、embedder 和 BM25 cache invalidation。
+
+`gmail-gold-template` 从已同步的真实 Gmail JSON 生成 `gmail_*_chunk_*` 标注模板，默认会按 `gold_chunk_ids` 保留已有标签，只为新 chunk 补空模板。`gmail-gold-quality` 会阻断未标注、重复 chunk id、`????`/替换字符、问题泄漏 chunk 位置等质量问题，并报告本地标注比例。需要补齐并通过 quality gate 后，再运行 `context-recall-real`。当前真实邮箱 gate 固定为 `V2 --top-n 10 --fetch-k 80`，把长邮件多 chunk 的召回窗口扩大到 recall@10，以 `data/eval_results/context_recall.real.json` 记录本地忽略报告。因此只有 `gmail-preflight` 通过、真实同步产物存在、真实 gold labels 已填好、quality gate 通过并跑过 `context-recall-real`，才应该对外说“真实邮箱数据已经正式评测过”。
+
+本机 2026-06-10 真实邮箱 gate 已覆盖 52 封 Gmail、112 个索引 chunks、100 条已标注 gold cases；`gmail-gold-quality` 通过并提示 100 条为本地质量标注，建议继续人工抽检；`context-recall-real` 结果为 `V2 n=100 mean_context_recall=0.9700 hit_rate=0.9700 perfect=0.9700`，miss case ids 为 `real_gold_003/019/066`。报告文件和真实邮件正文均在 ignored 路径下，不进入仓库。
 
 ## Trace 与 Eval
 
@@ -300,13 +339,24 @@ AGENT_TRACE_LOG_PATH=./data/traces/agent_traces.jsonl
 .\.venv\Scripts\python.exe scripts\summarize_agent_traces.py --json
 ```
 
-Agent eval：
+Agent eval smoke：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_agent_eval.py --limit 8 --report-output data/eval_results/agent_eval_report.md
 ```
 
-`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate、forbidden_tool_violation_rate，并把每条记录关联 `trace_id`。任务集现在是 105 条元数据化 case（gate 门槛 `>=100`），每条包含 `id`、`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；报告会给出 `failure_category`，用于区分 missing_expected_tool、forbidden_tool、tool_error、approval_required、max_steps 等问题。
+Agent eval full：
+
+```powershell
+$env:ENABLE_AGENT_TRACE='true'
+$env:AGENT_TRACE_LOG_PATH='data/traces/agent_traces_full.jsonl'
+.\.venv\Scripts\python.exe scripts\run_agent_eval.py `
+  --output data/eval_results/agent_eval.json `
+  --report-output data/eval_results/agent_eval_report.md `
+  --trace-input data/traces/agent_traces_full.jsonl
+```
+
+`scripts/run_agent_eval.py` 会输出 task_success_rate、tool_accuracy、avg_steps、max_steps_reached_rate、forbidden_tool_violation_rate，并把每条记录关联 `trace_id`。任务集现在是 105 条元数据化 case（gate 门槛 `>=100`），每条包含 `id`、`task_type`、`risk_level`、`expected_tools`、`forbidden_tools`、`success_criteria`；报告会给出 `failure_category`，用于区分 missing_expected_tool、forbidden_tool、tool_error、approval_required、max_steps 等问题。脚本支持 checkpoint 写入和 `--resume`，长跑中断后可复用已完成记录。
 
 离线 gate 不调用 LLM，只读取已有 `agent_eval.json`：
 
@@ -321,6 +371,12 @@ Agent eval：
 ```
 
 ## 评测结果
+
+Agent EvalOps full run（本机 2026-06-11，先重建默认 `data/emails.json` 的 5000 chunk Chroma 索引）：
+
+| n_tasks | task_success_rate | tool_accuracy | avg_steps | max_steps_reached_rate | forbidden_tool_violation_rate | gate |
+|---:|---:|---:|---:|---:|---:|---|
+| 105 | 0.8095 | 0.8857 | 2.68 | 0.0190 | 0.0000 | PASS |
 
 RAG 消融脚本：
 
@@ -369,12 +425,12 @@ RAG 消融脚本：
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-当前回归结果：`146 passed`。
+当前回归结果：`190 passed`。
 
 覆盖重点：
 
 - RAG：chunker、retriever、pipeline、Cross-Encoder reranker、reranker serving policy、gold chunk context_recall、generation context budget、memory、coordinator、eval。
-- Agent：tool registry、tools、agent loop、agent eval、EvalOps failure attribution/report/gate。
+- Agent：tool registry、skills、tools、agent loop、agent eval、EvalOps failure attribution/report/gate。
 - MCP：tool schema 转换、MCP backend、server 注册、auth header、token verifier、schema cache、audit JSONL、tool policy、audit query API。
 - Safety / Mail：approval store、`send_email` pending approval、approve/reject、Gmail draft provider、Gmail read-only sync。
 - Trace：JSONL recorder、agent trace metadata、trace summary。
@@ -406,6 +462,7 @@ frontend/app.py                Streamlit UI
 mcp_server.py                  FastMCP server
 agents/
   agent_loop.py                Function-calling ReAct loop
+  skills.py                    Agent Skill profiles：工具集合 + planner 指令
   tool_registry.py             工具元数据单一事实源
   tool_policy.py               MCP 工具可见性策略
   evalops.py                   Agent eval 失败归因和报告生成
@@ -428,18 +485,21 @@ scripts/
   measure_reranker_latency.py  Reranker-only latency benchmark
   evaluate_context_recall.py   Gold chunk 模板和 context_recall 评测
   sync_gmail_readonly.py       Gmail read-only 增量同步到本地 JSON/索引
+  gmail_phase2a_preflight.py   真实 Gmail 数据本地 readiness 检查
+  build_real_gmail_gold_template.py  从真实 Gmail JSON 生成 gold 标注模板
+  check_real_gold_quality.py   真实 gold 标注质量 gate
   run_agent_eval.py            Agent 任务评测
   check_agent_eval_gate.py     Agent EvalOps 离线阈值 gate
   summarize_agent_traces.py    Trace 汇总
-tests/                         146 个单测
+tests/                         186 个单测
 docs/                          架构、评测、复盘；docs/面经 为本地忽略目录
 ```
 
 ## 已知限制和下一步
 
-- Gmail read-only provider 已能把真实邮件增量同步到本地忽略 JSON；下一步是在个人/脱敏邮箱上实际跑同步、清洗质量抽检，并标注 supporting chunks。
+- Gmail read-only provider 已能把真实邮件增量同步到本地忽略 JSON，并提供 `gmail-preflight` / `gmail-sync-index` / `gmail-gold-template` / `context-recall-real` 闭环；如果本机缺少 Gmail OAuth client 或 read-only token，真实同步仍会被 preflight 明确阻塞。
 - `send_email` 已支持审批后 simulated 或 Gmail draft-only；真实发送、撤销策略和企业邮箱多用户授权仍是后续工作。
-- `ApprovalStore` 当前是本地 JSON；生产应换 Redis/DB。
-- MCP 已有 token verifier、工具级可见性策略和审计查询；生产还需要更完整的 OAuth、租户隔离、密钥轮换、部署层 TLS 和限流。
-- Agent eval 已扩到 105 条元数据化任务并支持离线 gate；下一步接入真实失败样本、人工复核和历史趋势对比。
-- 检索侧已接入 Cross-Encoder reranker，并补了 rerank-only benchmark harness、serving policy 和 synthetic gold context_recall baseline；下一步是在真实模型环境跑 30+ 题 × 多轮 latency、加 batch 推理，并基于真实邮箱 gold chunk 产出正式 recall 数据。
+- `ApprovalStore` 和 session memory 已支持 SQLite-backed 状态与基础 tenant 隔离；企业级生产仍建议换 Redis/Postgres，并补迁移、备份和连接池策略。
+- MCP 已有 token verifier、工具级可见性策略和审计查询；API 侧已有 bearer token、CORS 配置和基础固定窗口限流；生产还需要更完整的 OAuth/RBAC、密钥轮换、部署层 TLS 和分布式限流。
+- Agent eval 已完成 105 条 full LLM run 并通过 strict gate；下一步接入真实失败样本、人工复核和历史趋势对比。
+- 检索侧已接入 Cross-Encoder reranker，并补了 rerank-only benchmark harness、serving policy、synthetic gold context_recall baseline 和 100 条真实 Gmail gold gate；下一步是扩展到更多真实邮件、做人工抽检与多轮 latency/recall 趋势看板，并加 batch rerank 推理。

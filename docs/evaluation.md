@@ -81,6 +81,16 @@ Q1 OKR 回顾会议定于什么时间、在哪个地点举行？     → 单邮�
 
 这张表回答的是 RAGAS 三指标没有直接覆盖的问题：**检索到底有没有把应该召回的证据 chunk 找回来**。在当前 synthetic gold baseline 上，V7 相比 V2 的 `mean_context_recall` 绝对提升 `+0.1833`；这与 V7 在 `answer_relevancy / faithfulness` 上更高的结果方向一致。但它仍然是合成语料上的 30 题 baseline，真实邮箱场景要重新标注 gold chunks 后再下生产结论。
 
+### Agent EvalOps full run
+
+2026-06-11 已完成 105 条真实 LLM agent eval，并通过 strict full gate。该 run 使用 `data/agent_testset.json` 的 105 条任务集，评测前先将 Chroma 索引重建为默认 `data/emails.json` 的 5000 chunks；如果索引切到了真实 Gmail corpus，会导致任务集和语料不匹配，指标失真。
+
+| n_tasks | task_success_rate | tool_accuracy | avg_steps | max_steps_reached_rate | forbidden_tool_violation_rate | gate |
+|---:|---:|---:|---:|---:|---:|---|
+| 105 | 0.8095 | 0.8857 | 2.68 | 0.0190 | 0.0000 | PASS |
+
+这组指标衡量的是 agent 的工具选择、任务完成、人审/禁用工具边界和 max steps 健康度；它不替代真实 Gmail 的 retrieval recall。真实 Gmail 可靠性当前由 `gmail-gold-quality` + `context-recall-real` 覆盖，最近一次结果为 `V2 n=100 mean_context_recall=0.9700 hit_rate=0.9700 perfect=0.9700`。
+
 ### 逐组件看：单个 delta 的方向并不稳定
 
 很容易给每个组件配一个"单维度故事"——加 BM25+RRF 让某指标涨、加 reranker 让 precision 涨之类。但把这套消融**跑两次对比**就会发现：**单个组件对单个指标的影响方向，并不都稳定**。比如"加 query rewrite 对 faithfulness 是正还是负"，两次跑给出的方向就不一致。
@@ -135,9 +145,10 @@ V6（V4 去掉 reranker）也值得记一下：延迟 mean 11s，跟 V2 几乎�
 
 1. **30 题样本，方差较大**：正式 benchmark 应跑 100 题 × 3 次取均值。当前数据足以揭示"赢家分散"这个**模式**，但版本间精确排名会随重跑变动（§4 给了两次跑的对比），不要把单次排名当定论。
 2. **合成数据偏向"单邮件可答"**：testset 由 LLM 基于单封邮件生成 QA 对，跨邮件多跳推理题占比低。这是 rewrite 在合成数据上 ROI 偏低的可能原因之一；Phase 9 已补 Gmail read-only 增量同步，下一步要在个人/脱敏真实邮箱上验证这个结论是否反转。
-3. **context_recall 已有 synthetic baseline，但仍缺真实邮箱 gold 标注**：Phase 10 新增 `scripts/evaluate_context_recall.py`、`data/gold_chunks.json` 和 `data/eval_results/context_recall.json`，已经能基于 `gold_chunk_ids` 计算 deterministic `context_recall` / hit rate / perfect recall。当前结果只证明在 synthetic testset 上 V7 的召回覆盖更好；个人/脱敏真实邮箱仍需单独标注正式 gold chunk 文件。
-4. **Cross-Encoder benchmark 已有 harness，但正式数字未补齐**：旧 LLM reranker 的延迟和方差问题已经通过 V7 的 `RERANKER_BACKEND=cross_encoder` 路径缓解；Phase 8 增加了 `scripts/measure_reranker_latency.py` 隔离测 V2/V3/V7 的 rerank step，并把上线策略写进 `core.reranker_policy`。下一步要在真实模型环境跑 30+ 题 × 多轮 latency，并结合 Phase 10 的真实邮箱 gold chunk recall 再决定是否默认开启 reranker。
-5. **延迟样本仍偏小**：当前数字是 10 题/版的 trimmed mean + p95，足以做相对排序；正式上线前应跑 30+ 题 × 多次取均值，并在不同时段重复以观测 API 抖动方差。源数据 `data/eval_results/latency.json`，复现 `python scripts/measure_latency.py --limit 10`。
+3. **context_recall 已从 synthetic baseline 扩到真实 Gmail gate**：Phase 10 新增 `scripts/evaluate_context_recall.py`、`data/gold_chunks.json` 和 `data/eval_results/context_recall.json`，已经能基于 `gold_chunk_ids` 计算 deterministic `context_recall` / hit rate / perfect recall。Phase 2B/2C 又补了 100 条真实 Gmail gold cases，并加了 `gmail-gold-quality` 阻断未标注、重复 chunk、文本乱码和 chunk 位置泄漏；本机 2026-06-10 的 `context-recall-real` 结果为 `V2 n=100 mean_context_recall=0.9700 hit_rate=0.9700 perfect=0.9700`。下一步是继续扩大真实邮件覆盖、人工抽检本地 gold labels，并做多轮趋势对比。
+4. **Agent EvalOps 已有 105 条 full run，但仍是 synthetic corpus 对齐任务集**：它能验证工具链路、权限边界和多步 agent 行为，但不能直接证明真实个人邮箱上的泛化能力。真实邮箱方向还需要把 agent 任务集接入真实失败样本、人工复核和趋势对比。
+5. **Cross-Encoder benchmark 已有 harness，但正式数字未补齐**：旧 LLM reranker 的延迟和方差问题已经通过 V7 的 `RERANKER_BACKEND=cross_encoder` 路径缓解；Phase 8 增加了 `scripts/measure_reranker_latency.py` 隔离测 V2/V3/V7 的 rerank step，并把上线策略写进 `core.reranker_policy`。下一步要在真实模型环境跑 30+ 题 × 多轮 latency，并结合 Phase 10 的真实邮箱 gold chunk recall 再决定是否默认开启 reranker。
+6. **延迟样本仍偏小**：当前数字是 10 题/版的 trimmed mean + p95，足以做相对排序；正式上线前应跑 30+ 题 × 多次取均值，并在不同时段重复以观测 API 抖动方差。源数据 `data/eval_results/latency.json`，复现 `python scripts/measure_latency.py --limit 10`。
 
 ---
 
@@ -162,12 +173,21 @@ python scripts/evaluate_context_recall.py --init-template --gold data/gold_chunk
 # 基于 gold_chunk_ids 计算确定性 context_recall
 python scripts/evaluate_context_recall.py --gold data/gold_chunks.json --versions V2,V7
 
+# Agent EvalOps full run：先让 Chroma 索引与 105 条 agent testset 对齐
+python scripts/index_emails.py --clear
+$env:ENABLE_AGENT_TRACE='true'
+$env:AGENT_TRACE_LOG_PATH='data/traces/agent_traces_full.jsonl'
+python scripts/run_agent_eval.py --output data/eval_results/agent_eval.json --report-output data/eval_results/agent_eval_report.md --trace-input data/traces/agent_traces_full.jsonl
+python scripts/check_agent_eval_gate.py --input data/eval_results/agent_eval.json --min-tasks 100 --min-task-success-rate 0.80 --min-tool-accuracy 0.80 --max-forbidden-tool-violation-rate 0.01 --max-max-steps-reached-rate 0.05
+
 # 输出
 data/eval_results/V{1..7}.json     # 每版逐题记录（含 answer / contexts）
 data/eval_results/comparison.json  # 三维度均值汇总
 data/eval_results/reranker_latency.json  # Phase 8 rerank-only latency
 data/gold_chunks.json              # Phase 10 synthetic gold chunk labels
 data/eval_results/context_recall.json    # Phase 10 gold chunk recall
+data/eval_results/agent_eval.json         # Agent EvalOps full run records
+data/eval_results/agent_eval_report.md    # Agent EvalOps Markdown report
 ```
 
 评测脚本会自动应用每版的 `ENABLE_*` flag、重置 reranker 熔断器（避免上一版的失败计数泄漏到下一版，详见 [`docs/technical_retrospective.md`](technical_retrospective.md) §4）、把 LLM 打分失败的样本降级到向量相似度。

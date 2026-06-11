@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 from models.schemas import SearchResult
 
 
@@ -82,3 +85,31 @@ def test_evaluate_context_recall_cases_aggregates_recall_rates():
         "perfect_recall_rate": 0.5,
     }
     assert [record["context_recall"] for record in report["records"]] == [0.5, 1.0]
+
+
+def test_evaluate_version_passes_retrieval_window_options(monkeypatch):
+    from scripts import evaluate_context_recall as recall
+
+    calls = []
+
+    def fake_retrieve(question: str, **kwargs):
+        calls.append((question, kwargs))
+        return [_result("c1")]
+
+    monkeypatch.setitem(sys.modules, "core.pipeline", SimpleNamespace(retrieve=fake_retrieve))
+    monkeypatch.setitem(
+        sys.modules,
+        "core.reranker",
+        SimpleNamespace(reset_circuit_breaker=lambda: None),
+    )
+    monkeypatch.setattr(recall, "apply_flags", lambda flags: None)
+
+    report = recall.evaluate_version(
+        "V2",
+        [{"id": "gold_001", "question": "q", "gold_chunk_ids": ["c1"]}],
+        top_n=5,
+        fetch_k=40,
+    )
+
+    assert report["summary"]["mean_context_recall"] == 1.0
+    assert calls == [("q", {"top_n": 5, "fetch_k": 40})]

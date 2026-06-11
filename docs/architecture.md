@@ -90,7 +90,7 @@ flowchart TB
 
 | 层 | 职责 | 关键设计 |
 |---|---|---|
-| API | HTTP 入口、SSE/WebSocket、降级 | 7 个端点，stateless（除 session_id 索引的内存对话） |
+| API | HTTP 入口、SSE/WebSocket、降级 | 端点按 `tenant_id + session_id` 读取会话；默认内存，生产化可切 SQLite |
 | Agent | 意图路由、按场景组合 core 能力 | 多 agent 模式，每个 agent 自治 |
 | Core | 检索 / 生成 / 嵌入 / 切分 / 记忆 | 纯函数为主，可独立测试 |
 | Storage | ChromaDB + 进程内 BM25 缓存 + 外部 LLM/embed | LLM 是外部依赖，要做超时和降级 |
@@ -434,18 +434,20 @@ flowchart LR
     Local["local backend<br/>TOOL_SCHEMAS + call_tool"]
     MCPServer["mcp_server.py<br/>FastMCP tools/resources/prompts"]
     MCPClient["MCP backend<br/>tools/list + tools/call"]
+    Skill["agents/skills.py<br/>Skill profiles"]
     Loop["agent_loop.py<br/>/chat/agent"]
 
     Registry --> Local
     Registry --> MCPServer
-    Local --> Loop
-    MCPServer --> MCPClient --> Loop
+    Local --> Skill
+    MCPServer --> MCPClient --> Skill
+    Skill --> Loop
 ```
 
 默认 `AGENT_TOOL_BACKEND=local`，所以现有 `/chat/agent` 仍然走进程内
 function-calling 工具层；设置 `AGENT_TOOL_BACKEND=mcp` 后，`agents/mcp_adapter.py`
 会从 `MCP_SERVER_URL` 拉取 MCP tools，再转换成 OpenAI-compatible `tools` schema
-交给规划模型。模型返回 tool call 后，后端通过 MCP `tools/call` 执行工具。
+交给规划模型。无论走 local 还是 MCP，`agents/skills.py` 都会在 planner 前按任务场景收敛可见工具和 planner instruction：`mail_search` 只暴露只读查询工具，`reply_drafting` 才暴露起草/发信申请，`mail_digest` 面向主题汇总。模型返回 tool call 后，后端通过 local dispatch 或 MCP `tools/call` 执行工具；若模型幻觉调用当前 Skill 禁用的工具，`SkillToolBackend` 返回 error，不执行越权动作。
 
 **6 个工具**（`agents/tools.py`）：
 
@@ -477,6 +479,15 @@ MCP backend 已加入生产化基础：
 | Audit query API | `GET /agent/mcp-audit` | 按 tool/status/limit 查询 MCP 工具调用审计事件 |
 | 工具风险元数据 | `ToolSpec.risk_level` / `requires_approval` | 高风险工具可被人审链路拦住 |
 
+Agent Skill 是工具之上的任务型能力层，不新增底层工具，只控制“当前任务暴露哪些工具、给 planner 哪段指令”。它和 Function Calling / MCP 的分工是：Function Calling 负责模型如何表达工具调用决策，MCP 负责工具如何被标准化发现和执行，Skill 负责把工具集合按任务边界收窄，降低不相关工具和高风险工具被误调用的概率。
+
+| Skill | 允许工具 | 适用场景 |
+|---|---|---|
+| `general` | 6 个工具全量可见 | 默认复杂任务、多步组合 |
+| `mail_search` | `search_emails`、`get_email`、`email_stats` | 只读查找、详情读取、统计 |
+| `reply_drafting` | `search_emails`、`get_email`、`draft_reply`、`send_email` | 找邮件后起草回复、申请发信 |
+| `mail_digest` | `search_emails`、`summarize_emails`、`email_stats` | 主题汇总、周报、批量摘要 |
+
 **护栏**（`AGENT_*` 配置，详见 `agents/agent_loop.py`）：
 
 | 护栏 | 机制 |
@@ -492,7 +503,7 @@ MCP backend 已加入生产化基础：
 
 ```mermaid
 flowchart LR
-    Agent["agent tool_call: send_email"] --> Store["ApprovalStore<br/>pending_actions.json"]
+    Agent["agent tool_call: send_email"] --> Store["ApprovalStore<br/>json/sqlite backend"]
     Store --> Pending["status=pending"]
     Pending --> Approve["POST /agent/approvals/{id}/approve"]
     Pending --> Reject["POST /agent/approvals/{id}/reject"]
@@ -520,6 +531,8 @@ tool_error、approval_required、max_steps、judge_failed 等失败原因，并�
 `agent_eval_report.md` 供面试或回归复盘。`scripts/check_agent_eval_gate.py`
 可离线读取 `agent_eval.json`，按任务数、成功率、工具准确率、禁用工具违规率和
 max_steps 触发率做阈值 gate。
+
+当前 `data/eval_results/agent_eval.json` 已由 2026-06-11 的 105 条 full LLM run 生成：`task_success_rate=0.8095`、`tool_accuracy=0.8857`、`avg_steps=2.68`、`max_steps_reached_rate=0.0190`、`forbidden_tool_violation_rate=0.0000`，并通过 strict `agent-eval-full` gate。该 full run 依赖默认 synthetic `data/emails.json` 的 5000 chunk Chroma 索引；真实 Gmail 可靠性另由 `context-recall-real` 的 100-case gold gate 覆盖。
 
 **与 §六 固定路由的区别**：Coordinator 是"一次分类 → 一条固定链"；agent loop 是 LLM
 自主多轮规划，能把"找出 X 并逐封处理"这类任务拆成 `search → 逐个 draft` 的多步链。
@@ -557,6 +570,7 @@ E:/智能邮件agent/
 │   ├── analyzer_agent.py         # 分析 agent
 │   ├── graph_workflow.py         # LangGraph Self-RAG
 │   ├── tool_registry.py          # 工具元数据单一来源
+│   ├── skills.py                 # Agent Skill profiles：工具集合 + planner 指令
 │   ├── tool_policy.py            # MCP 工具可见性策略
 │   ├── evalops.py                # Agent eval 失败归因和报告生成
 │   ├── mcp_adapter.py            # MCP tools/list → function schema，tools/call → tool result + audit/cache

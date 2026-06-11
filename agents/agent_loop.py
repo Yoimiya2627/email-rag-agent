@@ -19,6 +19,7 @@ from openai import OpenAI
 
 from agents.tools import TOOL_SCHEMAS, call_tool
 from agents.mcp_adapter import LocalToolBackend, create_mcp_backend_from_settings
+from agents.skills import SkillToolBackend, resolve_agent_skill
 from agents.tracing import AgentTraceRecorder
 from models.schemas import AgentRequest, AgentResponse
 import config.settings as cfg
@@ -45,6 +46,10 @@ _SYSTEM = """你是一个邮件智能助手 Agent，可以调用工具完成用�
   的 email_id 逐个调用 get_email / draft_reply，不要凭空编造 email_id。
 - 每拿到一次工具结果，判断信息是否已经足够。
 - 信息足够后，用中文给出清晰、有依据的最终回答，此时不要再调用工具。"""
+
+
+def _system_for_skill(skill) -> str:
+    return f"{_SYSTEM}\n\n{skill.planner_instruction}"
 
 
 def _serialize_tool_calls(tool_calls) -> list:
@@ -74,7 +79,8 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
     metadata['steps'] records every tool invocation (name + arguments) for
     transparency and agent-level evaluation (Step 6).
     """
-    messages = [{"role": "system", "content": _SYSTEM}]
+    skill = resolve_agent_skill(request.query, request.context)
+    messages = [{"role": "system", "content": _system_for_skill(skill)}]
     if memory is not None:
         messages.extend(memory.to_messages())
     messages.append({"role": "user", "content": request.query})
@@ -82,7 +88,7 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
     steps: List[dict] = []
     call_counts: Counter = Counter()  # (tool, args) signature → times invoked
     client = _get_client()
-    tool_backend = _get_tool_backend()
+    tool_backend = SkillToolBackend(_get_tool_backend(), skill)
     tool_schemas = tool_backend.tool_schemas()
     trace = AgentTraceRecorder.from_settings()
     trace.record(
@@ -90,6 +96,7 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
         query=request.query,
         session_id=request.session_id,
         tool_backend=cfg.AGENT_TOOL_BACKEND,
+        skill=skill.name,
     )
 
     for step in range(cfg.AGENT_MAX_STEPS):
@@ -110,7 +117,7 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
             return AgentResponse(
                 answer=answer,
                 sources=[],
-                metadata={"steps": steps, "trace_id": trace.trace_id},
+                metadata={"steps": steps, "trace_id": trace.trace_id, "skill": skill.name},
             )
 
         # Echo the assistant turn (with its tool_calls) back into the history,
@@ -202,5 +209,10 @@ def run_agent_loop(request: AgentRequest, memory=None) -> AgentResponse:
     return AgentResponse(
         answer=answer,
         sources=[],
-        metadata={"steps": steps, "max_steps_reached": True, "trace_id": trace.trace_id},
+        metadata={
+            "steps": steps,
+            "max_steps_reached": True,
+            "trace_id": trace.trace_id,
+            "skill": skill.name,
+        },
     )
