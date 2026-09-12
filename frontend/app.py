@@ -424,237 +424,287 @@ QUICK_QUESTIONS = [
     "帮我回复关于项目进度的邮件",
 ]
 
-# ── sidebar ───────────────────────────────────────────────────────────────────
 
-with st.sidebar:
-    st.title("📧 邮件智能助手")
-    st.caption("基于 RAG + Multi-Agent 架构")
-    st.divider()
+def _render_chat_workspace():
+    st.title('问答工作台')
+    st.caption('针对导入的问答资料，检索、总结或起草回复。')
+    st.info('此处尚未连接你的真实邮箱。查看和搜索已同步邮件，请切换到「我的邮箱」。')
+    with st.expander("问答资料与高级设置", expanded=False):
 
-    # API status
-    health = _get("/health")
-    if health:
-        st.success("✅ API 已连接")
-        if st.button('在 API 中预热模型',help='首次预热可能下载嵌入模型；不会读取邮箱或调用远端生成模型。'):
-            result = _post('/warmup',timeout=10)
-            if result.get('error'):
-                st.error(result['error'])
-            else:
-                st.info(f"预热状态：{result.get('status')}")
-        status = _get("/index/status")
-        if status:
-            ec = status.get("email_count", 0)
-            cc = status.get("chunk_count", 0)
-            if status.get('requires_rebuild'):
-                st.warning('已有旧索引需要显式重建。请先备份，再使用项目的索引重建命令。')
-            elif cc:
-                st.info(f"📚 已索引 **{ec}** 封邮件 / **{cc}** 个片段")
-            else:
-                st.warning("⚠️ 索引为空，请先点击下方 “索引邮件”")
-    else:
-        st.error("❌ 后端未连接，请运行：\n`uvicorn api.main:app --reload`")
-
-    st.divider()
-    st.subheader("📂 数据管理")
-    data_path = st.text_input(
-        "邮件数据路径",
-        value="./data/emails.json",
-        help="JSON 文件路径，相对于项目根目录",
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🗂️ 索引邮件", use_container_width=True):
-            result = _post("/jobs/index", {"data_path": data_path}, timeout=10)
-            if result.get("error"):
-                st.error(result["error"])
-            else:
-                st.session_state['job_submitted'] = True
-                st.info('索引任务已建立，可在任务进度中查看或停止。')
-    with col2:
-        if st.button("🗑️ 清除索引", use_container_width=True):
-            result = _post("/index/clear")
-            if result.get("error"):
-                st.error(result["error"])
-            elif result.get("success"):
-                st.success("索引已清除")
-
-    st.divider()
-    _render_session_controls()
-    st.checkbox('显示后台任务',key='show_jobs')
-    st.divider()
-    st.subheader("⚡ 快捷问题")
-    for q in QUICK_QUESTIONS:
-        if st.button(q, use_container_width=True, key=f"qk_{q}"):
-            st.session_state["pending_query"] = q
-
-    st.divider()
-    st.subheader("⚙️ 模式")
-    mode = st.radio(
-        "问答模式",
-        ["普通（多 Agent 路由）", "Self-RAG（反思工作流）", "Agent（自主工具调用）"],
-        help=(
-            "普通=意图路由到专家 agent；"
-            "Self-RAG=LangGraph 反思重试；"
-            "Agent=function-calling 自主规划并多轮调用工具"
-        ),
-    )
-    use_stream = st.toggle("流式输出", value=False, help="SSE 流式返回 token（仅普通模式）")
-
-    st.divider()
-    if st.button("🗑️ 清空对话", use_container_width=True):
-        sid = st.session_state.get("session_id")
-        try:
-            if sid:
-                response = requests.delete(f"{API_URL}/chat/history", params={"session_id": sid}, timeout=5, headers=_headers())
-                response.raise_for_status()
-            import uuid
-            st.session_state["session_id"] = str(uuid.uuid4())
-            st.session_state["messages"] = []
-        except Exception:
-            st.error('清空失败，可能仍有任务在执行；保留当前对话，请稍后重试。')
-
-# ── main chat area ────────────────────────────────────────────────────────────
-
-st.title("邮件智能问答")
-st.caption("支持检索、摘要、回复撰写、统计分析")
-st.caption('聊天使用侧栏中的问答索引；下方 163 邮箱使用独立的本地全文索引，真实邮件不会自动进入模型问答。')
-from frontend.mailbox_view import render_mailboxes
-render_mailboxes(st, _get, _post)
-_render_approvals()
-_render_jobs()
-_render_submission_recovery()
-
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
-if "session_id" not in st.session_state:
-    import uuid
-    st.session_state["session_id"] = str(uuid.uuid4())
-
-_render_history_tools()
-
-# Render history
-for message_index, msg in enumerate(st.session_state["messages"]):
-    with st.chat_message(msg["role"]):
-        if msg.get("intent"):
-            st.caption(f"意图识别：{INTENT_LABELS.get(msg['intent'], msg['intent'])}")
-        st.markdown(msg["content"])
-
-        render_evidence(st,msg.get('sources',[]),msg.get('extra_metadata') or {},
-                        _get,_post,'history-'+str(message_index))
-
-        _render_metadata(msg.get("extra_metadata"))
-
-# Handle pending quick query
-pending = st.session_state.pop("pending_query", None)
-user_input = st.chat_input("输入你的问题，例如：最近有哪些重要邮件？") or pending
-
-if user_input:
-    session_id = st.session_state["session_id"]
-    # Show user bubble
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    st.session_state["messages"].append({"role": "user", "content": user_input})
-
-    # Call API and show assistant bubble
-    import uuid
-    payload = {"query": user_input, "session_id": session_id, "operation_key":str(uuid.uuid4())}
-    if mode.startswith("Agent"):
-        endpoint = "/chat/agent"
-    elif mode.startswith("Self-RAG"):
-        endpoint = "/chat/graph"
-    else:
-        endpoint = "/chat"
-
-    with st.chat_message("assistant"):
-        if use_stream and mode.startswith("普通"):
-            # SSE streaming
-            import sseclient
-            intent_caption = st.empty()
-            answer_placeholder = st.empty()
-            full_answer = ""
-            intent_value = ""
-            streamed_sources = []
-            stream_done = False
-            accumulator = StreamAccumulator()
-            try:
-                with requests.post(
-                    f"{API_URL}/chat/stream",
-                    headers=_headers(),
-                    json=payload,
-                    stream=True,
-                    timeout=cfg.AGENT_RUN_TIMEOUT + 15,
-                ) as resp:
-                    resp.raise_for_status()
-                    client_sse = sseclient.SSEClient(resp)
-                    for event in client_sse.events():
-                        if event.data == "[DONE]":
-                            stream_done = True
-                            accumulator.feed('[DONE]')
-                            break
-                        import json as _json
-                        token_data = _json.loads(event.data)
-                        accumulator.feed(token_data)
-                        if "sources" in token_data:
-                            streamed_sources = token_data['sources']
-                        if "intent" in token_data:
-                            intent_value = token_data["intent"]
-                            label = INTENT_LABELS.get(intent_value, intent_value)
-                            intent_caption.caption(f"意图识别：{label}")
-                        elif "token" in token_data:
-                            full_answer += token_data["token"]
-                            answer_placeholder.markdown(full_answer + "▌")
-                answer_placeholder.markdown(full_answer)
-                # 标记 _streamed，让下方通用渲染分支跳过重复渲染
-                result = accumulator.result()
-            except Exception as exc:
-                accumulator.error = '流式请求失败，请先检查会话状态。'
-                result = accumulator.result()
-                answer_placeholder.markdown(accumulator.answer)
-        else:
-            with st.spinner("思考中…"):
-                if mode.startswith('Agent'):
-                    st.session_state['unconfirmed_submission'] = dict(payload)
-                    result = _post('/jobs/agent',payload,timeout=10)
-                    if not result.get('error'):
-                        st.session_state.pop('unconfirmed_submission',None)
-                        st.session_state['job_submitted'] = True
-                        st.info(f"任务已建立：{result['id']}。可在任务进度中停止或查看结果。")
-                        result = {'_queued':True}
+        # API status
+        health = _get("/health")
+        if health:
+            st.success("✅ API 已连接")
+            if st.button('在 API 中预热模型',help='首次预热可能下载嵌入模型；不会读取邮箱或调用远端生成模型。'):
+                result = _post('/warmup',timeout=10)
+                if result.get('error'):
+                    st.error(result['error'])
                 else:
-                    result = _post(endpoint, payload)
-
-        if result.get('warning'):
-            st.warning(result['warning'])
-        if result.get('_queued'):
-            st.rerun()
-        elif result.get("error"):
-            st.error(result["error"])
-            st.session_state["messages"].append(
-                {"role": "assistant", "content": result["error"]}
-            )
+                    st.info(f"预热状态：{result.get('status')}")
+            status = _get("/index/status")
+            if status:
+                ec = status.get("email_count", 0)
+                cc = status.get("chunk_count", 0)
+                if status.get('requires_rebuild'):
+                    st.warning('已有旧索引需要显式重建。请先备份，再使用项目的索引重建命令。')
+                elif cc:
+                    st.caption(f"问答资料：{ec} 封邮件 / {cc} 个片段（独立于已连接邮箱）")
+                else:
+                    st.warning("⚠️ 索引为空，请先点击下方 “索引邮件”")
         else:
-            intent = result.get("intent", "")
-            answer = result.get("answer", "抱歉，未能生成回答。")
+            st.error("❌ 后端未连接，请运行：\n`uvicorn api.main:app --reload`")
 
-            # 流式模式：placeholder 已渲染答案 + intent caption，跳过下面的重复渲染；
-            # 非流式模式：在这里渲染 caption 和答案。
-            if not result.get("_streamed"):
-                if intent:
-                    st.caption(f"意图识别：{INTENT_LABELS.get(intent, intent)}")
-                st.markdown(answer)
+        st.divider()
+        st.subheader("📂 数据管理")
+        data_path = st.text_input(
+            "邮件数据路径",
+            value="./data/emails.json",
+            help="JSON 文件路径，相对于项目根目录",
+        )
 
-            sources = result.get("sources", [])
-            render_evidence(st,sources,result.get('metadata') or {},_get,_post,'current-response')
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🗂️ 索引邮件", use_container_width=True):
+                result = _post("/jobs/index", {"data_path": data_path}, timeout=10)
+                if result.get("error"):
+                    st.error(result["error"])
+                else:
+                    st.session_state['job_submitted'] = True
+                    st.info('索引任务已建立，可在任务进度中查看或停止。')
+        with col2:
+            if st.button("🗑️ 清除索引", use_container_width=True):
+                result = _post("/index/clear")
+                if result.get("error"):
+                    st.error(result["error"])
+                elif result.get("success"):
+                    st.success("索引已清除")
 
-            _render_metadata(result.get("metadata"))
+        st.divider()
+        _render_session_controls()
+        st.checkbox('显示后台任务',key='show_jobs')
+        st.divider()
+        st.subheader("⚡ 快捷问题")
+        for q in QUICK_QUESTIONS:
+            if st.button(q, use_container_width=True, key=f"qk_{q}"):
+                st.session_state["pending_query"] = q
 
-            st.session_state["messages"].append(
-                {
-                    "role": "assistant",
-                    "content": answer,
-                    "intent": intent,
-                    "sources": sources,
-                    "extra_metadata": result.get("metadata"),
-                }
-            )
+        st.divider()
+        st.subheader("⚙️ 模式")
+        mode = st.radio(
+            "问答模式",
+            ["普通（多 Agent 路由）", "Self-RAG（反思工作流）", "Agent（自主工具调用）"],
+            help=(
+                "普通=意图路由到专家 agent；"
+                "Self-RAG=LangGraph 反思重试；"
+                "Agent=function-calling 自主规划并多轮调用工具"
+            ),
+        )
+        use_stream = st.toggle("流式输出", value=False, help="SSE 流式返回 token（仅普通模式）")
+
+        st.divider()
+        if st.button("🗑️ 清空对话", use_container_width=True):
+            sid = st.session_state.get("session_id")
+            try:
+                if sid:
+                    response = requests.delete(f"{API_URL}/chat/history", params={"session_id": sid}, timeout=5, headers=_headers())
+                    response.raise_for_status()
+                import uuid
+                st.session_state["session_id"] = str(uuid.uuid4())
+                st.session_state["messages"] = []
+            except Exception:
+                st.error('清空失败，可能仍有任务在执行；保留当前对话，请稍后重试。')
+
+    # ── main chat area ────────────────────────────────────────────────────────────
+
+    _render_approvals()
+    _render_jobs()
+    _render_submission_recovery()
+
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
+    if "session_id" not in st.session_state:
+        import uuid
+        st.session_state["session_id"] = str(uuid.uuid4())
+
+    _render_history_tools()
+
+    # Render history
+    for message_index, msg in enumerate(st.session_state["messages"]):
+        with st.chat_message(msg["role"]):
+            if msg.get("intent"):
+                st.caption(f"意图识别：{INTENT_LABELS.get(msg['intent'], msg['intent'])}")
+            st.markdown(msg["content"])
+
+            render_evidence(st,msg.get('sources',[]),msg.get('extra_metadata') or {},
+                            _get,_post,'history-'+str(message_index))
+
+            _render_metadata(msg.get("extra_metadata"))
+
+    # Handle pending quick query
+    pending = st.session_state.pop("pending_query", None)
+    user_input = st.chat_input("针对问答资料提问，例如：总结项目进展") or pending
+
+    if user_input:
+        session_id = st.session_state["session_id"]
+        # Show user bubble
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        st.session_state["messages"].append({"role": "user", "content": user_input})
+
+        # Call API and show assistant bubble
+        import uuid
+        payload = {"query": user_input, "session_id": session_id, "operation_key":str(uuid.uuid4())}
+        if mode.startswith("Agent"):
+            endpoint = "/chat/agent"
+        elif mode.startswith("Self-RAG"):
+            endpoint = "/chat/graph"
+        else:
+            endpoint = "/chat"
+
+        with st.chat_message("assistant"):
+            if use_stream and mode.startswith("普通"):
+                # SSE streaming
+                import sseclient
+                intent_caption = st.empty()
+                answer_placeholder = st.empty()
+                full_answer = ""
+                intent_value = ""
+                streamed_sources = []
+                stream_done = False
+                accumulator = StreamAccumulator()
+                try:
+                    with requests.post(
+                        f"{API_URL}/chat/stream",
+                        headers=_headers(),
+                        json=payload,
+                        stream=True,
+                        timeout=cfg.AGENT_RUN_TIMEOUT + 15,
+                    ) as resp:
+                        resp.raise_for_status()
+                        client_sse = sseclient.SSEClient(resp)
+                        for event in client_sse.events():
+                            if event.data == "[DONE]":
+                                stream_done = True
+                                accumulator.feed('[DONE]')
+                                break
+                            import json as _json
+                            token_data = _json.loads(event.data)
+                            accumulator.feed(token_data)
+                            if "sources" in token_data:
+                                streamed_sources = token_data['sources']
+                            if "intent" in token_data:
+                                intent_value = token_data["intent"]
+                                label = INTENT_LABELS.get(intent_value, intent_value)
+                                intent_caption.caption(f"意图识别：{label}")
+                            elif "token" in token_data:
+                                full_answer += token_data["token"]
+                                answer_placeholder.markdown(full_answer + "▌")
+                    answer_placeholder.markdown(full_answer)
+                    # 标记 _streamed，让下方通用渲染分支跳过重复渲染
+                    result = accumulator.result()
+                except Exception as exc:
+                    accumulator.error = '流式请求失败，请先检查会话状态。'
+                    result = accumulator.result()
+                    answer_placeholder.markdown(accumulator.answer)
+            else:
+                with st.spinner("思考中…"):
+                    if mode.startswith('Agent'):
+                        st.session_state['unconfirmed_submission'] = dict(payload)
+                        result = _post('/jobs/agent',payload,timeout=10)
+                        if not result.get('error'):
+                            st.session_state.pop('unconfirmed_submission',None)
+                            st.session_state['job_submitted'] = True
+                            st.info(f"任务已建立：{result['id']}。可在任务进度中停止或查看结果。")
+                            result = {'_queued':True}
+                    else:
+                        result = _post(endpoint, payload)
+
+            if result.get('warning'):
+                st.warning(result['warning'])
+            if result.get('_queued'):
+                st.rerun()
+            elif result.get("error"):
+                st.error(result["error"])
+                st.session_state["messages"].append(
+                    {"role": "assistant", "content": result["error"]}
+                )
+            else:
+                intent = result.get("intent", "")
+                answer = result.get("answer", "抱歉，未能生成回答。")
+
+                # 流式模式：placeholder 已渲染答案 + intent caption，跳过下面的重复渲染；
+                # 非流式模式：在这里渲染 caption 和答案。
+                if not result.get("_streamed"):
+                    if intent:
+                        st.caption(f"意图识别：{INTENT_LABELS.get(intent, intent)}")
+                    st.markdown(answer)
+
+                sources = result.get("sources", [])
+                render_evidence(st,sources,result.get('metadata') or {},_get,_post,'current-response')
+
+                _render_metadata(result.get("metadata"))
+
+                st.session_state["messages"].append(
+                    {
+                        "role": "assistant",
+                        "content": answer,
+                        "intent": intent,
+                        "sources": sources,
+                        "extra_metadata": result.get("metadata"),
+                    }
+                )
+
+
+# Navigation describes the user's work; provider details belong to accounts.
+from frontend.theme import apply_theme, render_brand
+from frontend.mailbox_view import render_mailboxes
+apply_theme(st)
+accounts_response = _get('/mailboxes')
+mail_accounts = (accounts_response or {}).get('accounts',[])
+with st.sidebar:
+    render_brand(st)
+    with st.container(key='mail_nav'):
+        workspace_page = st.radio('工作区',['我的邮箱','同步与设置','问答工作台'],key='workspace_page',label_visibility='collapsed')
+    st.divider()
+    st.caption('已连接邮箱')
+    if mail_accounts:
+        account_ids = [row['id'] for row in mail_accounts]
+        saved_account = st.session_state.get('mail_account_id')
+        if saved_account not in account_ids:
+            saved_account = account_ids[0]
+        if st.session_state.get('mail_account_picker') != saved_account:
+            st.session_state['mail_account_picker'] = saved_account
+        def choose_mail_account():
+            st.session_state['mail_account_id'] = st.session_state['mail_account_picker']
+        selected_account = st.selectbox('当前邮箱',account_ids,
+            format_func=lambda aid:next((row.get('display_name') or row['address']) for row in mail_accounts if row['id']==aid),
+            key='mail_account_picker',on_change=choose_mail_account,label_visibility='collapsed')
+        st.session_state['mail_account_id'] = selected_account
+        current_account = next(row for row in mail_accounts if row['id']==selected_account)
+        provider_name = {'163':'网易163','qq':'QQ邮箱'}.get(current_account.get('provider'),current_account.get('provider','邮箱'))
+        st.caption(provider_name+' · 本地收取')
+        st.text(current_account.get('address',''))
+    else:
+        selected_account = None
+        st.caption('还没有连接账号' if accounts_response is not None else '暂时无法读取账号')
+    def open_mail_settings():
+        st.session_state['workspace_page'] = '同步与设置'
+    st.button('管理 / 添加邮箱',on_click=open_mail_settings,use_container_width=True)
+    st.divider()
+    health = _get('/health')
+    st.caption('● 本地服务在线' if health else '本地服务未连接，请先启动服务')
+    st.caption('阅读与搜索仅在本机处理')
+    st.caption('更多邮箱服务将陆续接入')
+
+if workspace_page == '问答工作台':
+    _render_chat_workspace()
+else:
+    if accounts_response is None:
+        st.title(workspace_page)
+        st.error('邮箱账号暂时无法读取，请确认本地服务正在运行后刷新。')
+    else:
+        render_mailboxes(st,_get,_post,view='settings' if workspace_page=='同步与设置' else 'inbox',
+                         accounts=mail_accounts,account_id=selected_account)
+    if workspace_page == '同步与设置':
+        st.checkbox('显示后台任务',key='show_jobs')
+        _render_jobs()

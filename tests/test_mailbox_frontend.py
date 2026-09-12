@@ -79,10 +79,148 @@ def button(app, label):
     return next(item for item in app.button if item.label == label)
 
 
+def navigate(app, page):
+    next(item for item in app.radio if item.label == '工作区').set_value(page).run()
+    assert not app.exception
+
+
+def test_default_workspace_shows_mail_without_chat_or_demo_index():
+    http = MailboxHTTP()
+    with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
+        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        assert not app.exception
+        assert any(item.value == '我的邮箱' for item in app.title)
+        assert any(item.label == '合成邮件' for item in app.button)
+        assert any('mail-body' in item.value for item in app.markdown)
+        assert not app.chat_input
+        assert not any(url.endswith('/index/status') for url,_ in http.gets)
+        assert not any(item.label == '邮件数据路径' for item in app.text_input)
+        assert http.posts == []
+        navigate(app,'问答工作台')
+        assert len(app.chat_input) == 1
+        assert any('尚未连接你的真实邮箱' in item.value for item in app.info)
+        navigate(app,'我的邮箱')
+        assert not app.chat_input and http.posts == []
+
+
+def test_empty_workspace_leads_to_account_setup_without_network_actions():
+    http = MailboxHTTP(configured=False,parsed=False)
+    with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
+        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        assert not app.exception
+        button(app,'连接我的邮箱').click().run()
+        assert not app.exception
+        assert app.session_state['workspace_page'] == '同步与设置'
+        assert any(item.label == '客户端授权码' for item in app.text_input)
+        assert http.posts == []
+
+
+def test_account_selection_and_search_state_survive_workspace_navigation():
+    http = MailboxHTTP()
+    second = {**ACCOUNT,'id':'b'*32,'address':'second@163.com','display_name':'第二个邮箱'}
+    http.accounts.append(second)
+    with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
+        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        next(item for item in app.text_input if item.label == '搜索邮件').set_value('发票')
+        next(item for item in app.checkbox if item.label == '只搜索未读邮件').check()
+        button(app,'搜索').click().run()
+        next(item for item in app.selectbox if item.label == '当前邮箱').set_value(second['id']).run()
+        assert not app.exception
+        assert app.session_state['mail_account_id'] == second['id']
+        assert not any(item.label == '返回全部邮件' for item in app.button)
+        assert any(url.endswith('/'+second['id']+'/messages') for url,_ in http.gets)
+        navigate(app,'同步与设置')
+        navigate(app,'我的邮箱')
+        assert next(item for item in app.selectbox if item.label == '当前邮箱').value == second['id']
+        next(item for item in app.selectbox if item.label == '当前邮箱').set_value(ACCOUNT['id']).run()
+        assert not app.exception
+        assert any(item.label == '返回全部邮件' for item in app.button)
+        assert app.session_state['imap_search_request_'+ACCOUNT['id']]['q'] == '发票'
+        assert next(item for item in app.text_input if item.label == '搜索邮件').value == '发票'
+        assert next(item for item in app.checkbox if item.label == '只搜索未读邮件').value is True
+        button(app,'返回全部邮件').click().run()
+        assert not app.exception
+        assert next(item for item in app.text_input if item.label == '搜索邮件').value == ''
+        assert next(item for item in app.checkbox if item.label == '只搜索未读邮件').value is False
+        assert http.posts == []
+
+
+def test_mail_subject_markdown_cannot_create_active_links_or_images():
+    from frontend.mailbox_view import _plain_label
+    assert _plain_label('![pixel](https://tracking.invalid/pixel)') == r'\!\[pixel\]\(https://tracking\.invalid/pixel\)'
+
+
+def test_inbox_fetch_failure_is_not_rendered_as_empty_mailbox():
+    http = MailboxHTTP()
+    old_get = http.get
+    def failed_get(url, **kwargs):
+        if url.endswith('/messages'):
+            raise RuntimeError('offline fixture')
+        return old_get(url,**kwargs)
+    with patch('requests.get',side_effect=failed_get),patch('requests.post',side_effect=http.post):
+        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        assert not app.exception
+        assert any('邮件列表暂时无法加载' in item.value for item in app.error)
+        assert not any('这里还没有邮件' in item.value for item in app.info)
+
+
+@pytest.mark.parametrize('suffix',['/mailboxes','/schedule','/report'])
+def test_settings_read_failures_are_visible_and_do_not_invent_zero_counts(suffix):
+    http = MailboxHTTP()
+    old_get = http.get
+    def failed_get(url, **kwargs):
+        if url.endswith(suffix):
+            raise RuntimeError('offline fixture')
+        return old_get(url,**kwargs)
+    with patch('requests.get',side_effect=failed_get),patch('requests.post',side_effect=http.post):
+        app = st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app.session_state['workspace_page'] = '同步与设置'
+        app.run()
+        assert not app.exception
+        assert any('暂时无法读取' in item.value for item in app.error)
+        assert not app.metric
+        assert http.posts == []
+
+
+def test_remote_removal_moves_browse_cursor_back_to_valid_page():
+    http = MailboxHTTP()
+    old_get = http.get
+    def get_page(url,**kwargs):
+        if url.endswith('/messages'):
+            http.gets.append((url,kwargs))
+            if (kwargs.get('params') or {}).get('offset',0)>=20:
+                return response({'items':[],'total':20,'next_offset':None})
+        return old_get(url,**kwargs)
+    with patch('requests.get',side_effect=get_page),patch('requests.post',side_effect=http.post):
+        app = st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app.session_state['mail_page_'+ACCOUNT['id']] = 20
+        app.run()
+        assert not app.exception
+        assert app.session_state['mail_page_'+ACCOUNT['id']] == 0
+        assert any(item.label == '合成邮件' for item in app.button)
+        assert not any('这里还没有邮件' in item.value for item in app.info)
+
+
+def test_readable_table_display_uses_only_matching_metadata_and_escapes_cells():
+    from frontend.mailbox_view import body_for_display
+    text='[Table synthetic row synthetic:r1 status=complete] metadata'
+    row={'start':2,'end':2+len(text),'text':text,'cells':[{'text':'<img src="https://invalid">','headers':['费用']}]}
+    email={'body':'前言'+text+'结尾','table_rows':[row]}
+    displayed=body_for_display(email)
+    assert 'synthetic:r1' not in displayed and 'mail-table-row' in displayed
+    assert '<img' not in displayed and '&lt;img' in displayed
+    assert '费用' in displayed and '前言' in displayed and '结尾' in displayed
+    assert email['body']=='前言'+text+'结尾'
+    row['text']='mismatched metadata'
+    assert 'synthetic:r1' in body_for_display(email)
+
+
 def test_real_account_form_masks_code_and_submits_only_mailbox_endpoint():
     http = MailboxHTTP(configured=False, parsed=False)
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+        app.session_state['workspace_page'] = '同步与设置'
+        app.run()
         assert not app.exception
         address = next(item for item in app.text_input if item.label == '163 邮箱地址')
         code = next(item for item in app.text_input if item.label == '客户端授权码')
@@ -102,7 +240,9 @@ def test_real_account_form_masks_code_and_submits_only_mailbox_endpoint():
 def test_real_connection_and_sync_controls_submit_fixed_account_scope():
     http = MailboxHTTP(parsed=False)
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+        app.session_state['workspace_page'] = '同步与设置'
+        app.run()
         button(app, '测试连接并读取文件夹').click().run()
         assert not app.exception
         folders = next(item for item in app.multiselect if item.label == '同步文件夹')
@@ -121,24 +261,25 @@ def test_real_connection_and_sync_controls_submit_fixed_account_scope():
         assert any('正在同步' in item.value for item in app.info)
 
 
-def test_real_report_renders_coverage_and_mail_html_only_as_disabled_text():
+def test_real_report_and_mail_html_are_displayed_safely_on_separate_pages():
+    from html import escape
     http = MailboxHTTP()
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
         app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
         assert not app.exception
+        assert not app.chat_input
+        assert any('mail-body' in item.value and escape(HTML) in item.value for item in app.markdown)
+        attachment = next(item for item in app.text_area if item.label == '附件提取文本')
+        assert attachment.value == HTML and attachment.disabled
+        assert not app.get('imgs') and not app.get('iframe')
+        assert all(HTML not in item.value for item in app.markdown)
+        assert all('tracking.invalid' not in url for url, _ in http.gets)
+        assert http.posts == []
+        next(item for item in app.radio if item.label == '工作区').set_value('同步与设置').run()
         values = {item.label:item.value for item in app.metric}
         assert {key:values[key] for key in ['已扫描邮件','解析成功','解析/下载失败','尚未下载']} == {
             '已扫描邮件':'9', '解析成功':'5', '解析/下载失败':'1', '尚未下载':'3'}
         assert any('不表示每个附件或字符都完整' in item.value for item in app.caption)
-        body = next(item for item in app.text_area if item.label == '解析后的正文')
-        attachment = next(item for item in app.text_area if item.label == '附件提取文本')
-        assert body.value == attachment.value == HTML
-        assert body.disabled and attachment.disabled
-        assert not app.get('imgs')
-        assert not app.get('iframe')
-        assert all(HTML not in item.value for item in app.markdown)
-        assert all('tracking.invalid' not in url for url, _ in http.gets)
-        assert http.posts == []
 
 
 def test_completed_sync_refreshes_report_and_stops_polling_without_resubmission():
@@ -146,7 +287,9 @@ def test_completed_sync_refreshes_report_and_stops_polling_without_resubmission(
     http = MailboxHTTP()
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post), \
          patch('streamlit.fragment', wraps=st.fragment) as fragment:
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+        app.session_state['workspace_page'] = '同步与设置'
+        app.run()
         button(app, '测试连接并读取文件夹').click().run()
         button(app, '开始本地同步与解析').click().run()
         assert not app.exception
@@ -165,7 +308,9 @@ def test_completed_sync_refreshes_report_and_stops_polling_without_resubmission(
 def test_auto_sync_configuration_and_pause_use_only_mailbox_routes():
     http=MailboxHTTP()
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
-        app=st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        app=st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app.session_state['workspace_page']='同步与设置'
+        app.run()
         button(app,'测试连接并读取文件夹').click().run()
         next(item for item in app.checkbox if item.label=='启用后台自动同步').check()
         button(app,'保存自动同步设置').click().run()
@@ -182,8 +327,8 @@ def test_local_search_uses_get_and_keeps_snippet_and_body_plain():
     http=MailboxHTTP()
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
         app=st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
-        next(item for item in app.text_input if item.label=='搜索关键词').set_value('发票')
-        button(app,'本地搜索').click().run()
+        next(item for item in app.text_input if item.label=='搜索邮件').set_value('发票')
+        button(app,'搜索').click().run()
         assert not app.exception
         searches=[kwargs['params'] for url,kwargs in http.gets if url.endswith('/search')]
         assert searches and searches[-1]['q']=='发票'

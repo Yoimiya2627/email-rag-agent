@@ -27,7 +27,9 @@ def test_normal_chat_renders_response_without_uninitialized_result():
     with patch('requests.get',side_effect=get),patch('requests.post',return_value=response({
         'answer':'synthetic answer','intent':'general','sources':[],
         'metadata':{'status':'incomplete','completion_status':'incomplete','finish_reason':'length'}})):
-        app=st_testing.AppTest.from_file(str(path),default_timeout=15).run()
+        app=st_testing.AppTest.from_file(str(path),default_timeout=15)
+        app.session_state['workspace_page']='问答工作台'
+        app.run()
         assert not app.exception
         app.chat_input[0].set_value('hello').run()
         assert not app.exception
@@ -39,7 +41,9 @@ def test_agent_submission_can_enable_jobs_after_sidebar_widgets_exist():
     path=Path(__file__).resolve().parents[1]/'frontend'/'app.py'
     with patch('requests.get',side_effect=get),patch('requests.post',return_value=response({
         'id':'job-synthetic','kind':'agent','status':'queued','resumable':False})):
-        app=st_testing.AppTest.from_file(str(path),default_timeout=15).run()
+        app=st_testing.AppTest.from_file(str(path),default_timeout=15)
+        app.session_state['workspace_page']='问答工作台'
+        app.run()
         # The mode control belongs to the sidebar; use its actual options.
         control=next(item for item in app.radio if any(str(option).startswith('Agent') for option in item.options))
         control.set_value(next(option for option in control.options if option.startswith('Agent'))).run()
@@ -64,7 +68,9 @@ def test_approval_displays_bound_destination_without_execution(binding, expected
             }]})
         return get(url, **kwargs)
     with patch('requests.get', side_effect=approvals_get), patch('requests.post') as post:
-        app = st_testing.AppTest.from_file(str(path), default_timeout=15).run()
+        app = st_testing.AppTest.from_file(str(path), default_timeout=15)
+        app.session_state['workspace_page'] = '问答工作台'
+        app.run()
         next(box for box in app.checkbox if box.label == '加载审批待办').check().run()
         assert not app.exception
         assert any(expected in str(element.value) for element in [*app.markdown, *app.caption])
@@ -86,7 +92,9 @@ def test_saved_sessions_and_jobs_can_reach_later_pages():
                              'next_offset':offset+10 if offset+10<12 else None})
         return get(url,**kwargs)
     with patch('requests.get',side_effect=paged_get):
-        app=st_testing.AppTest.from_file(str(path),default_timeout=15).run()
+        app=st_testing.AppTest.from_file(str(path),default_timeout=15)
+        app.session_state['workspace_page']='问答工作台'
+        app.run()
         next(box for box in app.checkbox if box.label=='查看已保存会话').check().run()
         next(button for button in app.button if button.label=='下一页会话').click().run()
         assert not app.exception
@@ -114,7 +122,9 @@ def test_exact_evidence_reread_displays_original_and_table_context():
         return response({'answer':'Supported [e#c]','sources':[],
                          'metadata':{'status':'success','model_visible_evidence':[ref],'cited_evidence':[ref]}})
     with patch('requests.get',side_effect=get),patch('requests.post',side_effect=post):
-        app=st_testing.AppTest.from_file(str(path),default_timeout=15).run()
+        app=st_testing.AppTest.from_file(str(path),default_timeout=15)
+        app.session_state['workspace_page']='问答工作台'
+        app.run()
         app.chat_input[0].set_value('fixture').run()
         # Once persisted in UI history, its stable widget key owns the read.
         app.run()

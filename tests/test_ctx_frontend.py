@@ -34,6 +34,7 @@ def test_context_task_switch_and_constraint_revoke_use_displayed_versions():
         return response({'status':'success'})
     with patch('requests.get',side_effect=get),patch('requests.post',side_effect=post):
         app=st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app.session_state['workspace_page']='问答工作台'
         app.session_state['session_id']='s'
         app.run()
         next(box for box in app.checkbox if box.label=='查看当前任务与记忆').check().run()
@@ -64,6 +65,7 @@ def test_history_window_original_read_and_continuation_survive_rerun():
         return response({'jobs':[],'sessions':[],'turns':[]})
     with patch('requests.get',side_effect=get):
         app=st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app.session_state['workspace_page']='问答工作台'
         app.session_state['session_id']='s';app.run()
         next(item for item in app.text_input if item.label=='历史关键词').set_value('Q-728').run()
         next(button for button in app.button if button.label=='搜索这段会话').click().run()
