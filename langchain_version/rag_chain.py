@@ -7,6 +7,10 @@ Uses:
   - langchain.chains.RetrievalQA with ConversationalRetrievalChain
   - ConversationBufferWindowMemory for multi-turn context
 
+Scope: optional standalone demo with ephemeral window memory. It does not load
+the application's persistent sessions, trusted owner scope, or shared context
+budget. Production context entry points are the API and agents/graph_workflow.py.
+
 How to run:
   python langchain_version/rag_chain.py
 

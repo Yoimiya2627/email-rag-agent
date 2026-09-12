@@ -5,10 +5,14 @@ requests to the appropriate specialist agent.
 import json
 import logging
 
-from openai import OpenAI
+from openai import OpenAI, APITimeoutError
 
 from models.schemas import AgentRequest, AgentResponse, IntentType
 import config.settings as cfg
+from core.memory import build_model_messages
+from agents.runtime import remaining_timeout, RunCancelled, ContextBudgetExceeded
+
+from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +32,20 @@ _INTENT_SYSTEM = """你是一个邮件助手的任务协调器，负责分析用
 
 def _get_client() -> OpenAI:
     global _client
-    if _client is None:
-        _client = OpenAI(api_key=cfg.DEEPSEEK_API_KEY, base_url=cfg.DEEPSEEK_BASE_URL)
+    _client = get_model_client(legacy=_client, factory=OpenAI)
     return _client
 
 
-def classify_intent(query: str) -> IntentType:
+def classify_intent(query: str, history=None) -> IntentType:
+    messages = build_model_messages(_INTENT_SYSTEM, query, history, stage="intent", model=cfg.DEEPSEEK_MODEL, model_revision=getattr(cfg, "MODEL_REVISION", None), max_output_tokens=1500)
     try:
-        resp = _get_client().chat.completions.create(
+        resp = create_completion(_get_client(), stage="intent",
             model=cfg.DEEPSEEK_MODEL,
-            messages=[
-                {"role": "system", "content": _INTENT_SYSTEM},
-                {"role": "user", "content": query},
-            ],
+            messages=messages,
             temperature=0,
             # 推理模型预留推理 + 答案空间，避免 content 为空
             max_tokens=1500,
-            timeout=cfg.LLM_TIMEOUT,
+            timeout=remaining_timeout(cfg.LLM_TIMEOUT),
         )
         choice = resp.choices[0]
         raw = (choice.message.content or "").strip()
@@ -61,19 +62,25 @@ def classify_intent(query: str) -> IntentType:
             raw = raw[s:e]
         data = json.loads(raw)
         return IntentType(data["intent"])
+    except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
+        raise
     except Exception as exc:
-        logger.warning(f"Intent classification failed: {exc}, defaulting to general")
+        logger.warning("Intent classification failed; error_type=%s; defaulting to general", type(exc).__name__)
         return IntentType.GENERAL
 
 
-def route(request: AgentRequest, memory=None) -> AgentResponse:
+def route(request: AgentRequest, memory=None, *, intent: IntentType | None = None) -> AgentResponse:
     from agents.retriever_agent import RetrieverAgent
     from agents.summarizer_agent import SummarizerAgent
     from agents.writer_agent import WriterAgent
     from agents.analyzer_agent import AnalyzerAgent
 
-    intent = classify_intent(request.query)
-    logger.info(f"Intent={intent.value!r} | query={request.query[:60]!r}")
+    history = memory.to_messages() if memory else None
+    if intent is None:
+        intent = classify_intent(request.query, history=history) if history else classify_intent(request.query)
+    else:
+        intent = IntentType(intent)
+    logger.info("Intent=%s", intent.value)
 
     agent_map = {
         IntentType.RETRIEVE: RetrieverAgent,

@@ -1,6 +1,8 @@
 """Tests for real mail-provider execution behind human approval."""
 
 import base64
+from types import SimpleNamespace
+from tests.mail_binding_helpers import write_gmail_token, bound_payload
 
 import pytest
 
@@ -30,6 +32,9 @@ class FakeUsers:
     def drafts(self):
         return FakeDrafts(self.sink)
 
+    def getProfile(self, **kwargs):
+        return SimpleNamespace(execute=lambda: {'emailAddress': 'owner@example.test'})
+
 
 class FakeGmailService:
     def __init__(self):
@@ -56,19 +61,19 @@ def test_build_gmail_raw_message_contains_headers_and_body():
     assert "确认收到" in decoded
 
 
-def test_gmail_provider_creates_draft_with_fake_service():
+def test_gmail_provider_creates_draft_with_fake_service(tmp_path):
     from agents.mail_providers import GmailDraftProvider
 
     service = FakeGmailService()
-    provider = GmailDraftProvider(service=service, user_id="me")
+    provider = GmailDraftProvider(service=service, user_id="me", token_path=write_gmail_token(tmp_path / 'token.json'))
     out = provider.execute_approval(
         {
             "approval_id": "approval-1",
-            "payload": {
+            "payload": bound_payload(provider, {
                 "to": ["alice@example.com"],
                 "subject": "Budget",
                 "body": "确认收到",
-            },
+            }),
         }
     )
 
@@ -87,3 +92,29 @@ def test_gmail_provider_requires_recipient():
 
     with pytest.raises(MailProviderError, match="recipient"):
         provider.execute_approval({"payload": {"to": [], "subject": "x", "body": "y"}})
+
+
+def test_simulated_provider_never_claims_real_send():
+    from agents.mail_providers import SimulatedMailProvider
+
+    result = SimulatedMailProvider().execute_approval({
+        "request_id": "stable-request", "payload": {"to": ["alice@example.com"], "subject": "Hi", "body": "Hello"}
+    })
+    assert result["sent"] is False
+    assert result["simulated"] is True
+    assert result["request_id"] == "stable-request"
+
+
+@pytest.mark.parametrize("payload", [
+    {"to": "alice@example.com", "subject": "Hi", "body": "Hello"},
+    {"to": [12], "subject": "Hi", "body": "Hello"},
+    {"to": ["alice@example.com\nBcc: hidden@example.com"], "subject": "Hi", "body": "Hello"},
+    {"to": ["alice@example.com"], "subject": "Hi\r\nBcc: hidden@example.com", "body": "Hello"},
+])
+def test_invalid_payload_fails_before_provider_call(payload):
+    from agents.mail_providers import GmailDraftProvider, MailProviderPreconditionError
+
+    service = FakeGmailService()
+    with pytest.raises(MailProviderPreconditionError):
+        GmailDraftProvider(service=service).execute_approval({"payload": payload})
+    assert not service.sink

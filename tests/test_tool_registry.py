@@ -12,10 +12,14 @@ def test_registry_contains_existing_email_tools():
     assert set(TOOL_REGISTRY) == {
         "search_emails",
         "get_email",
+        "get_thread",
         "summarize_emails",
         "draft_reply",
         "send_email",
         "email_stats",
+        "search_history",
+        "get_turn",
+        "get_tool_result",
     }
 
 

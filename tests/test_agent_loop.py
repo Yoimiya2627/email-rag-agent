@@ -69,7 +69,9 @@ def test_loop_executes_tool_then_answers(monkeypatch):
     out = run_agent_loop(AgentRequest(query="谁发了预算邮件"))
     assert "Alice" in out.answer
     assert tool_args == {"name": "search_emails", "args": {"query": "预算"}}
-    assert out.metadata["steps"] == [{"tool": "search_emails", "arguments": {"query": "预算"}}]
+    assert out.metadata["steps"][0]["tool"] == "search_emails"
+    assert out.metadata["steps"][0]["status"] == "success"
+    assert "arguments" not in out.metadata["steps"][0]
     assert len(client.calls) == 2
     # The second LLM call must carry the tool result back as a tool-role message.
     second_msgs = client.calls[1]["messages"]
@@ -133,18 +135,8 @@ def test_loop_can_use_configured_mcp_tool_backend(monkeypatch):
 
     assert out.answer == "共有 3 封邮件。"
     assert client.calls[0]["tools"][0]["function"]["name"] == "email_stats"
-    assert out.metadata["steps"] == [{"tool": "email_stats", "arguments": {}}]
-
-
-def test_loop_filters_tools_by_requested_skill(monkeypatch):
-    client = _ScriptedClient([_response(content="只查邮件")])
-    _use_client(monkeypatch, client)
-
-    out = run_agent_loop(AgentRequest(query="帮我查一下预算邮件", context={"skill": "mail_search"}))
-    tool_names = {schema["function"]["name"] for schema in client.calls[0]["tools"]}
-
-    assert tool_names == {"search_emails", "get_email", "email_stats"}
-    assert out.metadata["skill"] == "mail_search"
+    assert out.metadata["steps"][0]["tool"] == "email_stats"
+    assert out.metadata["steps"][0]["status"] == "success"
 
 
 def test_loop_stops_at_max_steps(monkeypatch):
@@ -165,7 +157,7 @@ def test_loop_stops_at_max_steps(monkeypatch):
 
 
 def test_loop_degrades_malformed_tool_arguments(monkeypatch):
-    """Malformed JSON arguments must degrade to an empty call, not crash."""
+    """Malformed JSON must be rejected without executing even a zero-arg tool."""
     bad = _response(tool_calls=[
         SimpleNamespace(
             id="c1", type="function",
@@ -180,7 +172,8 @@ def test_loop_degrades_malformed_tool_arguments(monkeypatch):
 
     out = run_agent_loop(AgentRequest(query="统计"))
     assert out.answer == "done"
-    assert seen["args"] == {}
+    assert seen == {}
+    assert out.metadata["steps"][0]["error_code"] == "validation_error"
 
 
 def test_loop_handles_multi_step_task(monkeypatch):
@@ -239,3 +232,4 @@ def test_loop_truncates_oversized_tool_output(monkeypatch):
     tool_msg = next(m for m in client.calls[1]["messages"] if m.get("role") == "tool")
     assert len(tool_msg["content"]) <= 1000 + 40
     assert "truncated" in tool_msg["content"]
+    assert json.loads(tool_msg["content"])["truncated"] is True

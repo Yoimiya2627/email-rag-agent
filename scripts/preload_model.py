@@ -1,11 +1,6 @@
-"""Preload the bge-m3 embedding model so the first `make run` doesn't stall.
+"""Explicit embedding preparation; uses configured model/revision/endpoint.
 
-sentence-transformers downloads the model on first use (~570MB for bge-m3).
-Without preloading, the first incoming request to /index or /chat blocks for
-several minutes silently. Running this script during `make install` moves
-that wait into the install step where the user expects it.
-
-Idempotent — if the model is already cached, this is a few seconds at most.
+This command may download weights. Dependency installation does not invoke it.
 """
 import logging
 import sys
@@ -23,11 +18,13 @@ def main():
     logger.info(
         f"Preloading embedding model {cfg.EMBEDDING_MODEL} (device={cfg.EMBEDDING_DEVICE}) ..."
     )
-    logger.info("First run downloads ~570MB and may take several minutes.")
+    logger.info("Explicit model preparation may download weights; size depends on the selected model.")
 
     from sentence_transformers import SentenceTransformer
 
-    model = SentenceTransformer(cfg.EMBEDDING_MODEL, device=cfg.EMBEDDING_DEVICE)
+    revision = getattr(cfg, 'EMBEDDING_MODEL_REVISION', None)
+    options = {'revision':revision} if revision else {}
+    model = SentenceTransformer(cfg.EMBEDDING_MODEL, device=cfg.EMBEDDING_DEVICE, **options)
     # Force a tiny encode so any lazy initialization (tokenizer, weights) finishes now.
     _ = model.encode(["hello"], show_progress_bar=False)
     logger.info("Embedding model ready.")

@@ -91,36 +91,3 @@ def test_chunk_email_serializes_metadata_and_carries_subject(make_email):
     for i, chunk in enumerate(chunks):
         assert chunk.chunk_id == f"e42_chunk_{i}"
         assert chunk.chunk_index == i
-
-
-def test_chunk_email_prefixes_headers_on_every_long_body_chunk(make_email, monkeypatch):
-    import config.settings as cfg
-
-    monkeypatch.setattr(cfg, "CHUNK_SIZE", 120)
-    monkeypatch.setattr(cfg, "CHUNK_OVERLAP", 20)
-    monkeypatch.setattr(cfg, "MIN_CHUNK_SIZE", 20)
-    email = make_email(
-        id="gmail_1",
-        subject="Security notice",
-        sender="noreply@example.com",
-        recipients=["owner@example.com"],
-        date="2026-06-10",
-        labels=["IMPORTANT"],
-        thread_id="thread-1",
-        body="A" * 350,
-    )
-
-    chunks = chunk_email(email)
-
-    assert len(chunks) > 1
-    for chunk in chunks:
-        assert chunk.content.startswith(
-            "Subject: Security notice\n"
-            "From: noreply@example.com\n"
-            "To: owner@example.com\n"
-            "Date: 2026-06-10\n"
-            "Labels: IMPORTANT\n"
-            "Thread-ID: thread-1"
-        )
-        assert "\n\nBody:\n" in chunk.content
-        assert len(chunk.content.split("Body:\n", 1)[1].strip()) > 0

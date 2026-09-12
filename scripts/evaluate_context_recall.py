@@ -134,32 +134,16 @@ def _parse_versions(raw: str) -> list[str]:
     return versions
 
 
-def evaluate_version(
-    version: str,
-    cases: list[dict],
-    limit: int | None = None,
-    top_n: int | None = None,
-    fetch_k: int | None = None,
-) -> dict:
+def evaluate_version(version: str, cases: list[dict], limit: int | None = None) -> dict:
     apply_flags(VERSION_FLAGS[version])
     from core.pipeline import retrieve
     from core.reranker import reset_circuit_breaker
 
-    retrieve_kwargs = {}
-    if top_n is not None:
-        retrieve_kwargs["top_n"] = top_n
-    if fetch_k is not None:
-        retrieve_kwargs["fetch_k"] = fetch_k
-
-    def retrieve_with_config(question: str) -> list[SearchResult]:
-        return retrieve(question, **retrieve_kwargs)
-
     reset_circuit_breaker()
-    report = evaluate_context_recall_cases(cases, retrieve_fn=retrieve_with_config, limit=limit)
+    report = evaluate_context_recall_cases(cases, retrieve_fn=retrieve, limit=limit)
     return {
         "version": version,
         "flags": VERSION_FLAGS[version],
-        "retrieval": retrieve_kwargs,
         **report,
     }
 
@@ -182,8 +166,6 @@ def main() -> None:
     parser.add_argument("--gold", default=str(GOLD_PATH), help="Gold chunk JSON path")
     parser.add_argument("--versions", default="V2,V7", help="Comma-separated versions to evaluate")
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--top-n", type=int, default=None, help="Reranked contexts kept per query")
-    parser.add_argument("--fetch-k", type=int, default=None, help="Initial retrieval window before rerank")
     parser.add_argument("--output", default=str(OUTPUT_PATH))
     parser.add_argument(
         "--init-template",
@@ -201,16 +183,7 @@ def main() -> None:
 
     cases = _load_json(args.gold)
     versions = _parse_versions(args.versions)
-    results = [
-        evaluate_version(
-            version,
-            cases,
-            limit=args.limit,
-            top_n=args.top_n,
-            fetch_k=args.fetch_k,
-        )
-        for version in versions
-    ]
+    results = [evaluate_version(version, cases, limit=args.limit) for version in versions]
     payload = {"gold_path": args.gold, "results": results}
     _dump_json(args.output, payload)
     _print_table(results)

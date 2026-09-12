@@ -29,6 +29,12 @@ def classify_eval_record(
         return "max_steps"
     if record.get("tool_accuracy") is False:
         return "missing_expected_tool"
+    if any(step.get('status') in {'error', 'unknown'} for step in record.get('steps', [])):
+        return 'tool_error'
+    if record.get('tool_assertion_checks', {}).get('passed') is False:
+        return 'tool_assertion_failed'
+    if record.get('execution_contract_passed') is False:
+        return 'execution_contract_failed'
     if any(row.get("event") == "tool_call" and row.get("status") == "error" for row in events):
         return "tool_error"
     if any(
@@ -36,7 +42,7 @@ def classify_eval_record(
         for row in events
     ):
         return "approval_required"
-    if str(record.get("reason", "")).lower().startswith("judge error"):
+    if record.get('scoring_status') == 'error' or str(record.get("reason", "")).lower().startswith("judge error"):
         return "judge_failed"
     if int(record.get("success", 0)) == 1:
         return "success"
@@ -79,6 +85,8 @@ def build_eval_report(
             f"- Risk: {record.get('risk_level', '')}",
             f"- Success: {record.get('success', 0)}",
             f"- Failure category: {category}",
+            f"- Scoring method/status: {record.get('scoring_method', 'unavailable')} / {record.get('scoring_status', 'unavailable')}",
+            f"- Tool assertion checks: {record.get('tool_assertion_checks', 'unavailable')}",
             f"- Trace id: {trace_id}",
             f"- Expected tools: {', '.join(record.get('expected_tools', []) or [])}",
             f"- Actual tools: {', '.join(record.get('actual_tools', []) or [])}",

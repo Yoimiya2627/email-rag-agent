@@ -41,6 +41,7 @@ Thumbs.db
 *.log
 data/audit/
 data/approvals/
+data/app/
 data/traces/
 data/mail_sync/
 data/real_emails/
@@ -65,3 +66,16 @@ README_draft.md
 resume_agent_long.png
 *_Agent开发工程师_长图.png
 *简历.png
+
+# Persistent runtime state and test caches
+.pytest_cache/
+.ruff_cache/
+data/sessions/
+data/jobs/
+*.sqlite3
+*.sqlite3-*
+*.sqlite
+*.sqlite-*
+
+# Local interview documents
+docs/interview-prep-*/

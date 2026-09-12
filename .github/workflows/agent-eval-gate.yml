@@ -1,0 +1,46 @@
+name: Agent evaluation report gate
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'agents/**'
+      - 'api/**'
+      - 'config/**'
+      - 'core/**'
+      - 'models/**'
+      - 'scripts/**'
+      - 'mcp_server.py'
+      - 'requirements*.txt'
+      - 'data/agent_testset.json'
+      - 'data/eval_results/agent_eval.json'
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Source-only changes expose stale reports without requiring a paid model
+      # evaluation for every small PR. Deterministic tests are a separate gate.
+      - name: Report revision check (stale is not current quality evidence)
+        continue-on-error: true
+        run: python scripts/check_agent_eval_gate.py --freshness-only --input data/eval_results/agent_eval.json
+      - id: scope
+        shell: python
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          import os, subprocess
+          strict = os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch'
+          if not strict:
+              changed = subprocess.check_output(['git', 'diff', '--name-only', os.environ['BASE'], os.environ['HEAD'], '--', 'data/agent_testset.json', 'data/eval_results/agent_eval.json'], text=True)
+              strict = bool(changed.strip())
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as target:
+              target.write('strict=' + str(strict).lower() + '\n')
+      - if: steps.scope.outputs.strict == 'true'
+        name: Validate submitted quality report against canonical dataset
+        run: python scripts/check_agent_eval_gate.py --input data/eval_results/agent_eval.json

@@ -1,13 +1,15 @@
-version: "3.9"
-
 services:
   api:
     build:
       context: .
-      target: api
+      args:
+        PRELOAD_EMBEDDING_MODEL: ${PRELOAD_EMBEDDING_MODEL:-false}
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+        EMBEDDING_MODEL_REVISION: ${EMBEDDING_MODEL_REVISION:-}
+        HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
     container_name: email-rag-api
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       # Persist ChromaDB and model cache outside the container
       - ./chroma_db:/app/chroma_db
@@ -16,8 +18,26 @@ services:
     env_file:
       - .env
     environment:
-      - CHROMA_PERSIST_DIR=/app/chroma_db
-      - EMAIL_DATA_PATH=/app/data/emails.json
+      # Override every host-specific state path, including Windows absolute paths.
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      CHROMA_PERSIST_DIR: /app/chroma_db
+      EMAIL_DATA_PATH: /app/data/emails.json
+      APPROVAL_STORE_PATH: /app/data/approvals/pending_actions.json
+      SESSION_STORE_PATH: /app/data/sessions/sessions.sqlite3
+      TOOL_RESULT_STORE_PATH: /app/data/sessions/tool_results.sqlite3
+      JOB_STORE_PATH: /app/data/jobs/jobs.sqlite3
+      AGENT_TRACE_LOG_PATH: /app/data/traces/agent_traces.jsonl
+      MCP_AUDIT_LOG_PATH: /app/data/audit/mcp_audit.jsonl
+      MCP_SERVER_AUDIT_LOG_PATH: /app/data/audit/mcp_server.jsonl
+      GMAIL_SYNC_OUTPUT_PATH: /app/data/real_emails/gmail_emails.json
+      GMAIL_SYNC_STATE_PATH: /app/data/mail_sync/gmail_sync_state.json
+      GMAIL_CREDENTIALS_PATH: /run/gmail/gmail_credentials.json
+      GMAIL_TOKEN_PATH: /run/gmail/gmail_token.json
+      GMAIL_READONLY_TOKEN_PATH: /run/gmail/gmail_readonly_token.json
+      HF_HOME: /root/.cache/huggingface
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:?Set API_AUTH_TOKEN in .env for container-to-container access}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -28,16 +48,16 @@ services:
   frontend:
     build:
       context: .
-      target: frontend
+      dockerfile: Dockerfile.frontend
     container_name: email-rag-frontend
+    working_dir: /app
     ports:
-      - "8501:8501"
-    volumes:
-      - .:/app
-    env_file:
-      - .env
+      - "127.0.0.1:8501:8501"
     environment:
-      - API_URL=http://api:8000
+      # UI only needs the API token; do not inject the model/Gmail configuration.
+      API_URL: http://api:8000
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:?Set API_AUTH_TOKEN in .env for container-to-container access}
+      AGENT_RUN_TIMEOUT: ${AGENT_RUN_TIMEOUT:-120}
     depends_on:
       api:
         condition: service_healthy

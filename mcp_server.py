@@ -8,14 +8,48 @@ and call the same capabilities that `/chat/agent` currently uses locally.
 from __future__ import annotations
 
 import argparse
+import functools
+import hmac
+import inspect
 import json
+import hashlib
+import logging
+import threading
 import time
-from typing import Any, Callable
+import uuid
+from pathlib import Path
+from typing import Annotated, Any, Callable
+
+from pydantic import Field
 
 import config.settings as cfg
 from agents.tool_policy import ToolPolicy
 from agents.tool_registry import TOOL_REGISTRY, ToolSpec, tool_dispatch
 from agents.tools import email_stats, get_email
+from agents.runtime import RunContext, use_run_context, normalize_tool_result, tool_error
+
+_AUDIT_LOCK = threading.Lock()
+
+
+def _server_audit(event: str, *, request_id: str, target: str, status: str,
+                  started: float, run_id: str | None = None) -> None:
+    """Server-boundary scalars only; do not copy tool arguments or mail text."""
+    if not getattr(cfg, 'ENABLE_MCP_AUDIT', True):
+        return
+    owner = str(getattr(cfg, 'MCP_OWNER_ID', getattr(cfg, 'API_OWNER_ID', 'local')))
+    row = {'event': event, 'boundary': 'server', 'request_id': request_id, 'run_id': run_id,
+           'owner_ref': hashlib.sha256(owner.encode('utf-8')).hexdigest(),
+           'target': target, 'status': status,
+           'latency_ms': round((time.perf_counter() - started) * 1000, 2),
+           'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+    try:
+        default = Path(cfg.MCP_AUDIT_LOG_PATH).with_name('mcp_server.jsonl')
+        path = Path(getattr(cfg, 'MCP_SERVER_AUDIT_LOG_PATH', default))
+        from agents.log_storage import append_jsonl
+        append_jsonl(path,row,max_bytes=getattr(cfg,'LOG_MAX_BYTES',5_000_000),
+                     backups=getattr(cfg,'LOG_BACKUP_COUNT',3))
+    except (OSError, TypeError, ValueError):
+        logging.getLogger(__name__).warning('MCP server audit write failed')
 
 
 class StaticBearerTokenVerifier:
@@ -26,7 +60,9 @@ class StaticBearerTokenVerifier:
         self.client_id = client_id
 
     async def verify_token(self, token: str):
-        if token != self.token:
+        started, request_id = time.perf_counter(), str(uuid.uuid4())
+        if not hmac.compare_digest(token.encode('utf-8'), self.token.encode('utf-8')):
+            _server_audit('authentication', request_id=request_id, target='bearer', status='denied', started=started)
             return None
         from mcp.server.auth.provider import AccessToken
 
@@ -72,19 +108,98 @@ def register_tools(server: Any, policy: ToolPolicy | None = None) -> list[str]:
     registered = []
     for name, spec in visible_specs.items():
         fn = dispatch[name]
-        _tool_decorator(server, spec)(fn)
+        _tool_decorator(server, spec)(_trusted_tool(name, fn))
         registered.append(name)
     return registered
 
 
+def _trusted_tool(name: str, function: Callable) -> Callable:
+    """This MCP server has one configured owner, not caller-selected tenants."""
+    @functools.wraps(function)
+    def execute(*args, **kwargs):
+        from agents.tools import call_tool
+        started, request_id = time.perf_counter(), str(uuid.uuid4())
+        try:
+            arguments = dict(inspect.signature(function).bind(*args, **kwargs).arguments)
+        except TypeError:
+            _server_audit('tool_call', request_id=request_id, target=name, status='validation_error', started=started)
+            return tool_error("validation_error", "Invalid tool arguments.")
+        context = RunContext(
+            owner_id=getattr(cfg, "MCP_OWNER_ID", getattr(cfg, "API_OWNER_ID", "local")),
+            session_id="mcp",
+            deadline=time.monotonic() + float(getattr(cfg, "AGENT_RUN_TIMEOUT", 120)),
+            context_char_limit=int(getattr(cfg, "AGENT_CONTEXT_CHAR_LIMIT", 60000)),
+        )
+        with use_run_context(context):
+            try:
+                result = normalize_tool_result(call_tool(name, arguments))
+            except BaseException:
+                _server_audit('tool_call', request_id=request_id, target=name, status='error',
+                              started=started, run_id=context.run_id)
+                raise
+            result["evidence_refs"] = [{"email_id": email, "chunk_id": chunk}
+                                       for email, chunk in context.tool_evidence]
+            # Sources are actual retrieval candidates, not model-verified citations.
+            if context.tool_evidence and result["status"] == "success":
+                result["candidate_sources"] = list(context.tool_evidence.values())
+            result['server_request_id'] = request_id
+            _server_audit('tool_call', request_id=request_id, target=name, status=result['status'],
+                          started=started, run_id=context.run_id)
+            return result
+    # wraps() otherwise exposes the business function's list/str return type,
+    # while this boundary always returns a result envelope. FastMCP validates
+    # both signatures, including defaults, before and after execution.
+    spec = TOOL_REGISTRY[name]
+    signature = inspect.signature(function, eval_str=True)
+    parameters = [parameter.replace(
+        annotation=_parameter_annotation(spec.parameters["properties"][parameter.name]),
+        default=(inspect.Parameter.empty if parameter.name in spec.parameters.get("required", [])
+                 else parameter.default),
+    ) for parameter in signature.parameters.values()]
+    execute.__signature__ = signature.replace(parameters=parameters, return_annotation=dict[str, Any])
+    execute.__annotations__ = {parameter.name: parameter.annotation for parameter in parameters}
+    execute.__annotations__["return"] = dict[str, Any]
+    return execute
+
+
+def _parameter_annotation(schema: dict) -> Any:
+    """Project registry constraints into the SDK's inferred input model."""
+    kind = schema["type"]
+    nullable = isinstance(kind, list) and "null" in kind
+    if isinstance(kind, list):
+        kind = next(item for item in kind if item != "null")
+    annotation = {"string": str, "integer": int, "boolean": bool, "number": float}.get(kind)
+    if kind == "array":
+        annotation = list[_parameter_annotation(schema["items"])]
+    constraints = {"strict": True}
+    for source, target in (("minLength", "min_length"), ("maxLength", "max_length"),
+                           ("minItems", "min_length"), ("maxItems", "max_length"),
+                           ("minimum", "ge"), ("maximum", "le"), ("description", "description")):
+        if source in schema:
+            constraints[target] = schema[source]
+    annotation = Annotated[annotation, Field(**constraints)]
+    return annotation | None if nullable else annotation
+
+
 def read_email_resource(email_id: str) -> str:
     """Return one full email as a JSON resource."""
-    return json.dumps(get_email(email_id), ensure_ascii=False)
+    return _read_resource('email', lambda: get_email(email_id))
 
 
 def read_email_corpus_stats_resource() -> str:
     """Return corpus-level email statistics as a JSON resource."""
-    return json.dumps(email_stats(), ensure_ascii=False)
+    return _read_resource('corpus_stats', email_stats)
+
+
+def _read_resource(target: str, read: Callable) -> str:
+    started, request_id = time.perf_counter(), str(uuid.uuid4())
+    status = 'error'
+    try:
+        result = json.dumps(read(), ensure_ascii=False)
+        status = 'success'
+        return result
+    finally:
+        _server_audit('resource_read', request_id=request_id, target=target, status=status, started=started)
 
 
 def draft_reply_prompt(email_id: str = "", instruction: str = "") -> str:
@@ -148,6 +263,8 @@ def build_server(
     ``server_factory`` is injectable so tests can verify registration without
     requiring the MCP SDK or opening a transport.
     """
+    if not cfg.MCP_AUTH_TOKEN and cfg.MCP_HOST not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("MCP_AUTH_TOKEN is required when binding outside loopback")
     if server_factory is None:
         from mcp.server.fastmcp import FastMCP
 

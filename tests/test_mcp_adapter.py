@@ -55,7 +55,9 @@ def test_mcp_backend_call_tool_returns_structured_content():
 
     backend = MCPToolBackend(FakeClient())
 
-    assert backend.call_tool("email_stats", {}) == {"total_emails": 3}
+    out = backend.call_tool("email_stats", {})
+    assert out["status"] == "success"
+    assert out["data"] == {"total_emails": 3}
 
 
 def test_mcp_backend_call_tool_captures_errors():
@@ -66,4 +68,6 @@ def test_mcp_backend_call_tool_captures_errors():
     backend = MCPToolBackend(FakeClient())
 
     out = backend.call_tool("email_stats", {})
-    assert out == {"error": "mcp tool 'email_stats' failed: server down"}
+    assert out["status"] == "error"
+    assert out["error_code"] == "mcp_transport_error"
+    assert "server down" not in out["error"]

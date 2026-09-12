@@ -25,7 +25,7 @@ def test_approval_endpoints_list_and_approve_pending_action(monkeypatch, tmp_pat
     assert listed.json()["approvals"][0]["approval_id"] == pending["approval_id"]
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
-    assert approved.json()["reviewer"] == "tester"
+    assert approved.json()["reviewer"] == "local"
 
 
 def test_approval_api_uses_configured_mail_provider(monkeypatch, tmp_path):
@@ -61,7 +61,7 @@ def test_approval_api_uses_configured_mail_provider(monkeypatch, tmp_path):
     assert approved.json()["result"]["draft_id"] == "draft-123"
 
 
-def test_approval_api_provider_error_keeps_item_pending(monkeypatch, tmp_path):
+def test_approval_api_provider_error_marks_item_unknown(monkeypatch, tmp_path):
     import api.main as api_mod
     import config.settings as cfg
     from agents.approvals import ApprovalStore
@@ -85,4 +85,4 @@ def test_approval_api_provider_error_keeps_item_pending(monkeypatch, tmp_path):
     )
 
     assert approved.status_code == 502
-    assert ApprovalStore().get(pending["approval_id"])["status"] == "pending"
+    assert ApprovalStore().get(pending["approval_id"])["status"] == "unknown"

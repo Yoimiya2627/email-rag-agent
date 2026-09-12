@@ -11,87 +11,52 @@ import logging
 from collections import Counter
 from typing import Any, Dict
 
-from openai import OpenAI
+from openai import OpenAI, APITimeoutError
 
 from models.schemas import AgentRequest, AgentResponse
-from core.embedder import get_all_chunks
+from core.embedder import get_all_metadata as get_all_chunks
+from agents.runtime import remaining_timeout, RunCancelled, ContextBudgetExceeded
+from core.memory import build_model_messages
+from core.model_outcomes import display_text, outcome_metadata, text_from_choice
 import config.settings as cfg
+
+from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
 
 logger = logging.getLogger(__name__)
 
 
 def compute_email_stats() -> Dict[str, Any]:
-    """Aggregate metadata stats over the indexed corpus (pure, no LLM call)."""
-    chunks = get_all_chunks()
-    # Deduplicate by email_id to avoid counting chunks multiple times
-    seen: Dict[str, dict] = {}
-    for chunk in chunks:
-        meta = chunk["metadata"]
-        eid = meta.get("email_id", "")
-        if eid and eid not in seen:
-            seen[eid] = meta
-
-    emails = list(seen.values())
-    total = len(emails)
-
-    sender_counts = Counter(m.get("sender", "unknown") for m in emails)
-    top5_senders = sender_counts.most_common(5)
-
-    label_counts: Counter = Counter()
-    for m in emails:
-        raw = m.get("labels", "[]")
-        try:
-            labels = json.loads(raw) if isinstance(raw, str) else raw
-        except Exception:
-            labels = []
-        for label in labels:
-            label_counts[label] += 1
-
-    daily_counts: Counter = Counter()
-    for m in emails:
-        date_str = m.get("date", "")
-        if date_str and len(date_str) >= 10:
-            daily_counts[date_str[:10]] += 1
-
-    return {
-        "total_emails": total,
-        "top5_senders": [{"sender": s, "count": c} for s, c in top5_senders],
-        "label_distribution": dict(label_counts.most_common(10)),
-        "daily_counts": [
-            {"date": d, "count": c}
-            for d, c in sorted(daily_counts.items())[-30:]
-        ],
-    }
+    """Deterministic whole-index statistics; natural-language scope is not inferred."""
+    from core.evidence_pages import compute_scoped_stats
+    return compute_scoped_stats(get_all_chunks())
 
 
 class AnalyzerAgent:
     def __init__(self):
-        self._client = OpenAI(api_key=cfg.DEEPSEEK_API_KEY, base_url=cfg.DEEPSEEK_BASE_URL)
+        self._client = get_model_client(factory=OpenAI)
 
     def run(self, request: AgentRequest, memory=None) -> AgentResponse:
+        remaining_timeout(cfg.LLM_TIMEOUT)
         stats = compute_email_stats()
         stats_json = json.dumps(stats, ensure_ascii=False, indent=2)
 
-        resp = self._client.chat.completions.create(
+        history = memory.to_messages() if memory is not None else None
+        messages = build_model_messages(
+            "你是邮件数据分析专家。根据统计数据，用清晰易懂的语言回答用户的分析问题，"
+            "只按 coverage 中的明确范围解释；未解析用户自然语言范围，不能把全索引统计冒充指定期间或指定集合。"
+            "存在未读附件、解码疑点或同步不完整时明确说明，日期较新也不自动代表结论仍有效。",
+            f"邮件统计数据如下：\n{stats_json}\n\n用户问题：{request.query}", history, stage="analyze", model=cfg.DEEPSEEK_MODEL, model_revision=getattr(cfg, "MODEL_REVISION", None), max_output_tokens=1000, original_request=request.query)
+        resp = create_completion(self._client, stage="analyze",
             model=cfg.DEEPSEEK_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "你是邮件数据分析专家。根据统计数据，用清晰易懂的语言回答用户的分析问题，"
-                        "并给出有价值的洞察。"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"邮件统计数据如下：\n{stats_json}\n\n用户问题：{request.query}",
-                },
-            ],
+            messages=messages,
             temperature=0.2,
             max_tokens=1000,
+            timeout=remaining_timeout(cfg.LLM_TIMEOUT),
         )
+        remaining_timeout(cfg.LLM_TIMEOUT)
+        answer = text_from_choice(resp.choices[0] if resp.choices else None)
         return AgentResponse(
-            answer=resp.choices[0].message.content,
+            answer=display_text(answer),
             sources=[],
-            metadata=stats,
+            metadata={**stats, **outcome_metadata(answer)},
         )

@@ -1,0 +1,3 @@
+# Optional /chat/graph mode. Core application does not require LangGraph.
+-r requirements.txt
+langgraph>=0.2.0

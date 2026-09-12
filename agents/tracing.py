@@ -3,12 +3,34 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
+import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Iterable
 
 import config.settings as cfg
+from agents.log_storage import append_jsonl, read_jsonl_tail
+
+_WRITE_LOCK = threading.Lock()
+_logger = logging.getLogger(__name__)
+_ALLOWED = {"run_id", "tool", "status", "tool_backend", "step", "steps", "tool_calls",
+            "query_chars", "answer_chars", "latency_ms", "argument_hash", "argument_chars",
+            "request_id", "error_code", "error_type", "cache_hit"}
+
+
+def safe_event(payload: dict[str, Any]) -> dict[str, Any]:
+    """Only operational scalars are stored, never free-form bodies/errors/arguments."""
+    output = {}
+    for key in _ALLOWED & payload.keys():
+        value = payload[key]
+        if isinstance(value, (int, float, bool)) or value is None:
+            output[key] = value
+        elif isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
+            output[key] = value
+    return output
 
 
 class AgentTraceRecorder:
@@ -20,8 +42,12 @@ class AgentTraceRecorder:
         enabled: bool | None = None,
         trace_id: str | None = None,
     ):
-        self.path = Path(path or cfg.AGENT_TRACE_LOG_PATH)
-        self.enabled = cfg.ENABLE_AGENT_TRACE if enabled is None else enabled
+        from agents.execution_scope import current_execution_scope
+        scope = current_execution_scope()
+        evaluating = scope is not None and scope.evaluation
+        default_path = Path(scope.run_dir) / 'trace.jsonl' if evaluating else cfg.AGENT_TRACE_LOG_PATH
+        self.path = Path(path or default_path)
+        self.enabled = (True if evaluating else cfg.ENABLE_AGENT_TRACE) if enabled is None else enabled
         self.trace_id = trace_id or str(uuid.uuid4())
 
     @classmethod
@@ -35,24 +61,19 @@ class AgentTraceRecorder:
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "trace_id": self.trace_id,
             "event": event,
-            **payload,
+            **safe_event(payload),
         }
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+        try:
+            append_jsonl(self.path,row,max_bytes=getattr(cfg,'LOG_MAX_BYTES',5_000_000),
+                         backups=getattr(cfg,'LOG_BACKUP_COUNT',3))
+        except (OSError, ValueError) as exc:
+            _logger.warning("trace write failed error_type=%s", type(exc).__name__)
 
 
-def load_events(path: str | Path | None = None) -> list[dict[str, Any]]:
+def load_events(path: str | Path | None = None, *, limit: int = 1000,
+                max_bytes: int = 1_000_000) -> list[dict[str, Any]]:
     trace_path = Path(path or cfg.AGENT_TRACE_LOG_PATH)
-    if not trace_path.exists():
-        return []
-    rows = []
-    with trace_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
+    return read_jsonl_tail(trace_path,limit=limit,max_bytes=max_bytes)
 
 
 def summarize_events(events: Iterable[dict[str, Any]]) -> dict[str, Any]:

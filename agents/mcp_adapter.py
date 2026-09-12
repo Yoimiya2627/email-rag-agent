@@ -7,6 +7,8 @@ remains local; MCP is only used when `AGENT_TOOL_BACKEND=mcp`.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import copy
 import json
 import threading
 import time
@@ -15,6 +17,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 import config.settings as cfg
+from agents.runtime import (current_run, remaining_timeout, normalize_tool_result, tool_error, content_digest,
+                            validate_schema, RunDeadlineExceeded, ContextBudgetExceeded)
+from agents.tool_policy import ToolPolicy
+from agents.tool_registry import TOOL_REGISTRY
+from agents.tracing import safe_event
 
 
 def _get_field(obj: Any, *names: str, default: Any = None) -> Any:
@@ -48,16 +55,15 @@ def mcp_tool_to_openai_schema(tool: Any) -> dict:
 
 def normalize_mcp_result(result: Any) -> Any:
     """Return the model-facing payload from an MCP call result."""
+    if _get_field(result, "isError", "is_error", default=False):
+        return normalize_tool_result(None, protocol_error=True)
     if isinstance(result, dict):
-        if "structuredContent" in result:
-            return result["structuredContent"]
-        if "structured_content" in result:
-            return result["structured_content"]
-        return result
+        if result.get("_tool_result") == 1:
+            return normalize_tool_result(result)
 
     structured = _get_field(result, "structuredContent", "structured_content")
     if structured is not None:
-        return structured
+        return normalize_tool_result(structured)
 
     content = _get_field(result, "content", default=None)
     if content:
@@ -68,13 +74,13 @@ def normalize_mcp_result(result: Any) -> Any:
                 texts.append(text)
         if len(texts) == 1:
             try:
-                return json.loads(texts[0])
+                return normalize_tool_result(json.loads(texts[0]))
             except json.JSONDecodeError:
-                return texts[0]
+                return normalize_tool_result(texts[0])
         if texts:
-            return "\n".join(texts)
+            return normalize_tool_result("\n".join(texts))
 
-    return result
+    return normalize_tool_result(result)
 
 
 class LocalToolBackend:
@@ -92,7 +98,7 @@ class LocalToolBackend:
         return self._schemas_provider()
 
     def call_tool(self, name: str, arguments: dict) -> Any:
-        return self._call_tool_fn(name, arguments)
+        return normalize_tool_result(self._call_tool_fn(name, arguments))
 
 
 class MCPToolBackend:
@@ -113,6 +119,8 @@ class MCPToolBackend:
         self.audit_logger = audit_logger or MCPAuditLogger.from_settings()
         self._schema_cache: list[dict] | None = None
         self._schema_cache_at = 0.0
+        # This backend normally lives for one run. Never infer cross-run/server idempotency.
+        self._approval_results: dict[tuple[str, str, str, str], dict] = {}
 
     def tool_schemas(self) -> list[dict]:
         now = time.monotonic()
@@ -125,7 +133,9 @@ class MCPToolBackend:
 
         result = self.client.list_tools()
         tools = _get_field(result, "tools", default=result)
-        self._schema_cache = [mcp_tool_to_openai_schema(tool) for tool in tools]
+        visible = ToolPolicy.from_settings().visible_specs(TOOL_REGISTRY)
+        self._schema_cache = [mcp_tool_to_openai_schema(tool) for tool in tools
+                              if _get_field(tool, "name") in visible]
         self._schema_cache_at = now
         return self._schema_cache
 
@@ -137,27 +147,67 @@ class MCPToolBackend:
     def call_tool(self, name: str, arguments: dict) -> Any:
         started = time.perf_counter()
         request_id = str(uuid.uuid4())
+        submitted = False
+        cache_key = None
+        context = current_run()
+        cache_hit = False
         try:
-            result = self.client.call_tool(name, arguments or {})
-            normalized = normalize_mcp_result(result)
+            visible = ToolPolicy.from_settings().visible_specs(TOOL_REGISTRY)
+            if name not in visible:
+                normalized = tool_error("tool_not_allowed", "Tool is not allowed by policy.")
+            else:
+                validate_schema(arguments, visible[name].parameters)
+                owner = getattr(cfg, "MCP_OWNER_ID", getattr(cfg, "API_OWNER_ID", "local"))
+                if context and context.owner_id != owner:
+                    normalized = tool_error("owner_mismatch", "MCP owner does not match this run.")
+                else:
+                    if context and visible[name].requires_approval:
+                        cache_key = (context.owner_id, context.run_id, name, content_digest(arguments))
+                    if cache_key is not None and cache_key in self._approval_results:
+                        normalized = copy.deepcopy(self._approval_results[cache_key])
+                        cache_hit = True
+                    else:
+                        submitted = True
+                        result = self.client.call_tool(name, arguments)
+                        normalized = normalize_mcp_result(result)
+                        if normalized["status"] == "error" and visible[name].requires_approval:
+                            normalized = tool_error("mcp_write_error", "Check the remote operation before retrying.", unknown=True)
+                        self._cache_approval_result(cache_key, normalized, context)
             self.audit_logger.record(
                 event="tool_call",
                 tool=name,
-                status="success",
+                status=normalized["status"],
                 latency_ms=round((time.perf_counter() - started) * 1000, 2),
                 request_id=request_id,
+                cache_hit=cache_hit,
             )
             return normalized
+        except (RunDeadlineExceeded, ContextBudgetExceeded):
+            raise
         except Exception as exc:
+            spec = TOOL_REGISTRY.get(name)
+            validation = not submitted and isinstance(exc, (ValueError, TypeError))
+            normalized = tool_error("validation_error" if validation else "mcp_transport_error",
+                "Invalid tool arguments." if validation else "MCP transport failed; operation outcome may be unknown.",
+                unknown=not validation and (spec is None or spec.risk_level != "low"))
+            self._cache_approval_result(cache_key, normalized, context)
             self.audit_logger.record(
                 event="tool_call",
                 tool=name,
-                status="error",
+                status=normalized["status"],
                 latency_ms=round((time.perf_counter() - started) * 1000, 2),
                 request_id=request_id,
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
-            return {"error": f"mcp tool {name!r} failed: {exc}"}
+            return normalized
+
+    def _cache_approval_result(self, key, result: dict, context) -> None:
+        if key is None or context is None:
+            return
+        capacity = max(1, min(context.max_tool_calls, 128))
+        if key not in self._approval_results and len(self._approval_results) >= capacity:
+            self._approval_results.pop(next(iter(self._approval_results)))
+        self._approval_results[key] = copy.deepcopy(result)
 
 
 class MCPAuditLogger:
@@ -169,15 +219,25 @@ class MCPAuditLogger:
 
     @classmethod
     def from_settings(cls) -> "MCPAuditLogger":
+        from agents.execution_scope import current_execution_scope
+        scope = current_execution_scope()
+        if scope is not None and scope.evaluation:
+            return cls(path=Path(scope.run_dir) / 'mcp-audit.jsonl', enabled=True)
         return cls(path=cfg.MCP_AUDIT_LOG_PATH, enabled=cfg.ENABLE_MCP_AUDIT)
 
     def record(self, **event: Any) -> None:
         if not self.enabled:
             return
-        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **event}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+               "event": "tool_call", **safe_event(event)}
+        try:
+            from agents.log_storage import append_jsonl
+            append_jsonl(self.path,row,max_bytes=getattr(cfg,'LOG_MAX_BYTES',5_000_000),
+                         backups=getattr(cfg,'LOG_BACKUP_COUNT',3))
+        except (OSError, ValueError):
+            # An audit failure must never turn a completed write into a retryable tool failure.
+            import logging
+            logging.getLogger(__name__).warning("MCP audit write failed")
 
     @staticmethod
     def load_events(
@@ -185,31 +245,14 @@ class MCPAuditLogger:
         tool: str | None = None,
         status: str | None = None,
         limit: int = 100,
+        max_bytes: int = 1_000_000,
     ) -> list[dict[str, Any]]:
         """Load MCP audit events, optionally filtering by tool and status."""
         audit_path = Path(path or cfg.MCP_AUDIT_LOG_PATH)
-        if not audit_path.exists():
-            return []
-
-        rows: list[dict[str, Any]] = []
-        with audit_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if tool and row.get("tool") != tool:
-                    continue
-                if status and row.get("status") != status:
-                    continue
-                rows.append(row)
-
-        if limit and limit > 0:
-            return rows[-limit:]
-        return rows
+        from agents.log_storage import read_jsonl_tail
+        return read_jsonl_tail(audit_path,limit=limit,max_bytes=max_bytes,
+                                predicate=lambda row:(not tool or row.get('tool')==tool)
+                                and (not status or row.get('status')==status))
 
 
 class StreamableHttpMCPClient:
@@ -227,19 +270,35 @@ class StreamableHttpMCPClient:
 
     def _run(self, coro_factory: Callable[[], Any]) -> Any:
         box: dict[str, Any] = {}
+        timeout = remaining_timeout(self.timeout)
+        inherited = contextvars.copy_context()
+
+        async def run_bounded():
+            box["loop"] = asyncio.get_running_loop()
+            box["task"] = asyncio.current_task()
+            return await asyncio.wait_for(coro_factory(), timeout=timeout)
 
         def worker() -> None:
             try:
-                box["result"] = asyncio.run(coro_factory())
-            except Exception as exc:
+                box["result"] = asyncio.run(run_bounded())
+            except BaseException as exc:
                 box["error"] = exc
 
-        thread = threading.Thread(target=worker, daemon=True)
+        thread = threading.Thread(target=lambda: inherited.run(worker), daemon=True)
         thread.start()
-        thread.join(self.timeout)
+        thread.join(timeout + 0.05)
         if thread.is_alive():
-            raise TimeoutError(f"MCP request timed out after {self.timeout}s")
+            # Cooperative local cancellation; this is not proof a remote operation stopped.
+            event_loop, task = box.get("loop"), box.get("task")
+            if event_loop is not None and task is not None:
+                try:
+                    event_loop.call_soon_threadsafe(task.cancel)
+                except RuntimeError:
+                    pass
+            raise TimeoutError("MCP wait timed out; remote outcome is unknown")
         if "error" in box:
+            if isinstance(box["error"], (asyncio.CancelledError, asyncio.TimeoutError)):
+                raise TimeoutError("MCP request cancelled; remote outcome is unknown")
             raise box["error"]
         return box.get("result")
 
@@ -250,7 +309,7 @@ class StreamableHttpMCPClient:
         async with streamablehttp_client(
             self.server_url,
             headers=self.headers(),
-            timeout=self.timeout,
+            timeout=remaining_timeout(self.timeout),
         ) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
@@ -263,7 +322,7 @@ class StreamableHttpMCPClient:
         async with streamablehttp_client(
             self.server_url,
             headers=self.headers(),
-            timeout=self.timeout,
+            timeout=remaining_timeout(self.timeout),
         ) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()

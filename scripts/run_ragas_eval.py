@@ -24,6 +24,8 @@ import os
 import sys
 import time
 import logging
+import math
+from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -37,6 +39,24 @@ logger = logging.getLogger(__name__)
 
 TESTSET_PATH = Path(__file__).parent.parent / "data" / "ragas_testset.json"
 RESULTS_DIR = Path(__file__).parent.parent / "data" / "eval_results"
+METRICS = ('answer_relevancy', 'faithfulness', 'context_precision')
+
+
+def validate_scores(value: Any) -> Dict[str, float]:
+    """Only finite numeric scores in the documented range may enter metrics."""
+    if not isinstance(value, dict):
+        raise ValueError('scores must be an object')
+    scores = {}
+    for name in METRICS:
+        score = value.get(name)
+        if type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 1:
+            raise ValueError(f'invalid score: {name}')
+        scores[name] = float(score)
+    return scores
+
+
+def _scored(scores, method, status):
+    return {**validate_scores(scores), 'scoring_method': method, 'scoring_status': status}
 
 VERSION_FLAGS = {
     "V1": dict(ENABLE_BM25=False, ENABLE_RRF=False, ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="llm"),
@@ -127,7 +147,7 @@ def _extract_json_obj(text: str) -> str:
     return text
 
 
-def score_response(client: OpenAI, question: str, answer: str, contexts: List[str]) -> Dict[str, float]:
+def score_response(client: OpenAI, question: str, answer: str, contexts: List[str]) -> Dict[str, Any]:
     """先尝试 LLM 打分，失败则降级为向量相似度打分。
 
     DEEPSEEK_MODEL=deepseek-v4-flash 是推理模型，会先输出 reasoning_content 再输出
@@ -162,19 +182,19 @@ def score_response(client: OpenAI, question: str, answer: str, contexts: List[st
                     raise ValueError(f"Empty response from LLM (finish_reason={finish!r})")
 
             raw = _extract_json_obj(raw)
-            return json.loads(raw)
+            return _scored(json.loads(raw), 'llm', 'success')
         except Exception as exc:
-            logger.warning(f"LLM score attempt {attempt+1} failed: {exc}")
+            logger.warning("LLM score attempt %s failed; error_type=%s", attempt+1, type(exc).__name__)
             if attempt < 2:
                 time.sleep(1)
 
     # 降级：LLM 打分全部失败，改用向量相似度
     logger.warning("LLM scoring failed 3 times, falling back to embedding-based scoring")
     try:
-        return _score_by_embedding(question, answer, contexts)
+        return _scored(_score_by_embedding(question, answer, contexts), 'embedding_proxy', 'degraded')
     except Exception as exc:
-        logger.warning(f"Embedding scoring also failed: {exc}")
-        return {"answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0}
+        logger.warning("Embedding scoring also failed; error_type=%s", type(exc).__name__)
+        return _scored(dict.fromkeys(METRICS, 0.0), 'unavailable', 'error')
 
 
 def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) -> Dict[str, Any]:
@@ -200,17 +220,26 @@ def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) ->
                 "ground_truth": gt,
                 "answer": result["answer"],
                 "contexts": result["contexts"],
-                **scores,
+                **validate_scores(scores),
+                'scoring_method': scores.get('scoring_method', 'unknown'),
+                'scoring_status': scores.get('scoring_status', 'unknown'),
             })
         except Exception as exc:
-            logger.warning(f"  Failed: {exc}")
-            records.append({"question": q, "ground_truth": gt, "error": str(exc),
-                            "answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0})
+            logger.warning("  Failed; error_type=%s", type(exc).__name__)
+            records.append({"question": q, "ground_truth": gt, "error": type(exc).__name__,
+                            **_scored(dict.fromkeys(METRICS, 0.0), 'unavailable', 'error')})
         time.sleep(0.3)
 
-    metrics = ["answer_relevancy", "faithfulness", "context_precision"]
-    avg = {m: round(sum(r.get(m, 0) for r in records) / max(len(records), 1), 4) for m in metrics}
-    return {"version": version, "flags": flags, "avg": avg, "records": records}
+    avg = {m: round(sum(r[m] for r in records) / max(len(records), 1), 4) for m in METRICS}
+    methods = Counter(r['scoring_method'] for r in records)
+    by_method = {}
+    for method in methods:
+        group = [r for r in records if r['scoring_method'] == method]
+        by_method[method] = {m: round(sum(r[m] for r in group) / len(group), 4) for m in METRICS}
+    scoring = {'method_counts': dict(methods), 'averages_by_method': by_method,
+               'mixed_methods': len(methods) > 1, 'failed_count': sum(r['scoring_status'] == 'error' for r in records),
+               'average_includes_failed_as_zero': True}
+    return {"version": version, "flags": flags, "avg": avg, "records": records, 'scoring': scoring}
 
 
 def print_comparison_table(summaries: List[Dict]):
@@ -226,6 +255,7 @@ def print_comparison_table(summaries: List[Dict]):
               f"{str(f.get('ENABLE_QUERY_REWRITE','')):<8} "
               f"{a['answer_relevancy']:>10.4f} {a['faithfulness']:>10.4f} {a['context_precision']:>10.4f}")
     print("=" * 92)
+    print('Scores may use different methods; inspect scoring.method_counts and averages_by_method.')
 
 
 def main():
@@ -258,7 +288,8 @@ def main():
         logger.info(f"Saved {version} results → {version_path}")
 
     # Save combined comparison
-    comparison = {"summaries": [{"version": s["version"], "flags": s["flags"], "avg": s["avg"]} for s in summaries]}
+    comparison = {"summaries": [{"version": s["version"], "flags": s["flags"], "avg": s["avg"],
+                                 "scoring": s['scoring']} for s in summaries]}
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(comparison, f, ensure_ascii=False, indent=2)
 

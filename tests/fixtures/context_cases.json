@@ -1,0 +1,396 @@
+{
+  "schema_version": 1,
+  "dataset_id": "ctx-synthetic-v1",
+  "data_classification": "synthetic_only",
+  "cases": [
+    {
+      "id": "old_35",
+      "kind": "retrieval",
+      "tags": [
+        "old_over_30"
+      ],
+      "query": "早期订单号",
+      "source_query": "早期订单号为ZX-8844，请保留。",
+      "source_answer": "已记录ZX-8844。",
+      "fillers": 35,
+      "required_text": [
+        "ZX-8844"
+      ],
+      "quality_gold": {
+        "required_claims": [
+          "ZX-8844"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "cjk_two",
+      "kind": "retrieval",
+      "tags": [
+        "cjk_two_chars"
+      ],
+      "query": "预算",
+      "source_query": "预算要求",
+      "source_answer": "总额上限为人民币8700元。",
+      "required_text": [
+        "8700元"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "8700元"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "cjk_single",
+      "kind": "retrieval",
+      "tags": [
+        "single_character"
+      ],
+      "query": "税",
+      "source_query": "税额安排",
+      "source_answer": "税额另计490元。",
+      "required_text": [
+        "490元"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "490元"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "symbol_id",
+      "kind": "retrieval",
+      "tags": [
+        "symbol_identifier"
+      ],
+      "query": "A-102",
+      "source_query": "订单A-102",
+      "source_answer": "该订单交付代号为DELTA-7。",
+      "required_text": [
+        "DELTA-7"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "DELTA-7"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "email",
+      "kind": "retrieval",
+      "tags": [
+        "email_address"
+      ],
+      "query": "buyer+a@example.com",
+      "source_query": "客户buyer+a@example.com",
+      "source_answer": "联系人是合成样本赵甲。",
+      "required_text": [
+        "赵甲"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "赵甲"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "date",
+      "kind": "retrieval",
+      "tags": [
+        "date"
+      ],
+      "query": "2026-09-09",
+      "source_query": "计划日期2026-09-09",
+      "source_answer": "当天仅交付蓝色样件。",
+      "required_text": [
+        "蓝色样件"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "蓝色样件"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "late_clause",
+      "kind": "retrieval",
+      "tags": [
+        "after_200_chars"
+      ],
+      "query": "关键付款条件",
+      "source_query": "合同阅读记录",
+      "answer_prefix_repeat": [
+        "普通背景资料。",
+        65
+      ],
+      "source_answer": "关键付款条件：验收后45天付款，不接受预付。",
+      "required_text": [
+        "验收后45天付款，不接受预付"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "验收后45天付款，不接受预付"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "negation",
+      "kind": "retrieval",
+      "tags": [
+        "negation"
+      ],
+      "query": "发送",
+      "source_query": "发送规则",
+      "source_answer": "不要发送；仅生成草稿。",
+      "required_text": [
+        "不要发送；仅生成草稿"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "不要发送；仅生成草稿"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "failed_claim",
+      "kind": "retrieval",
+      "tags": [
+        "failed_assistant_claim"
+      ],
+      "query": "取消结论",
+      "source_query": "取消结论需要核实",
+      "source_answer": "历史错误回答称已经取消。",
+      "status": "error",
+      "required_text": [
+        "历史错误回答称已经取消"
+      ],
+      "expected_status": "error",
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "历史错误回答称已经取消"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "recent_duplicate",
+      "kind": "retrieval",
+      "tags": [
+        "deduplication"
+      ],
+      "query": "唯一校验",
+      "source_query": "唯一校验信息",
+      "source_answer": "唯一校验短语Z9。",
+      "fillers": 0,
+      "required_text": [
+        "唯一校验短语Z9"
+      ],
+      "max_occurrences": 1,
+      "quality_gold": {
+        "required_claims": [
+          "唯一校验短语Z9"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "literal_fts",
+      "kind": "retrieval",
+      "tags": [
+        "malicious_fts_literal"
+      ],
+      "query": "\" OR * --",
+      "source_query": "特殊字符串记录",
+      "source_answer": "特殊字符串 \" OR * -- 只是文字。",
+      "required_text": [
+        "只是文字"
+      ],
+      "fillers": 35,
+      "quality_gold": {
+        "required_claims": [
+          "只是文字"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "task_switch",
+      "kind": "task_switch",
+      "tags": [
+        "task_isolation"
+      ],
+      "query": "当前预算",
+      "required_text": [
+        "200"
+      ],
+      "forbidden_text": [
+        "100"
+      ],
+      "fillers": 0,
+      "quality_gold": {
+        "required_claims": [
+          "200"
+        ],
+        "forbidden_claims": [
+          "100"
+        ],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "correction",
+      "kind": "correction",
+      "tags": [
+        "effective_correction"
+      ],
+      "query": "预算改成200元",
+      "required_text": [
+        "200元"
+      ],
+      "forbidden_text": [
+        "100元"
+      ],
+      "fillers": 0,
+      "quality_gold": {
+        "required_claims": [
+          "200元"
+        ],
+        "forbidden_claims": [
+          "100元"
+        ],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "summary_quote",
+      "kind": "summary_quote",
+      "tags": [
+        "summary_source_quote",
+        "negation"
+      ],
+      "query": "合同付款",
+      "source_query": "合同要求：不接受预付，验收后45天付款。",
+      "required_text": [
+        "不接受预付"
+      ],
+      "fillers": 0,
+      "quality_gold": {
+        "required_claims": [
+          "不接受预付"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "tool_compaction",
+      "kind": "tool_compaction",
+      "tags": [
+        "closed_tools",
+        "unread_attachments"
+      ],
+      "query": "核查附件",
+      "required_text": [
+        "historical_tool_result"
+      ],
+      "expected_coverage": "unknown",
+      "fillers": 0,
+      "quality_gold": {
+        "required_claims": [
+          "historical_tool_result"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "open_tool_boundary",
+      "kind": "open_tool_boundary",
+      "tags": [
+        "unclosed_tool_group"
+      ],
+      "query": "继续读取",
+      "required_text": [
+        "payload-preserved"
+      ],
+      "fillers": 0,
+      "quality_gold": {
+        "required_claims": [
+          "payload-preserved"
+        ],
+        "forbidden_claims": [],
+        "review_instructions": "人工核对回答、数值、否定、来源与执行状态；文本命中不代表语义正确。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    },
+    {
+      "id": "summary_twenty",
+      "kind": "summary_twenty",
+      "tags": [
+        "stored_summary_20_turns",
+        "model_visible_summary"
+      ],
+      "query": "付款约束",
+      "source_query": "不得预付；验收后45天付款。",
+      "source_answer": "合成记录。",
+      "fillers": 19,
+      "required_text": [
+        "不得预付"
+      ],
+      "quality_gold": {
+        "required_claims": [
+          "不得预付",
+          "验收后45天付款"
+        ],
+        "forbidden_claims": [
+          "可以预付"
+        ],
+        "review_instructions": "来源正确与语义质量分别人工评审。",
+        "origin": "synthetic_expected_unreviewed"
+      }
+    }
+  ]
+}
