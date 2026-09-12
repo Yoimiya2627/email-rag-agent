@@ -84,7 +84,7 @@ class JobStore:
             db.close()
 
     def create(self, owner, kind, request, operation_key=None):
-        if kind not in {'agent', 'index'} or not owner or len(owner) > 256:
+        if kind not in {'agent', 'index', 'imap_sync'} or not owner or len(owner) > 256:
             raise ValueError('Invalid job owner or kind')
         encoded = _encode(request, 100_000)
         digest = hashlib.sha256((kind + ':' + encoded).encode()).hexdigest()

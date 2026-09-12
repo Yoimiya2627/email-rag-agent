@@ -50,6 +50,12 @@ CROSS_ENCODER_MAX_LENGTH = int(os.getenv("CROSS_ENCODER_MAX_LENGTH", "512"))
 # Data
 EMAIL_DATA_PATH = os.getenv("EMAIL_DATA_PATH", str(BASE_DIR / "data" / "emails.json"))
 
+# Read-only personal mailbox data is separate from the active model corpus.
+MAIL_ACCOUNTS_PATH = os.getenv('MAIL_ACCOUNTS_PATH', str(BASE_DIR / 'data/mail_sync/accounts.sqlite3'))
+IMAP_DATA_ROOT = os.getenv('IMAP_DATA_ROOT', str(BASE_DIR / 'data/real_emails/imap'))
+IMAP_MAX_MESSAGE_BYTES = int(os.getenv('IMAP_MAX_MESSAGE_BYTES', '25000000'))
+IMAP_PARSE_TIMEOUT = float(os.getenv('IMAP_PARSE_TIMEOUT', '30'))
+
 # API server
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))

@@ -25,6 +25,7 @@ def _run_child(state, pytest_args):
                          'AGENT_TRACE_LOG_PATH':'trace.jsonl','MCP_AUDIT_LOG_PATH':'audit.jsonl',
                          'MCP_SERVER_AUDIT_LOG_PATH':'mcp-server.jsonl','SESSION_STORE_PATH':'sessions.sqlite3',
                          'JOB_STORE_PATH':'jobs.sqlite3','TOOL_RESULT_STORE_PATH':'tool_results.sqlite3',
+                         'MAIL_ACCOUNTS_PATH':'mail-accounts.sqlite3','IMAP_DATA_ROOT':'imap-mail',
                          'GMAIL_CREDENTIALS_PATH':'no-client.json',
                          'GMAIL_TOKEN_PATH':'no-token.json','GMAIL_READONLY_TOKEN_PATH':'no-read-token.json',
                          'GMAIL_SYNC_OUTPUT_PATH':'emails.json','GMAIL_SYNC_STATE_PATH':'sync.json'}.items():

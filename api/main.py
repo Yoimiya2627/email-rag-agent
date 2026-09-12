@@ -592,6 +592,10 @@ def _run_background_job(job, cancel_event, progress, checkpoint_callback):
         context_char_limit=cfg.AGENT_CONTEXT_CHAR_LIMIT,cancel_event=cancel_event,
         progress_callback=progress,checkpoint_callback=checkpoint_callback)
     context.resuming = bool(job.get('checkpoint'))
+    if job['kind'] == 'imap_sync':
+        from api.mailbox_routes import run_mail_sync
+        with use_run_context(context):
+            return run_mail_sync(job)
     if job['kind'] == 'agent':
         from agents.agent_loop import run_agent_loop
         req = AgentRequest(**request)
@@ -631,6 +635,10 @@ def _job_manager():
             _jobs = JobManager(JobStore(cfg.JOB_STORE_PATH),_run_background_job,
                 gate=admission,max_workers=cfg.MAX_BACKGROUND_JOBS)
     return _jobs
+
+
+from api.mailbox_routes import mailbox_router
+app.include_router(mailbox_router(admission, _job_manager))
 
 
 @app.post('/jobs/agent', status_code=202)

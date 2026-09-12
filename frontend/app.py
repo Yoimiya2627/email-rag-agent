@@ -518,6 +518,9 @@ with st.sidebar:
 
 st.title("邮件智能问答")
 st.caption("支持检索、摘要、回复撰写、统计分析")
+st.caption('聊天使用当前已索引邮件；163 本地收取与解析结果在下方面板单独查看。')
+from frontend.mailbox_view import render_mailboxes
+render_mailboxes(st, _get, _post)
 _render_approvals()
 _render_jobs()
 _render_submission_recovery()
