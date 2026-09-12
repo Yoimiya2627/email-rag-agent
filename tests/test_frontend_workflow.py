@@ -27,7 +27,8 @@ def test_normal_chat_renders_response_without_uninitialized_result(advanced):
     path=Path(__file__).resolve().parents[1]/'frontend'/'app.py'
     with patch('requests.get',side_effect=get),patch('requests.post',return_value=response({
         'answer':'synthetic answer','intent':'general','sources':[],
-        'metadata':{'status':'incomplete','completion_status':'incomplete','finish_reason':'length'}})):
+        'metadata':{'status':'incomplete','completion_status':'incomplete','finish_reason':'length',
+                    'run_id':'synthetic-run'}})):
         app=st_testing.AppTest.from_file(str(path),default_timeout=15)
         app.session_state['workspace_page']='问答工作台'
         app.session_state['advanced_chat']=advanced
@@ -37,6 +38,8 @@ def test_normal_chat_renders_response_without_uninitialized_result(advanced):
         assert not app.exception
         assert any('synthetic answer' in element.value for element in app.markdown)
         assert any('incomplete' in str(element.value) for element in app.warning)
+        assert not any(item.value == '你好，想聊点什么？' for item in app.subheader)
+        assert any('任务编号' in item.value for item in app.caption) == advanced
 
 
 @pytest.mark.parametrize('advanced', [False, True])

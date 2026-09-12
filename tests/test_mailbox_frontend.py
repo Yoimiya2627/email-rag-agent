@@ -115,6 +115,26 @@ def test_chat_home_is_simple_and_mail_opens_only_when_requested():
         assert len(app.chat_input) == 1 and http.posts == []
 
 
+@pytest.mark.parametrize('mode', ['普通（多 Agent 路由）', 'Self-RAG（反思工作流）', 'Agent（自主工具调用）'])
+def test_mailbox_access_question_uses_local_report_without_calling_chat_or_reading_bodies(mode):
+    http = MailboxHTTP()
+    with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
+        app = _mail_app('问答工作台').run()
+        next(item for item in app.radio if item.label == '问答模式').set_value(mode).run()
+        app.chat_input[0].set_value('你现在可以看到我163的邮件吗？').run()
+        assert not app.exception
+        answer = app.session_state['messages'][-1]
+        assert '5 封' in answer['content'] and 'AI 对话还不能读取' in answer['content']
+        assert answer['local_status'] is True
+        assert not any(item.value == '你好，想聊点什么？' for item in app.subheader)
+        assert http.posts == []
+        assert any(url.endswith('/report') for url, _ in http.gets)
+        assert not any('/messages' in url or '/search' in url for url, _ in http.gets)
+        app.run()
+        assert len(app.session_state['messages']) == 2
+        assert http.posts == []
+
+
 @pytest.mark.parametrize('configured', [True, False])
 def test_embedded_chat_shares_conversation_without_adding_mail_context(configured):
     http = MailboxHTTP(configured=configured)

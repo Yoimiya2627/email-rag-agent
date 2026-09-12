@@ -353,17 +353,18 @@ def _render_approvals():
                             st.write({'status':response.get('status'),'execution_state':response.get('execution_state')})
 
 
-def _render_metadata(metadata: dict | None):
+def _render_metadata(metadata: dict | None, *, compact=False):
     """Render assistant-message metadata — agent tool-call steps, or stats."""
     if not metadata:
         return
-    render_context_metrics(st,metadata)
+    if not compact:
+        render_context_metrics(st,metadata)
     status = metadata.get('status', 'success')
     if status not in {'success', 'approval_required'}:
         st.warning(f"任务状态：{status}。此结果尚未完整完成，请先核对已有结果。")
     elif status == 'approval_required':
         st.info('草稿请求待人工审批。')
-    if metadata.get('run_id'):
+    if metadata.get('run_id') and not compact:
         st.caption(f"任务编号：{metadata['run_id']}")
     if metadata.get('finish_reason') == 'length' or metadata.get('output_truncated'):
         st.caption('内容受到输出预算限制。')
@@ -602,19 +603,21 @@ def _render_conversation(mode, use_stream, *, embedded=False):
             render_evidence(st,msg.get('sources',[]),msg.get('extra_metadata') or {},
                             _get,_post,'history-'+str(message_index))
 
-            _render_metadata(msg.get("extra_metadata"))
-
-    if embedded and not st.session_state['messages']:
-        with history, st.container(key='assistant_welcome'):
-            st.subheader('你好，想聊点什么？')
-            st.write('在下方输入问题。想先看邮件，也可以直接打开邮箱。')
-            st.button('查看我的邮件' if mail_accounts else '连接我的邮箱', type='primary',
-                      on_click=_open_workspace, args=('我的邮箱' if mail_accounts else '同步与设置',))
+            if msg.get('local_status'):
+                st.caption('本机状态说明 · 未调用模型')
+            _render_metadata(msg.get("extra_metadata"), compact=embedded)
 
     # Handle pending quick query
     pending = st.session_state.pop("pending_query", None)
     user_input = st.chat_input("输入你想问的问题…" if embedded else
                                "针对问答资料提问，例如：总结项目进展", key='agent_chat_input', disabled=busy) or pending
+
+    if embedded and not st.session_state['messages'] and not user_input:
+        with history, st.container(key='assistant_welcome'):
+            st.subheader('你好，想聊点什么？')
+            st.write('在下方输入问题。想先看邮件，也可以直接打开邮箱。')
+            st.button('查看我的邮件' if mail_accounts else '连接我的邮箱', type='primary',
+                      on_click=_open_workspace, args=('我的邮箱' if mail_accounts else '同步与设置',))
 
     if user_input:
         session_id = st.session_state["session_id"]
@@ -622,6 +625,17 @@ def _render_conversation(mode, use_stream, *, embedded=False):
         with history, st.chat_message("user"):
             st.markdown(user_input)
         st.session_state["messages"].append({"role": "user", "content": user_input})
+
+        from frontend.mailbox_capability import is_mailbox_access_question, mailbox_access_answer
+        if is_mailbox_access_question(user_input):
+            # This is a transient UI status check, not a model conversation turn.
+            # Only aggregate connection state is read; no message bodies are fetched.
+            answer = mailbox_access_answer(accounts_response, selected_account, _get)
+            with history, st.chat_message('assistant'):
+                st.markdown(answer)
+                st.caption('本机状态说明 · 未调用模型')
+            st.session_state['messages'].append({'role':'assistant', 'content':answer, 'local_status':True})
+            return
 
         # Call API and show assistant bubble
         import uuid
@@ -717,7 +731,7 @@ def _render_conversation(mode, use_stream, *, embedded=False):
                 sources = result.get("sources", [])
                 render_evidence(st,sources,result.get('metadata') or {},_get,_post,'current-response')
 
-                _render_metadata(result.get("metadata"))
+                _render_metadata(result.get("metadata"), compact=embedded)
 
                 st.session_state["messages"].append(
                     {
