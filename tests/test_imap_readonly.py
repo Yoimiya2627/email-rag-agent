@@ -460,3 +460,120 @@ def test_invalid_literal_framing_never_enters_size_fallback(connected):
     with pytest.raises(ImapReadError, match='incomplete_message'):
         provider.fetch_message(42)
     assert len([entry for entry in fake.trace if entry[0] == 'UID FETCH']) == 2
+
+
+def test_flags_batches_are_readonly_and_missing_uids_are_allowed(connected):
+    provider, fake = connected
+    provider.select_folder('INBOX')
+    fake.fetch = [[b'1 (UID 1 FLAGS (\\Seen \\Flagged))', b'2 (FLAGS () UID 200)'],
+                  [b'3 (uid 201 flags (Custom))'], [None]]
+    assert provider.fetch_flags(list(range(1, 402))) == {1: ['\\Seen', '\\Flagged'], 200: [], 201: ['Custom']}
+    requests = [entry for entry in fake.trace if entry[0] == 'UID FETCH']
+    assert len(requests) == 3
+    assert [len(entry[1][0].split(',')) for entry in requests] == [200, 200, 1]
+    assert all(entry[1][1] == '(UID FLAGS)' for entry in requests)
+    assert requests[-1][1][0] == '401'
+
+
+def test_empty_flags_request_does_not_require_network():
+    provider = ImapReadOnlyProvider('reader@163.com', 'synthetic-code')
+    assert provider.fetch_flags([]) == {}
+
+
+def test_duplicate_input_uids_and_consistent_responses(connected):
+    provider, fake = connected
+    provider.select_folder('INBOX')
+    fake.fetch = [[b'1 (UID 42 FLAGS (\\Seen Custom))', b'1 (FLAGS (Custom \\Seen) UID 42)']]
+    assert set(provider.fetch_flags([42, 42])[42]) == {'\\Seen', 'Custom'}
+    assert fake.trace[-1][1] == ('42', '(UID FLAGS)')
+
+
+@pytest.mark.parametrize('uids', [[True], [0], [-1], [2**32], ['42'], '42', None])
+def test_invalid_flags_uid_inputs_no_commands(connected, uids):
+    provider, fake = connected
+    before = list(fake.trace)
+    with pytest.raises(ImapReadError, match='invalid_uid_list'):
+        provider.fetch_flags(uids)
+    assert fake.trace == before
+
+
+@pytest.mark.parametrize('rows', [
+    [b'1 (UID 43 FLAGS ())'],
+    [b'1 (UID 0 FLAGS ())'],
+    [b'1 (UID 4294967296 FLAGS ())'],
+    [b'1 (FLAGS ("UID 42"))'],
+    [b'1 (UID 42 FLAGS ("quoted"))'],
+    [b'1 (UID 42 FLAGS (\xff))'],
+    [b'1 (UID 42 FLAGS (bad\x00flag))'],
+    [b'1 (UID 42 FLAGS (one\ttwo))'],
+    [b'4294967296 (UID 42 FLAGS ())'],
+    [b'1 (UID 42 FLAGS (' + b'x'*201 + b'))'],
+    [b'1 (UID 42 FLAGS (' + b'flag '*101 + b'))'],
+    [b'1 (UID 42 FLAGS ()) BODY[] {5}'],
+    [(b'1 (UID 42 FLAGS () BODY[] {5}', b'hello'), b')'],
+    [b'1 (UID 42 FLAGS ())', b'garbage'],
+    [b'1 (UID 42 FLAGS ())', b'1 (UID 42 FLAGS (\\Seen))'],
+    [b'1 (UID 42 FLAGS ()) UID 42'],
+    [b'1 (UID 42 FLAGS ())\r\n'],
+])
+def test_bad_flags_response_never_becomes_partial_snapshot(connected, rows):
+    provider, fake = connected
+    provider.select_folder('INBOX')
+    fake.fetch = [rows]
+    with pytest.raises(ImapReadError):
+        provider.fetch_flags([42])
+
+
+def test_uid_from_another_batch_rejected(connected):
+    provider, fake = connected
+    provider.select_folder('INBOX')
+    fake.fetch = [[b'1 (UID 201 FLAGS ())']]
+    with pytest.raises(ImapReadError, match='unexpected_uid'):
+        provider.fetch_flags(list(range(1, 202)))
+
+
+@pytest.mark.parametrize('failure', ['NO', 'disconnect'])
+def test_failed_flags_fetch_cannot_establish_empty_snapshot(connected, failure):
+    provider, fake = connected
+    provider.select_folder('INBOX')
+    if failure == 'NO':
+        fake.uid = lambda *args: ('NO', [b'private diagnostics'])
+    else:
+        fake.failures['UID FETCH'] = TimeoutError('private diagnostics')
+    with pytest.raises(ImapReadError, match='flags_fetch_failed'):
+        provider.fetch_flags([42])
+
+
+def test_cancel_after_first_flags_batch_prevents_further_requests(connected):
+    from threading import Event
+    from agents.runtime import RunContext, RunCancelled, use_run_context
+    provider, fake = connected
+    provider.select_folder('INBOX')
+    cancelled = Event()
+
+    def first_batch(*args):
+        fake.record('UID FETCH', *args)
+        cancelled.set()
+        return 'OK', [b'1 (UID 1 FLAGS ())']
+
+    fake.uid = first_batch
+    with use_run_context(RunContext(cancel_event=cancelled)):
+        with pytest.raises(RunCancelled):
+            provider.fetch_flags(list(range(1, 402)))
+    requests = [entry for entry in fake.trace if entry[0] == 'UID FETCH']
+    assert len(requests) == 1
+    assert len(requests[0][1][1].split(',')) == 200
+
+
+def test_cancel_before_flags_scan_sends_no_fetch(connected):
+    from threading import Event
+    from agents.runtime import RunContext, RunCancelled, use_run_context
+    provider, fake = connected
+    provider.select_folder('INBOX')
+    cancelled = Event()
+    cancelled.set()
+    before = list(fake.trace)
+    with use_run_context(RunContext(cancel_event=cancelled)):
+        with pytest.raises(RunCancelled):
+            provider.fetch_flags([42])
+    assert fake.trace == before

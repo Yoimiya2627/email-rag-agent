@@ -518,7 +518,7 @@ with st.sidebar:
 
 st.title("邮件智能问答")
 st.caption("支持检索、摘要、回复撰写、统计分析")
-st.caption('聊天使用当前已索引邮件；163 本地收取与解析结果在下方面板单独查看。')
+st.caption('聊天使用侧栏中的问答索引；下方 163 邮箱使用独立的本地全文索引，真实邮件不会自动进入模型问答。')
 from frontend.mailbox_view import render_mailboxes
 render_mailboxes(st, _get, _post)
 _render_approvals()

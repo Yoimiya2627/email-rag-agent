@@ -8,11 +8,23 @@ import config.settings as cfg
 from api.security import Identity, require_identity
 from core.mail_accounts import MailAccountStore, get_data_dir
 from core.mail_sync import MailSyncStore, ImapSyncError, sync_mailbox
+from core.jobs import CapacityExceeded
 from agents.runtime import current_run
 
 
 def accounts():
     return MailAccountStore(cfg.MAIL_ACCOUNTS_PATH)
+
+
+def schedules():
+    from core.mail_schedule import MailScheduleStore
+    return MailScheduleStore(cfg.MAIL_SCHEDULE_PATH)
+
+
+def scheduled_request(owner, account_id, folders, max_messages):
+    account = accounts().get(owner, account_id)
+    return {'account_id':account_id,'credential_version':account['credential_version'],
+            'folders':folders,'max_messages':max_messages,'retry_failed':False}
 
 
 def mailbox(owner, account_id):
@@ -41,6 +53,8 @@ _ERRORS = {
 def mailbox_error(exc):
     if isinstance(exc, HTTPException):
         return exc
+    if isinstance(exc, CapacityExceeded):
+        return HTTPException(429, '当前后台任务已满，请等待正在运行的任务完成后重试。')
     if isinstance(exc, KeyError):
         return HTTPException(404, '邮箱或邮件不存在')
     if isinstance(exc, PermissionError):
@@ -58,6 +72,13 @@ class SyncRequest(BaseModel):
     max_messages: int = Field(default=100, ge=1, le=2000)
     retry_failed: bool = False
     operation_key: str | None = Field(default=None, min_length=1, max_length=128, pattern=r'^[A-Za-z0-9._:-]+$')
+
+
+class ScheduleRequest(BaseModel):
+    enabled: bool
+    folders: list[str] = Field(min_length=1,max_length=30)
+    interval_seconds: int = Field(default=300,ge=60,le=86400)
+    max_messages: int = Field(default=100,ge=1,le=2000)
 
 
 def run_mail_sync(job):
@@ -133,6 +154,47 @@ def mailbox_router(admission, manager):
         try:
             return mailbox(identity.owner_id, account_id).report()
         except Exception as exc:
+            raise mailbox_error(exc) from None
+
+    @router.get('/{account_id}/schedule')
+    def schedule(account_id: str, identity: Identity = Depends(require_identity)):
+        try:
+            accounts().get(identity.owner_id,account_id)
+            return {**schedules().get(identity.owner_id,account_id),'worker_enabled':cfg.MAIL_SCHEDULER_ENABLED}
+        except Exception as exc:
+            raise mailbox_error(exc) from None
+
+    @router.post('/{account_id}/schedule')
+    def configure_schedule(account_id: str, request: ScheduleRequest, identity: Identity = Depends(require_identity)):
+        try:
+            accounts().get(identity.owner_id,account_id)
+            if request.enabled:
+                if not cfg.MAIL_SCHEDULER_ENABLED:
+                    raise HTTPException(503,'后台自动同步服务未启用。')
+                with admission.slot():
+                    _, provider = provider_for(identity.owner_id,account_id)
+                    with provider:
+                        available = {row['name'] for row in provider.list_folders() if row['selectable']}
+                if any(folder not in available for folder in request.folders):
+                    raise ImapSyncError('folder_not_available')
+            return schedules().upsert(identity.owner_id,account_id,**request.model_dump())
+        except Exception as exc:
+            raise mailbox_error(exc) from None
+
+    @router.get('/{account_id}/search')
+    def search(account_id: str, q: str=Query(min_length=1,max_length=500),
+               folders:list[str] | None=Query(None),unread_only:bool=False,starred_only:bool=False,
+               limit:int=Query(20,ge=1,le=50), identity: Identity=Depends(require_identity)):
+        try:
+            return mailbox(identity.owner_id,account_id).search(q,folders=folders,
+                unread_only=unread_only,starred_only=starred_only,limit=limit)
+        except Exception as exc:
+            from core.mail_search import MailSearchError
+            if isinstance(exc,MailSearchError):
+                input_error = exc.code in {'invalid_query','invalid_result_limit','invalid_flag_filter',
+                                          'invalid_folder_filter','query_term_limit'}
+                raise HTTPException(422 if input_error else 503,
+                    '本地检索未完成，请检查搜索词或本地索引状态。') from None
             raise mailbox_error(exc) from None
 
     @router.get('/{account_id}/messages')

@@ -291,6 +291,59 @@ class ImapReadOnlyProvider:
             raise ImapReadError('invalid_uid_list')
         return sorted(set(uids))
 
+    def fetch_flags(self, uids):
+        """Read a UID snapshot's current flags in batches of at most 200.
+
+        Missing UIDs may have been expunged remotely since SEARCH. Only an OK
+        response can establish their absence; malformed data never does.
+        """
+        if (not isinstance(uids, (list, tuple, set, frozenset)) or len(uids) > 1_000_000
+                or any(type(uid) is not int or not 1 <= uid <= 2**32-1 for uid in uids)):
+            raise ImapReadError('invalid_uid_list')
+        ordered = sorted(set(uids))
+        if not ordered:
+            return {}
+        client, result = self._mailbox(), {}
+        # Consume the entire two-attribute envelope. Searching for UID with a
+        # regex alone would let a flag or quoted string impersonate metadata.
+        layout = re.compile(rb'([1-9][0-9]{0,9}) +\((?:UID +([0-9]{1,10}) +FLAGS +\(([^()]*)\)|FLAGS +\(([^()]*)\) +UID +([0-9]{1,10}))\)', re.I)
+        for offset in range(0, len(ordered), 200):
+            from agents.runtime import remaining_timeout
+            remaining_timeout(self.timeout)
+            batch = ordered[offset:offset+200]
+            requested = set(batch)
+            rows = self._call('flags_fetch_failed', client.uid, 'FETCH', ','.join(map(str, batch)), '(UID FLAGS)')
+            for row in rows:
+                if row is None or row == b'':
+                    continue
+                if not isinstance(row, bytes) or len(row) > 25000:
+                    raise ImapReadError('invalid_flags_response')
+                match = layout.fullmatch(row)
+                if match is None:
+                    raise ImapReadError('invalid_flags_response')
+                if _decimal(match[1], code='invalid_flags_response') > 2**32-1:
+                    raise ImapReadError('invalid_flags_response')
+                uid = _decimal(match[2] or match[5], code='invalid_flags_response')
+                if uid not in requested:
+                    raise ImapReadError('unexpected_uid')
+                flag_bytes = match[3] if match[3] is not None else match[4]
+                if any(value < 32 or value > 126 for value in flag_bytes):
+                    raise ImapReadError('invalid_flags_response')
+                tokens = imaplib.ParseFlags(b'FLAGS (' + flag_bytes + b')')
+                if len(tokens) > 100:
+                    raise ImapReadError('invalid_flags_response')
+                flags = []
+                for token in tokens:
+                    atom = token[1:] if token.startswith(b'\\') else token
+                    if (not atom or len(token) > 200 or any(value < 33 or value > 126 for value in atom)
+                            or any(value in atom for value in b'(){%*"\\]')):
+                        raise ImapReadError('invalid_flags_response')
+                    flags.append(token.decode('ascii'))
+                if uid in result and set(result[uid]) != set(flags):
+                    raise ImapReadError('conflicting_flags_response')
+                result[uid] = flags
+        return result
+
     def _fetch_parts(self, rows, uid, *, body, allow_reported_size_mismatch=False, full_body=False):
         headers, literals = [], []
         for row in rows:

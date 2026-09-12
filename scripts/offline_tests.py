@@ -26,6 +26,7 @@ def _run_child(state, pytest_args):
                          'MCP_SERVER_AUDIT_LOG_PATH':'mcp-server.jsonl','SESSION_STORE_PATH':'sessions.sqlite3',
                          'JOB_STORE_PATH':'jobs.sqlite3','TOOL_RESULT_STORE_PATH':'tool_results.sqlite3',
                          'MAIL_ACCOUNTS_PATH':'mail-accounts.sqlite3','IMAP_DATA_ROOT':'imap-mail',
+                         'MAIL_SCHEDULE_PATH':'mail-schedules.sqlite3',
                          'GMAIL_CREDENTIALS_PATH':'no-client.json',
                          'GMAIL_TOKEN_PATH':'no-token.json','GMAIL_READONLY_TOKEN_PATH':'no-read-token.json',
                          'GMAIL_SYNC_OUTPUT_PATH':'emails.json','GMAIL_SYNC_STATE_PATH':'sync.json'}.items():
@@ -34,6 +35,7 @@ def _run_child(state, pytest_args):
     os.environ.update(DEEPSEEK_API_KEY='offline-placeholder',API_AUTH_TOKEN='',API_OWNER_ID='local',
                       MCP_AUTH_TOKEN='',MCP_OWNER_ID='local',MAIL_PROVIDER='simulated',AGENT_TOOL_BACKEND='local',
                       ENABLE_AGENT_TRACE='false',ENABLE_MCP_AUDIT='false',ENABLE_REAL_EMAIL_SEND='false',
+                      MAIL_SCHEDULER_ENABLED='false',
                       PYTHONDONTWRITEBYTECODE='1')
     def guard(event,arguments):
         if event in {'os.remove','os.rmdir','os.mkdir','os.rename'}:

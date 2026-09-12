@@ -32,6 +32,7 @@ def api_setup(tmp_path_factory, monkeypatch):
     jobs = JobStore(tmp_path / 'jobs.sqlite3')
     monkeypatch.setattr(routes, 'accounts', lambda: accounts)
     monkeypatch.setattr(cfg, 'IMAP_DATA_ROOT', str(tmp_path / 'mailboxes'))
+    monkeypatch.setattr(cfg, 'MAIL_SCHEDULE_PATH', str(tmp_path / 'schedules.sqlite3'))
     monkeypatch.setattr(cfg, 'API_OWNER_ID', 'owner-a')
     monkeypatch.setattr(api, '_jobs', SimpleNamespace(submit=lambda *args: jobs.create(*args)[0]))
     forbidden = []
@@ -54,6 +55,31 @@ def configure(env, secret='synthetic-only-authorization-code'):
     assert response.status_code == 200
     assert secret not in response.text
     return response.json()
+
+
+def test_mailbox_capacity_is_reported_as_retryable_limit(api_setup, monkeypatch):
+    from core.jobs import CapacityExceeded
+    import api.main as api
+    account = configure(api_setup)
+    monkeypatch.setattr(api, '_jobs', SimpleNamespace(submit=Mock(side_effect=CapacityExceeded('busy'))))
+    response = api_setup.client.post('/mailboxes/'+account['id']+'/sync', json={})
+    assert response.status_code == 429
+    assert 'busy' not in response.text
+
+
+def test_search_term_limit_is_input_error(api_setup):
+    account = configure(api_setup)
+    response = api_setup.client.get('/mailboxes/'+account['id']+'/search',
+        params={'q':' '.join('keyword'+str(n) for n in range(33))})
+    assert response.status_code == 422
+
+
+def test_search_invalid_stored_document_is_service_error(api_setup, monkeypatch):
+    from core.mail_search import MailSearchError
+    account = configure(api_setup)
+    monkeypatch.setattr(api_setup.routes, 'mailbox', Mock(side_effect=MailSearchError('invalid_stored_document')))
+    response = api_setup.client.get('/mailboxes/'+account['id']+'/search', params={'q':'keyword'})
+    assert response.status_code == 503
 
 
 def test_registered_routes_keep_accounts_isolated(api_setup, monkeypatch):
@@ -133,6 +159,9 @@ class FakeProvider:
     def list_uids(self):
         return [1, 2]
 
+    def fetch_flags(self, uids):
+        return {uid:[] for uid in uids}
+
     def fetch_message(self, uid):
         self.fetched.append(uid)
         return {'raw':b'Subject: Offline local fixture\r\nFrom: sender@example.test\r\n\r\nLocal mail only.',
@@ -149,6 +178,69 @@ def test_connect_reports_read_only_folders(api_setup, monkeypatch):
     assert response.json()['read_only'] is True
     assert response.json()['local_only'] is True
     assert response.json()['folders'][0]['name'] == 'INBOX'
+
+
+def test_schedule_defaults_enable_and_pause_without_reconnecting(api_setup,monkeypatch):
+    env=api_setup
+    account=configure(env)
+    prefix='/mailboxes/'+account['id']
+    assert env.client.get(prefix+'/schedule').json()['enabled'] is False
+    payload={'enabled':True,'folders':['INBOX'],'interval_seconds':300,'max_messages':100}
+    monkeypatch.setattr(env.cfg,'MAIL_SCHEDULER_ENABLED',False)
+    assert env.client.post(prefix+'/schedule',json=payload).status_code==503
+    monkeypatch.setattr(env.cfg,'MAIL_SCHEDULER_ENABLED',True)
+    monkeypatch.setattr(env.routes,'provider_for',lambda owner,aid:(env.accounts.get(owner,aid),FakeProvider()))
+    result=env.client.post(prefix+'/schedule',json=payload)
+    assert result.status_code==200 and result.json()['enabled'] is True
+    assert result.json()['folders']==['INBOX'] and result.json()['next_due']==0
+    assert 'credential' not in result.text and 'authorization' not in result.text
+    monkeypatch.setattr(env.routes,'provider_for',Mock(side_effect=AssertionError('pause must not connect')))
+    assert env.client.post(prefix+'/schedule',json={**payload,'enabled':False}).json()['enabled'] is False
+
+
+def test_schedule_scope_validation_and_owner_isolation(api_setup,monkeypatch):
+    env=api_setup
+    account=configure(env)
+    prefix='/mailboxes/'+account['id']
+    monkeypatch.setattr(env.cfg,'MAIL_SCHEDULER_ENABLED',True)
+    monkeypatch.setattr(env.routes,'provider_for',lambda owner,aid:(env.accounts.get(owner,aid),FakeProvider()))
+    assert env.client.post(prefix+'/schedule',json={'enabled':True,'folders':['missing']}).status_code==409
+    assert env.client.post(prefix+'/schedule',json={'enabled':True,'folders':['INBOX'],'interval_seconds':1}).status_code==422
+    monkeypatch.setattr(env.cfg,'API_OWNER_ID','other-owner')
+    assert env.client.get(prefix+'/schedule').status_code==404
+    assert env.client.get(prefix+'/search',params={'q':'fixture'}).status_code==404
+
+
+def test_live_local_sync_indexes_for_search_without_model_calls(api_setup,monkeypatch):
+    import core.mail_sync as sync
+    from core.imap_mime import parse_imap_message
+    env=api_setup
+    account=configure(env)
+    monkeypatch.setattr(env.routes,'provider_for',lambda owner,aid:(env.accounts.get(owner,aid),FakeProvider()))
+    monkeypatch.setattr(sync,'isolated_parse',lambda path,locator,timeout:parse_imap_message(path.read_bytes(),**locator))
+    report=env.routes.run_mail_sync(submit_job(env,account))
+    assert report['local_search']['status']=='ready' and report['local_search']['indexed_count']==2
+    response=env.client.get('/mailboxes/'+account['id']+'/search',params={'q':'Local','unread_only':True})
+    assert response.status_code==200 and len(response.json()['items'])==2
+    assert response.json()['diagnostics']['local_only'] is True
+
+
+def test_api_lifespan_starts_and_stops_scheduler(api_setup,monkeypatch):
+    import api.main as api
+    import core.mail_schedule as scheduling
+    events=[]
+    class FakeScheduler:
+        def __init__(self,store,manager_factory,request_factory):
+            assert callable(manager_factory) and callable(request_factory)
+        def start(self):events.append('start')
+        def stop(self):events.append('stop');return True
+    monkeypatch.setattr(scheduling,'MailScheduler',FakeScheduler)
+    monkeypatch.setattr(api_setup.cfg,'MAIL_SCHEDULER_ENABLED',True)
+    monkeypatch.setattr(api_setup.cfg,'WARMUP_ON_START',False)
+    monkeypatch.setattr(api,'_jobs',None)
+    with TestClient(api.app) as client:
+        assert events==['start'] and client.get('/health').status_code==200
+    assert events==['start','stop']
 
 
 def submit_job(env, account):

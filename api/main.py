@@ -56,14 +56,24 @@ async def lifespan(app):
     logger.info('Email RAG API starting up')
     if cfg.WARMUP_ON_START:
         readiness.start(_warm_components)
-    yield
-    logger.info('Email RAG API shut down')
-    if _jobs is not None:
-        _jobs.stop()
-        await asyncio.to_thread(_jobs.wait_idle,5)
-    if admission.active == 0:
-        from core.model_clients import close_model_clients
-        close_model_clients()
+    scheduler = None
+    if cfg.MAIL_SCHEDULER_ENABLED:
+        from core.mail_schedule import MailScheduler
+        from api.mailbox_routes import schedules, scheduled_request
+        scheduler = MailScheduler(schedules(),_job_manager,scheduled_request)
+        scheduler.start()
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            await asyncio.to_thread(scheduler.stop)
+        logger.info('Email RAG API shut down')
+        if _jobs is not None:
+            _jobs.stop()
+            await asyncio.to_thread(_jobs.wait_idle,5)
+        if admission.active == 0:
+            from core.model_clients import close_model_clients
+            close_model_clients()
 
 
 app = FastAPI(title='Email RAG API', version='1.1.0', lifespan=lifespan)

@@ -55,6 +55,8 @@ MAIL_ACCOUNTS_PATH = os.getenv('MAIL_ACCOUNTS_PATH', str(BASE_DIR / 'data/mail_s
 IMAP_DATA_ROOT = os.getenv('IMAP_DATA_ROOT', str(BASE_DIR / 'data/real_emails/imap'))
 IMAP_MAX_MESSAGE_BYTES = int(os.getenv('IMAP_MAX_MESSAGE_BYTES', '25000000'))
 IMAP_PARSE_TIMEOUT = float(os.getenv('IMAP_PARSE_TIMEOUT', '30'))
+MAIL_SCHEDULE_PATH = os.getenv('MAIL_SCHEDULE_PATH', str(Path(MAIL_ACCOUNTS_PATH).with_name('mail-schedules.sqlite3')))
+MAIL_SCHEDULER_ENABLED = os.getenv('MAIL_SCHEDULER_ENABLED', 'true').lower() == 'true'
 
 # API server
 API_HOST = os.getenv("API_HOST", "127.0.0.1")

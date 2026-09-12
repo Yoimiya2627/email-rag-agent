@@ -1,5 +1,7 @@
 ﻿# Email RAG Agent
 
+2026-09-12 新增 163 邮箱历史分批回补、后台定时增量同步及独立本地全文搜索。真实邮件不自动进入模型问答索引；使用与本轮实测范围见 [163 后台同步与验证说明](docs/163-background-sync-validation-2026-09-12.md)。
+
 > **Author**: 赵伟鑫 (Yoimiya2627) — Agent 开发工程师 / 大模型应用开发工程师
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
