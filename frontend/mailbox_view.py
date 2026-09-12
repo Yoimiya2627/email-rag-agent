@@ -106,6 +106,34 @@ def body_for_display(email):
     An unverified/malformed row falls back to escaped text, never HTML.
     """
     from html import escape
+    import json
+
+    def canonical_text(row):
+        if row.get('cells') == []:
+            table_id, status = row.get('table_id'), row.get('status')
+            if (not isinstance(table_id, str) or not isinstance(status, str)
+                    or row.get('row_id') != table_id + ':r0'):
+                return None
+            return '[Table ' + table_id + ' status=' + status + '; empty table]'
+        if isinstance(row.get('text'), str):
+            return row['text']
+        # The MIME parser stores spans and structured cells, deliberately
+        # omitting the redundant normalized row text. Reconstruct that exact
+        # representation before trusting a span; never strip marker-like prose.
+        try:
+            fields = []
+            for cell in row['cells']:
+                label = '/'.join(cell['headers']) or ('header' if cell['header'] else f"column {cell['column']}")
+                relation = f" {cell['rowspan']}x{cell['colspan']}" if cell['rowspan'] != 1 or cell['colspan'] != 1 else ''
+                carried = ' carried' if cell.get('carried') else ''
+                fields.append(f"{cell['source_id']}{relation}{carried} " + json.dumps(label, ensure_ascii=False)
+                              + '=' + json.dumps(cell['text'], ensure_ascii=False))
+            from core.cleaner import _normalize_whitespace
+            return _normalize_whitespace('[Table ' + row['table_id'] + ' row ' + row['row_id']
+                                         + ' status=' + row['status'] + '] ' + ' | '.join(fields))
+        except (KeyError, TypeError, ValueError):
+            return None
+
     body = email.get('body') or '这封邮件没有可显示的正文。'
     rows = [row for row in email.get('table_rows',[]) if isinstance(row,dict)
             and type(row.get('start')) is int and type(row.get('end')) is int]
@@ -113,11 +141,20 @@ def body_for_display(email):
     for row in sorted(rows,key=lambda row:row['start']):
         start, end = row['start'], row['end']
         cells = row.get('cells')
-        if (not cursor <= start < end <= len(body) or row.get('text') != body[start:end]
-                or not isinstance(cells,list) or not cells
+        if (not cursor <= start < end <= len(body)
+                or not isinstance(cells,list)
                 or any(not isinstance(cell,dict) or not isinstance(cell.get('text'),str) for cell in cells)):
             continue
+        if canonical_text(row) != body[start:end]:
+            continue
         result.append(escape(body[cursor:start]))
+        if not cells:
+            # An exactly verified empty table has no cell content to display.
+            # Keep a human-readable note: extraction limits can also yield an
+            # empty record, so do not silently promise the source was blank.
+            result.append('（表格未提取到可显示内容）')
+            cursor = end
+            continue
         result.append('<div class="mail-table-row">')
         for cell in cells:
             headers = cell.get('headers',[])
@@ -248,7 +285,7 @@ def _render_inbox(st, get, post, account, schedule, report):
     selected_key = 'mail_selected_'+aid
     available = {row['key'] for row in rows}
     if st.session_state.get(selected_key) not in available:
-        st.session_state[selected_key] = rows[0]['key'] if rows else None
+        st.session_state[selected_key] = None
     listing, reading = st.columns([.38,.62],gap='medium')
     with listing, st.container(key='mail_list'):
         st.subheader('搜索结果' if params else '全部邮件')

@@ -166,6 +166,7 @@ def test_actual_frontend_job_renders_index_work_without_untrusted_progress(monke
     monkeypatch.setattr('requests.get',get)
     app=st_testing.AppTest.from_file(str(Path(__file__).resolve().parents[1]/'frontend/app.py'),default_timeout=15)
     app.session_state['workspace_page']='问答工作台'
+    app.session_state['advanced_chat'] = True
     app.run()
     next(box for box in app.checkbox if box.label=='显示后台任务').check().run()
     assert not app.exception

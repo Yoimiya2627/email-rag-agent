@@ -1,6 +1,7 @@
 """Visual identity for 邮序, a local mailbox client.
 
-Plan: 240px deep-sea navigation | list + reader | always-open Agent conversation.
+Plan: clear assistant/mail/settings navigation; a full-width conversation first.
+Mail is opened deliberately on its own page. Sync diagnostics stay in settings.
 Tokens: sea #173238, canvas #F1F5F6, paper #FFFFFF, action #0F766E,
 ink #20343B, muted #657780; rules #DCE5E8. Bahnschrift is reserved for
 headings, Segoe UI for reading, and Consolas for small utility labels.
@@ -8,7 +9,7 @@ The single signature is a compact 邮 postage mark next to the Chinese name;
 provider labels belong to individual accounts, so future QQ accounts fit here.
 
 Plan critique: discard decorative dashboard cards and oversized metrics; this
-screen's purpose is choosing and reading mail. Use a real list/reader boundary
+screen's primary purpose is conversation, with a separate mail reading page. Use a real list/reader boundary
 instead of unrelated floating cards. Final review: no external assets, no mail
 HTML, no hidden controls, visible focus, flexible small-screen panels, and no
 animation required. Actual app rendering is checked by the integrating caller.
@@ -45,7 +46,7 @@ _CSS = """
   line-height: 1.6;
 }
 [data-testid="stMainBlockContainer"] {
-  max-width: 1920px;
+  max-width: 1540px;
   padding: 4.5rem 2rem 3rem;
 }
 [data-testid="stMarkdownContainer"] p,
@@ -89,7 +90,7 @@ _CSS = """
   color: var(--mail-paper);
   border-right: 1px solid var(--mail-sea);
 }
-[data-testid="stSidebarUserContent"] { padding: 1.1rem 1.1rem 1.75rem; }
+[data-testid="stSidebarUserContent"] { padding: 1rem 0 1.5rem; }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
@@ -113,7 +114,7 @@ _CSS = """
   display: flex;
   align-items: center;
   gap: 11px;
-  margin: 0 0 1.9rem;
+  margin: 0 0 1.2rem;
   padding-top: .15rem;
   color: var(--mail-paper);
 }
@@ -130,14 +131,15 @@ _CSS = """
   letter-spacing: -.03em;
 }
 .mail-brand__name {
-  font: 600 23px/1.2 var(--mail-display-font);
-  letter-spacing: .12em;
+  font: 600 20px/1.2 var(--mail-display-font);
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 .mail-brand__caption {
   margin-top: 5px;
   color: var(--mail-sidebar-muted);
   font: 11px/1.2 var(--mail-utility-font);
-  letter-spacing: .16em;
+  letter-spacing: .04em;
 }
 .st-key-mail_nav [role="radiogroup"] { gap: 5px; }
 .st-key-mail_nav [role="radiogroup"] > label {
@@ -173,8 +175,7 @@ _CSS = """
   border-bottom: 1px solid var(--mail-rule);
 }
 .st-key-mail_list,
-.st-key-mail_reader,
-.st-key-mail_agent {
+.st-key-mail_reader {
   min-width: 0;
   padding: 1.1rem 1.15rem;
   border: 1px solid var(--mail-rule);
@@ -184,16 +185,6 @@ _CSS = """
 }
 .st-key-mail_list { border-top: 3px solid var(--mail-action); }
 .st-key-mail_reader { padding: 1.25rem 1.5rem; }
-.st-key-mail_agent { border-top: 3px solid var(--mail-action); padding: 1.1rem; }
-.st-key-mail_agent [data-testid="stChatMessage"] { padding: .7rem; min-width: 0; }
-.st-key-mail_agent [data-testid="stChatMessageContent"] { min-width: 0; overflow-wrap: anywhere; }
-.st-key-mail_agent [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p { font-size: 14px; }
-.st-key-mail_agent [data-testid="stChatInput"] { border: 1px solid var(--mail-action); border-radius: 8px; }
-.st-key-mail_agent [data-testid="stChatInput"] textarea { font-family: var(--mail-body-font); font-size: 14px; }
-.st-key-mail_agent [data-testid="stAlert"] { padding: .65rem .8rem; }
-.st-key-mail_agent [data-testid="stCaptionContainer"] p { font-size: 12px; }
-.st-key-mail_agent_history { border-top: 1px solid var(--mail-rule); padding-top: .8rem; }
-.st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"] { min-width: 0; }
 .mail-body { white-space: pre-wrap; overflow-wrap: anywhere; font: 15px/1.9 var(--mail-body-font); color: var(--mail-ink); }
 .mail-address { overflow-wrap: anywhere; color: var(--mail-muted); font: 13px/1.6 var(--mail-body-font); }
 .mail-address b { font-weight: 500; display: inline-block; min-width: 54px; }
@@ -305,19 +296,6 @@ _CSS = """
   outline-color: #A9E1D9;
 }
 
-/* On narrow screens the assistant comes first, keeping the composer discoverable. */
-@media (max-width: 1150px) {
-  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) { flex-wrap: wrap; }
-  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"] {
-    width: 100%; flex: 1 1 100%; min-width: 0;
-  }
-  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"]:first-child { order: 2; }
-  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"]:last-child { order: 1; }
-  .st-key-mail_agent_history,
-  .st-key-mail_agent [data-testid="stLayoutWrapper"]:has(> .st-key-mail_agent_history) {
-    height: 190px !important; flex: 0 0 190px !important;
-  }
-}
 @media (max-width: 1000px) {
   [data-testid="stMainBlockContainer"] { padding: 4.5rem 1rem 2rem; }
   .st-key-mail_list { padding: .9rem; }
@@ -338,6 +316,43 @@ _CSS = """
   }
   .st-key-mail_reader { padding: 1rem; }
 }
+
+/* The assistant has one primary action: the native, bottom-pinned composer. */
+[data-testid="stMainBlockContainer"]:has(.st-key-assistant_header) {
+  max-width: 1080px;
+  padding-top: 3.5rem;
+}
+[data-testid="stAppViewContainer"]:has(.st-key-assistant_header),
+[data-testid="stAppViewContainer"]:has(.st-key-assistant_header) [data-testid="stHeader"] {
+  background: var(--mail-paper);
+}
+.st-key-assistant_header { border-bottom: 1px solid var(--mail-rule); padding-bottom: 1rem; }
+.st-key-assistant_header [data-testid="stCaptionContainer"] p { font-size: 14px; }
+.st-key-assistant_welcome { padding: 7vh 0 4vh; }
+.st-key-assistant_welcome [data-testid="stMarkdownContainer"] h3 { font-size: 30px; letter-spacing: -.035em; }
+.st-key-assistant_welcome [data-testid="stMarkdownContainer"] p { font-size: 16px; color: var(--mail-muted); }
+.st-key-assistant_welcome [data-testid="stButton"] { padding-top: .75rem; }
+.st-key-assistant_welcome [data-testid="stButton"] p { color: inherit; font-size: 14px; }
+.st-key-assistant_history [data-testid="stChatMessage"] { background: var(--mail-canvas); border-radius: 10px; }
+[data-testid="stBottomBlockContainer"] { max-width: 1080px; padding: .75rem 2rem 1.2rem; }
+[data-testid="stChatInput"] { border: 1px solid var(--mail-rule); border-radius: 12px; }
+[data-testid="stChatInput"]:focus-within { border-color: var(--mail-action); }
+[data-testid="stChatInput"] textarea { font-family: var(--mail-body-font); font-size: 16px; }
+[data-testid="stCaptionContainer"] p { color: var(--mail-muted); }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color: var(--mail-sidebar-muted); }
+[data-testid="stSidebar"] [data-testid="stText"] { color: var(--mail-paper); font-size: 13px; overflow-wrap: anywhere; }
+.st-key-mail_rows [data-testid="stButton"] p {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.5;
+}
+.st-key-mail_rows [data-testid="stCaptionContainer"] p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 720px) {
+  [data-testid="stMainBlockContainer"]:has(.st-key-assistant_header) { padding-top: 3rem; }
+  [data-testid="stBottomBlockContainer"] { padding: .5rem .75rem 1rem; }
+  .st-key-assistant_welcome { padding-top: 3vh; }
+  .st-key-assistant_welcome [data-testid="stMarkdownContainer"] h3 { font-size: 25px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-testid="stAppViewContainer"] *,
   [data-testid="stAppViewContainer"] *::before,
@@ -362,8 +377,8 @@ def render_brand(st):
     st.markdown(
         '<div class="mail-brand">'
         '<span class="mail-brand__stamp" aria-hidden="true">邮</span>'
-        '<div><div class="mail-brand__name">邮序</div>'
-        '<div class="mail-brand__caption">MAIL DESK</div></div>'
+        '<div><div class="mail-brand__name">邮件助手</div>'
+        '<div class="mail-brand__caption">你的邮箱助手</div></div>'
         '</div>',
         unsafe_allow_html=True,
     )

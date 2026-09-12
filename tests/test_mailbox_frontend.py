@@ -75,6 +75,12 @@ class MailboxHTTP:
         raise AssertionError('Mailbox UI unexpectedly called another POST endpoint: '+url)
 
 
+def _mail_app(workspace='我的邮箱'):
+    app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+    app.session_state['workspace_page'] = workspace
+    return app
+
+
 def button(app, label):
     return next(item for item in app.button if item.label == label)
 
@@ -84,24 +90,28 @@ def navigate(app, page):
     assert not app.exception
 
 
-def test_default_workspace_shows_mail_and_agent_without_automatic_chat_or_demo_index():
+def test_chat_home_is_simple_and_mail_opens_only_when_requested():
     http = MailboxHTTP()
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+        # Stale flags from an earlier sync must not display global job logs here.
+        app.session_state['job_submitted'] = True
+        app.session_state['show_jobs'] = True
+        app.run()
         assert not app.exception
+        assert any(item.value == '邮件助手' for item in app.title)
+        assert len(app.chat_input) == 1 and not app.chat_input[0].disabled
+        assert not any(url.endswith('/jobs') or url.endswith('/index/status') or url.endswith('/messages') for url,_ in http.gets)
+        assert not any(item.label in {'邮件数据路径','搜索邮件'} for item in app.text_input)
+        assert not any(item.label == '任务进度与恢复' for item in app.expander)
+        button(app,'查看我的邮件').click().run()
+        assert not app.exception
+        assert not app.chat_input
         assert any(item.value == '我的邮箱' for item in app.title)
-        assert any(item.label == '合成邮件' for item in app.button)
-        assert any('mail-body' in item.value for item in app.markdown)
-        assert len(app.chat_input) == 1
-        assert any(item.value == 'Agent 邮件助手' for item in app.subheader)
-        assert any('真实邮箱尚未接入对话' in item.value for item in app.info)
-        assert not any(url.endswith('/index/status') for url,_ in http.gets)
-        assert not any(item.label == '邮件数据路径' for item in app.text_input)
-        assert http.posts == []
+        assert not any('<div class="mail-body">' in item.value for item in app.markdown)
+        button(app,'合成邮件').click().run()
+        assert any('<div class="mail-body">' in item.value for item in app.markdown)
         navigate(app,'问答工作台')
-        assert len(app.chat_input) == 1
-        assert any('尚未连接你的真实邮箱' in item.value for item in app.info)
-        navigate(app,'我的邮箱')
         assert len(app.chat_input) == 1 and http.posts == []
 
 
@@ -114,8 +124,12 @@ def test_embedded_chat_shares_conversation_without_adding_mail_context(configure
         return response({'answer':'合成对话回复', 'intent':'general', 'sources':[]})
 
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=chat_post):
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        app = _mail_app('问答工作台').run()
         assert not app.exception and http.posts == []
+        if configured:
+            navigate(app, '我的邮箱')
+            button(app, '合成邮件').click().run()
+            navigate(app, '问答工作台')
         app.chat_input[0].set_value('你好').run()
         assert not app.exception
         assert any(item.value == '合成对话回复' for item in app.markdown)
@@ -125,13 +139,14 @@ def test_embedded_chat_shares_conversation_without_adding_mail_context(configure
         assert payload['query'] == '你好'
         session_id = app.session_state['session_id']
         messages = list(app.session_state['messages'])
-        button(app, '展开问答工作台').click().run()
+        button(app, '打开高级工具').click().run()
         assert not app.exception
         assert app.session_state['workspace_page'] == '问答工作台'
         assert app.session_state['session_id'] == session_id
         assert app.session_state['messages'] == messages
         navigate(app, '同步与设置')
-        navigate(app, '我的邮箱')
+        navigate(app, '问答工作台')
+        button(app, '返回助手对话').click().run()
         assert app.session_state['session_id'] == session_id
         assert app.session_state['messages'] == messages
         assert len(http.posts) == 1
@@ -148,21 +163,18 @@ def test_chat_mode_and_history_survive_account_and_workspace_switches():
     second = {**ACCOUNT, 'id':'b'*32, 'address':'second@163.com', 'display_name':'第二个邮箱'}
     http.accounts.append(second)
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        app = _mail_app('问答工作台').run()
         mode = next(item for item in app.radio if item.label == '问答模式')
         mode.set_value('Agent（自主工具调用）').run()
         app.toggle[0].set_value(True).run()
-        next(item for item in app.checkbox if item.label == '显示后台任务').check().run()
         session_id = app.session_state['session_id']
         app.session_state['messages'] = [{'role':'user', 'content':'合成历史记录'}]
         next(item for item in app.selectbox if item.label == '当前邮箱').set_value(second['id']).run()
         navigate(app, '同步与设置')
         navigate(app, '问答工作台')
-        navigate(app, '我的邮箱')
         app.run()
         assert next(item for item in app.radio if item.label == '问答模式').value == 'Agent（自主工具调用）'
         assert app.toggle[0].value is True
-        assert next(item for item in app.checkbox if item.label == '显示后台任务').value is True
         assert app.session_state['session_id'] == session_id
         assert app.session_state['messages'] == [{'role':'user', 'content':'合成历史记录'}]
         assert http.posts == []
@@ -171,7 +183,7 @@ def test_chat_mode_and_history_survive_account_and_workspace_switches():
 def test_empty_workspace_leads_to_account_setup_without_network_actions():
     http = MailboxHTTP(configured=False,parsed=False)
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        app = _mail_app().run()
         assert not app.exception
         button(app,'连接我的邮箱').click().run()
         assert not app.exception
@@ -185,7 +197,7 @@ def test_account_selection_and_search_state_survive_workspace_navigation():
     second = {**ACCOUNT,'id':'b'*32,'address':'second@163.com','display_name':'第二个邮箱'}
     http.accounts.append(second)
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        app = _mail_app().run()
         next(item for item in app.text_input if item.label == '搜索邮件').set_value('发票')
         next(item for item in app.checkbox if item.label == '只搜索未读邮件').check()
         button(app,'搜索').click().run()
@@ -223,7 +235,7 @@ def test_inbox_fetch_failure_is_not_rendered_as_empty_mailbox():
             raise RuntimeError('offline fixture')
         return old_get(url,**kwargs)
     with patch('requests.get',side_effect=failed_get),patch('requests.post',side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        app = _mail_app().run()
         assert not app.exception
         assert any('邮件列表暂时无法加载' in item.value for item in app.error)
         assert not any('这里还没有邮件' in item.value for item in app.info)
@@ -238,7 +250,7 @@ def test_settings_read_failures_are_visible_and_do_not_invent_zero_counts(suffix
             raise RuntimeError('offline fixture')
         return old_get(url,**kwargs)
     with patch('requests.get',side_effect=failed_get),patch('requests.post',side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app = _mail_app()
         app.session_state['workspace_page'] = '同步与设置'
         app.run()
         assert not app.exception
@@ -257,7 +269,7 @@ def test_remote_removal_moves_browse_cursor_back_to_valid_page():
                 return response({'items':[],'total':20,'next_offset':None})
         return old_get(url,**kwargs)
     with patch('requests.get',side_effect=get_page),patch('requests.post',side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app = _mail_app()
         app.session_state['mail_page_'+ACCOUNT['id']] = 20
         app.run()
         assert not app.exception
@@ -283,7 +295,7 @@ def test_readable_table_display_uses_only_matching_metadata_and_escapes_cells():
 def test_real_account_form_masks_code_and_submits_only_mailbox_endpoint():
     http = MailboxHTTP(configured=False, parsed=False)
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+        app = _mail_app()
         app.session_state['workspace_page'] = '同步与设置'
         app.run()
         assert not app.exception
@@ -305,7 +317,7 @@ def test_real_account_form_masks_code_and_submits_only_mailbox_endpoint():
 def test_real_connection_and_sync_controls_submit_fixed_account_scope():
     http = MailboxHTTP(parsed=False)
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+        app = _mail_app()
         app.session_state['workspace_page'] = '同步与设置'
         app.run()
         button(app, '测试连接并读取文件夹').click().run()
@@ -330,9 +342,10 @@ def test_real_report_and_mail_html_are_displayed_safely_on_separate_pages():
     from html import escape
     http = MailboxHTTP()
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        app = _mail_app().run()
         assert not app.exception
-        assert len(app.chat_input) == 1
+        assert not app.chat_input
+        button(app, '合成邮件').click().run()
         assert any('mail-body' in item.value and escape(HTML) in item.value for item in app.markdown)
         attachment = next(item for item in app.text_area if item.label == '附件提取文本')
         assert attachment.value == HTML and attachment.disabled
@@ -352,7 +365,7 @@ def test_completed_sync_refreshes_report_and_stops_polling_without_resubmission(
     http = MailboxHTTP()
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post), \
          patch('streamlit.fragment', wraps=st.fragment) as fragment:
-        app = st_testing.AppTest.from_file(str(APP), default_timeout=15)
+        app = _mail_app()
         app.session_state['workspace_page'] = '同步与设置'
         app.run()
         button(app, '测试连接并读取文件夹').click().run()
@@ -373,7 +386,7 @@ def test_completed_sync_refreshes_report_and_stops_polling_without_resubmission(
 def test_auto_sync_configuration_and_pause_use_only_mailbox_routes():
     http=MailboxHTTP()
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
-        app=st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app=_mail_app()
         app.session_state['workspace_page']='同步与设置'
         app.run()
         button(app,'测试连接并读取文件夹').click().run()
@@ -391,7 +404,7 @@ def test_auto_sync_configuration_and_pause_use_only_mailbox_routes():
 def test_local_search_uses_get_and_keeps_snippet_and_body_plain():
     http=MailboxHTTP()
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
-        app=st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        app=_mail_app().run()
         next(item for item in app.text_input if item.label=='搜索邮件').set_value('发票')
         button(app,'搜索').click().run()
         assert not app.exception
@@ -408,7 +421,7 @@ def test_disabled_worker_warns_without_automatic_polling():
     http.schedule.update(enabled=True,worker_enabled=False,revision=1,state='waiting',next_due=1000)
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post), \
          patch('streamlit.fragment',wraps=st.fragment) as fragment:
-        app=st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
+        app=_mail_app().run()
         assert not app.exception
         assert fragment.call_args.kwargs['run_every'] is None
         assert any('后台自动同步服务未启用' in item.value for item in app.warning)
@@ -437,7 +450,7 @@ def test_disabled_worker_keeps_manual_running_job_refreshing_until_completion():
     http=MultipleJobHTTP()
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post), \
          patch('streamlit.fragment',wraps=st.fragment) as fragment:
-        app=st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app=_mail_app()
         app.session_state['imap_job_'+ACCOUNT['id']]='manual-old'
         app.run()
         assert not app.exception
@@ -457,7 +470,7 @@ def test_paused_schedule_with_old_manual_and_new_auto_terminal_jobs_stops_pollin
     http=MultipleJobHTTP(worker_enabled=True,enabled=False,manual_status='succeeded')
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post), \
          patch('streamlit.fragment',wraps=st.fragment) as fragment:
-        app=st_testing.AppTest.from_file(str(APP),default_timeout=15)
+        app=_mail_app()
         app.session_state['imap_job_'+ACCOUNT['id']]='manual-old'
         app.session_state['imap_terminal_job_'+ACCOUNT['id']]='auto-new'
         app.run()

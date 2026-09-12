@@ -268,8 +268,9 @@ def _render_submission_recovery():
             job = _get('/jobs/operations/'+pending['operation_key'])
             if job:
                 st.session_state['job_submitted'] = True
+                st.session_state.setdefault('agent_job_by_session', {})[pending['session_id']] = job['id']
                 st.session_state.pop('unconfirmed_submission',None)
-                st.info(f"已找到任务 {job['id']}：{job['status']}")
+                st.info('已找到上次任务，可在原会话或高级工具中查看结果。')
             else:
                 st.warning('暂未查到或服务不可用；不会自动重新提交。')
         if st.button('使用原操作标识重试提交'):
@@ -278,8 +279,9 @@ def _render_submission_recovery():
                 st.error(job['error'])
             else:
                 st.session_state['job_submitted'] = True
+                st.session_state.setdefault('agent_job_by_session', {})[pending['session_id']] = job['id']
                 st.session_state.pop('unconfirmed_submission',None)
-                st.info(f"任务 {job['id']}：{job['status']}")
+                st.info('上次任务已提交，可在原会话或高级工具中查看结果。')
 
 
 def _render_approvals():
@@ -427,6 +429,27 @@ QUICK_QUESTIONS = [
 
 def _open_chat_workspace():
     st.session_state['workspace_page'] = '问答工作台'
+    st.session_state['advanced_chat'] = False
+
+
+def _open_advanced_chat():
+    st.session_state['workspace_page'] = '问答工作台'
+    st.session_state['advanced_chat'] = True
+
+
+def _open_workspace(page):
+    st.session_state['workspace_page'] = page
+
+
+def _new_conversation():
+    import uuid
+    st.session_state.update(session_id=str(uuid.uuid4()), messages=[], history_after=0, history_more=False)
+    _open_chat_workspace()
+
+
+def _render_job_toggle():
+    st.session_state['show_jobs_value'] = st.checkbox(
+        '显示后台任务', value=st.session_state.get('show_jobs_value', False), key='show_jobs')
 
 
 def _save_chat_option(name, widget):
@@ -452,16 +475,16 @@ def _render_chat_options():
 
 
 def _render_agent_panel():
-    with st.container(key='mail_agent'):
-        st.subheader('Agent 邮件助手')
-        st.caption('对话资料：独立问答资料 · 与问答工作台共用会话')
-        st.info('真实邮箱尚未接入对话；左侧邮件不会自动发送给模型。')
-        st.button('展开问答工作台', on_click=_open_chat_workspace, use_container_width=True)
-        with st.expander('会话与模式'):
-            _render_session_controls()
+    with st.container(key='assistant_header'):
+        heading, controls = st.columns([5, 1], vertical_alignment='center')
+        with heading:
+            st.title('邮件助手')
+        with controls, st.popover('对话设置', use_container_width=True):
             mode, use_stream = _render_chat_options()
-            st.checkbox('显示后台任务', key='show_jobs')
-        _render_conversation(mode, use_stream, embedded=True)
+            _render_session_controls()
+            st.button('打开高级工具', on_click=_open_advanced_chat, use_container_width=True)
+        st.caption('当前可自由对话、对导入资料提问。你的真实邮件尚未接入 AI 对话，可在「查看邮件」中阅读和搜索。')
+    _render_conversation(mode, use_stream, embedded=True)
 
 
 def _render_chat_workspace():
@@ -520,7 +543,7 @@ def _render_chat_workspace():
 
         st.divider()
         _render_session_controls()
-        st.checkbox('显示后台任务',key='show_jobs')
+        _render_job_toggle()
         st.divider()
         st.subheader("⚡ 快捷问题")
         for q in QUICK_QUESTIONS:
@@ -550,7 +573,7 @@ def _render_chat_workspace():
 def _render_conversation(mode, use_stream, *, embedded=False):
     if not embedded:
         _render_approvals()
-    _render_jobs()
+        _render_jobs()
     _render_submission_recovery()
 
     if "messages" not in st.session_state:
@@ -559,15 +582,20 @@ def _render_conversation(mode, use_stream, *, embedded=False):
         import uuid
         st.session_state["session_id"] = str(uuid.uuid4())
 
+    busy = False
+    if embedded:
+        from frontend.agent_activity import render_agent_activity
+        busy = render_agent_activity(st, _get, _post)
+
     if not embedded:
         _render_history_tools()
 
-    history = st.container(height=280, border=False, key='mail_agent_history') if embedded else st.container()
+    history = st.container(key='assistant_history') if embedded else st.container()
 
     # Render history
     for message_index, msg in enumerate(st.session_state["messages"]):
         with history, st.chat_message(msg["role"]):
-            if msg.get("intent"):
+            if msg.get("intent") and not embedded:
                 st.caption(f"意图识别：{INTENT_LABELS.get(msg['intent'], msg['intent'])}")
             st.markdown(msg["content"])
 
@@ -577,15 +605,16 @@ def _render_conversation(mode, use_stream, *, embedded=False):
             _render_metadata(msg.get("extra_metadata"))
 
     if embedded and not st.session_state['messages']:
-        with history:
-            st.markdown('**你好，我在这里。**')
-            st.write('你可以直接和我对话，或让我检索、总结已经导入的问答资料。')
-            st.caption('当前阅读的邮件不会成为对话上下文。真实邮件请使用左侧的本地搜索。')
+        with history, st.container(key='assistant_welcome'):
+            st.subheader('你好，想聊点什么？')
+            st.write('在下方输入问题。想先看邮件，也可以直接打开邮箱。')
+            st.button('查看我的邮件' if mail_accounts else '连接我的邮箱', type='primary',
+                      on_click=_open_workspace, args=('我的邮箱' if mail_accounts else '同步与设置',))
 
     # Handle pending quick query
     pending = st.session_state.pop("pending_query", None)
-    user_input = st.chat_input("和 Agent 说点什么…" if embedded else
-                               "针对问答资料提问，例如：总结项目进展", key='agent_chat_input') or pending
+    user_input = st.chat_input("输入你想问的问题…" if embedded else
+                               "针对问答资料提问，例如：总结项目进展", key='agent_chat_input', disabled=busy) or pending
 
     if user_input:
         session_id = st.session_state["session_id"]
@@ -638,7 +667,8 @@ def _render_conversation(mode, use_stream, *, embedded=False):
                             if "intent" in token_data:
                                 intent_value = token_data["intent"]
                                 label = INTENT_LABELS.get(intent_value, intent_value)
-                                intent_caption.caption(f"意图识别：{label}")
+                                if not embedded:
+                                    intent_caption.caption(f"意图识别：{label}")
                             elif "token" in token_data:
                                 full_answer += token_data["token"]
                                 answer_placeholder.markdown(full_answer + "▌")
@@ -657,7 +687,9 @@ def _render_conversation(mode, use_stream, *, embedded=False):
                         if not result.get('error'):
                             st.session_state.pop('unconfirmed_submission',None)
                             st.session_state['job_submitted'] = True
-                            st.info(f"任务已建立：{result['id']}。可在任务进度中停止或查看结果。")
+                            st.session_state.setdefault('agent_job_by_session', {})[session_id] = result['id']
+                            st.info('助手正在处理，完成后会在对话中显示结果。' if embedded else
+                                    f"任务已建立：{result['id']}。可在任务进度中停止或查看结果。")
                             result = {'_queued':True}
                     else:
                         result = _post(endpoint, payload)
@@ -678,7 +710,7 @@ def _render_conversation(mode, use_stream, *, embedded=False):
                 # 流式模式：placeholder 已渲染答案 + intent caption，跳过下面的重复渲染；
                 # 非流式模式：在这里渲染 caption 和答案。
                 if not result.get("_streamed"):
-                    if intent:
+                    if intent and not embedded:
                         st.caption(f"意图识别：{INTENT_LABELS.get(intent, intent)}")
                     st.markdown(answer)
 
@@ -706,10 +738,13 @@ accounts_response = _get('/mailboxes')
 mail_accounts = (accounts_response or {}).get('accounts',[])
 with st.sidebar:
     render_brand(st)
+    st.button('＋ 新对话', on_click=_new_conversation, use_container_width=True)
     with st.container(key='mail_nav'):
-        workspace_page = st.radio('工作区',['我的邮箱','同步与设置','问答工作台'],key='workspace_page',label_visibility='collapsed')
+        workspace_page = st.radio('工作区',['问答工作台','我的邮箱','同步与设置'],
+            format_func={'问答工作台':'助手对话','我的邮箱':'查看邮件','同步与设置':'邮箱设置'}.get,
+            key='workspace_page',label_visibility='collapsed')
     st.divider()
-    st.caption('已连接邮箱')
+    st.caption('当前邮箱')
     if mail_accounts:
         account_ids = [row['id'] for row in mail_accounts]
         saved_account = st.session_state.get('mail_account_id')
@@ -725,19 +760,17 @@ with st.sidebar:
         st.session_state['mail_account_id'] = selected_account
         current_account = next(row for row in mail_accounts if row['id']==selected_account)
         provider_name = {'163':'网易163','qq':'QQ邮箱'}.get(current_account.get('provider'),current_account.get('provider','邮箱'))
-        st.caption(provider_name+' · 本地收取')
+        st.caption(provider_name+' · 已连接')
         st.text(current_account.get('address',''))
     else:
         selected_account = None
         st.caption('还没有连接账号' if accounts_response is not None else '暂时无法读取账号')
     def open_mail_settings():
         st.session_state['workspace_page'] = '同步与设置'
-    st.button('管理 / 添加邮箱',on_click=open_mail_settings,use_container_width=True)
+    st.button('添加 / 管理邮箱',on_click=open_mail_settings,use_container_width=True)
     st.divider()
     health = _get('/health')
-    st.caption('● 本地服务在线' if health else '本地服务未连接，请先启动服务')
-    st.caption('阅读与搜索仅在本机处理')
-    st.caption('更多邮箱服务将陆续接入')
+    st.caption('● 服务正常' if health else '服务未连接，请先启动服务')
 
 def _render_mail_page():
     if accounts_response is None:
@@ -749,16 +782,17 @@ def _render_mail_page():
 
 
 if workspace_page == '问答工作台':
-    _render_chat_workspace()
+    if st.session_state.get('advanced_chat'):
+        st.button('返回助手对话', on_click=_open_chat_workspace)
+        _render_chat_workspace()
+    else:
+        _render_agent_panel()
 elif workspace_page == '我的邮箱':
-    with st.container(key='mail_workspace'):
-        mail, agent = st.columns([.68, .32], gap='medium')
-        with mail:
-            _render_mail_page()
-        with agent:
-            _render_agent_panel()
+    _render_mail_page()
 else:
     _render_mail_page()
     if workspace_page == '同步与设置':
-        st.checkbox('显示后台任务',key='show_jobs')
-        _render_jobs()
+        with st.expander('后台任务与高级工具', expanded=False):
+            _render_job_toggle()
+            _render_jobs()
+            st.button('打开高级工具', on_click=_open_advanced_chat)

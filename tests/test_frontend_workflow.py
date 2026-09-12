@@ -22,14 +22,15 @@ def get(url,**kwargs):
     return response({'sessions':[],'facts':[],'turns':[],'approvals':[]})
 
 
-@pytest.mark.parametrize('workspace', ['问答工作台', '我的邮箱'])
-def test_normal_chat_renders_response_without_uninitialized_result(workspace):
+@pytest.mark.parametrize('advanced', [False, True])
+def test_normal_chat_renders_response_without_uninitialized_result(advanced):
     path=Path(__file__).resolve().parents[1]/'frontend'/'app.py'
     with patch('requests.get',side_effect=get),patch('requests.post',return_value=response({
         'answer':'synthetic answer','intent':'general','sources':[],
         'metadata':{'status':'incomplete','completion_status':'incomplete','finish_reason':'length'}})):
         app=st_testing.AppTest.from_file(str(path),default_timeout=15)
-        app.session_state['workspace_page']=workspace
+        app.session_state['workspace_page']='问答工作台'
+        app.session_state['advanced_chat']=advanced
         app.run()
         assert not app.exception
         app.chat_input[0].set_value('hello').run()
@@ -38,13 +39,14 @@ def test_normal_chat_renders_response_without_uninitialized_result(workspace):
         assert any('incomplete' in str(element.value) for element in app.warning)
 
 
-@pytest.mark.parametrize('workspace', ['问答工作台', '我的邮箱'])
-def test_agent_submission_can_enable_jobs_after_sidebar_widgets_exist(workspace):
+@pytest.mark.parametrize('advanced', [False, True])
+def test_agent_submission_can_enable_jobs_after_sidebar_widgets_exist(advanced):
     path=Path(__file__).resolve().parents[1]/'frontend'/'app.py'
     with patch('requests.get',side_effect=get),patch('requests.post',return_value=response({
         'id':'job-synthetic','kind':'agent','status':'queued','resumable':False})):
         app=st_testing.AppTest.from_file(str(path),default_timeout=15)
-        app.session_state['workspace_page']=workspace
+        app.session_state['workspace_page']='问答工作台'
+        app.session_state['advanced_chat']=advanced
         app.run()
         # The mode control belongs to the sidebar; use its actual options.
         control=next(item for item in app.radio if any(str(option).startswith('Agent') for option in item.options))
@@ -52,6 +54,36 @@ def test_agent_submission_can_enable_jobs_after_sidebar_widgets_exist(workspace)
         app.chat_input[0].set_value('draft a reply').run()
         assert not app.exception
         assert app.session_state['job_submitted'] is True
+
+
+@pytest.mark.parametrize('action', ['检查上次任务状态', '使用原操作标识重试提交'])
+def test_recovered_submission_returns_answer_to_the_original_conversation(action):
+    path = Path(__file__).resolve().parents[1]/'frontend'/'app.py'
+    pending = {'session_id':'recovered-session', 'operation_key':'original-operation', 'query':'合成请求'}
+    job = {'id':'recovered-job', 'kind':'agent', 'status':'succeeded',
+           'result':{'answer':'恢复后的合成回答', 'metadata':{'session_id':'recovered-session'}}}
+    def job_get(url, **kwargs):
+        if '/jobs/' in url:
+            return response(job)
+        return get(url, **kwargs)
+    with patch('requests.get', side_effect=job_get), patch('requests.post', return_value=response(job)) as post:
+        app = st_testing.AppTest.from_file(str(path), default_timeout=15)
+        app.session_state['session_id'] = pending['session_id']
+        app.session_state['messages'] = [{'role':'user', 'content':pending['query']}]
+        app.session_state['unconfirmed_submission'] = pending
+        app.run()
+        assert not app.exception
+        next(item for item in app.button if item.label == action).click().run()
+        app.run()
+        assert not app.exception
+        assert app.session_state['agent_job_by_session'][pending['session_id']] == job['id']
+        assert [item['content'] for item in app.session_state['messages']] == ['合成请求', '恢复后的合成回答']
+        assert not app.chat_input[0].disabled
+        if action == '检查上次任务状态':
+            post.assert_not_called()
+        else:
+            post.assert_called_once()
+            assert post.call_args.kwargs['json'] == pending
 
 
 @pytest.mark.parametrize('binding, expected', [
@@ -72,6 +104,7 @@ def test_approval_displays_bound_destination_without_execution(binding, expected
     with patch('requests.get', side_effect=approvals_get), patch('requests.post') as post:
         app = st_testing.AppTest.from_file(str(path), default_timeout=15)
         app.session_state['workspace_page'] = '问答工作台'
+        app.session_state['advanced_chat'] = True
         app.run()
         next(box for box in app.checkbox if box.label == '加载审批待办').check().run()
         assert not app.exception
@@ -96,6 +129,7 @@ def test_saved_sessions_and_jobs_can_reach_later_pages():
     with patch('requests.get',side_effect=paged_get):
         app=st_testing.AppTest.from_file(str(path),default_timeout=15)
         app.session_state['workspace_page']='问答工作台'
+        app.session_state['advanced_chat'] = True
         app.run()
         next(box for box in app.checkbox if box.label=='查看已保存会话').check().run()
         next(button for button in app.button if button.label=='下一页会话').click().run()
@@ -126,6 +160,7 @@ def test_exact_evidence_reread_displays_original_and_table_context():
     with patch('requests.get',side_effect=get),patch('requests.post',side_effect=post):
         app=st_testing.AppTest.from_file(str(path),default_timeout=15)
         app.session_state['workspace_page']='问答工作台'
+        app.session_state['advanced_chat'] = True
         app.run()
         app.chat_input[0].set_value('fixture').run()
         # Once persisted in UI history, its stable widget key owns the read.
