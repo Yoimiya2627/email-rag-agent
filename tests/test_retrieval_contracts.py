@@ -165,7 +165,8 @@ class RetrievalContracts(unittest.TestCase):
         with patch.object(graph, "generate_answer", return_value="no evidence") as generate:
             graph.node_generate(state)
         self.assertEqual(generate.call_args.args[1], [])
-        with patch.object(graph, "get_graph", return_value=SimpleNamespace(invoke=lambda _: state)):
+        with patch.object(graph, "get_graph", return_value=SimpleNamespace(invoke=lambda _: state)), \
+             patch.object(coordinator, 'classify_intent', return_value='retrieve'):
             response = graph.run_graph(AgentRequest(query="q"))
         self.assertEqual(response.sources, [])
         self.assertFalse(response.metadata["grounded"])

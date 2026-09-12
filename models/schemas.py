@@ -1,6 +1,6 @@
 from __future__ import annotations
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Literal
+from pydantic import AfterValidator, BaseModel, Field
+from typing import Annotated, Optional, List, Dict, Any, Literal
 from enum import Enum
 
 
@@ -52,8 +52,17 @@ class IntentType(str, Enum):
     GENERAL = "general"
 
 
+def _nonblank_query(value: str) -> str:
+    if not value.strip():
+        raise ValueError("query must contain non-whitespace text")
+    return value
+
+
+QueryText = Annotated[str, Field(min_length=1, max_length=20000), AfterValidator(_nonblank_query)]
+
+
 class AgentRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=20000)
+    query: QueryText
     user_email: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
     session_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
@@ -79,7 +88,7 @@ class IndexResponse(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=20000)
+    query: QueryText
     top_k: int = Field(default=5, ge=1, le=100)
 
 

@@ -24,9 +24,9 @@ from core.pipeline import retrieve, extract_filters
 from core.memory import build_model_messages
 from core.generator import generate_answer, build_context
 from core.evidence import evidence_text
-from core.model_outcomes import outcome_metadata
+from core.model_outcomes import outcome_metadata, text_from_choice
 from agents.runtime import remaining_timeout
-from models.schemas import AgentRequest, AgentResponse, SearchResult
+from models.schemas import AgentRequest, AgentResponse, SearchResult, IntentType
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +84,10 @@ def node_rewrite(state: RAGState) -> RAGState:
             max_tokens=1500,
             timeout=remaining_timeout(cfg.LLM_TIMEOUT),
         )
-        choice = resp.choices[0]
-        rewritten = (choice.message.content or "").strip()
-        state["rewritten_query"] = rewritten or query
+        rewritten = text_from_choice(resp.choices[0] if resp.choices else None)
+        if rewritten.completion_status != 'complete':
+            raise ValueError('Rewrite response is not complete final content')
+        state["rewritten_query"] = str(rewritten)
     except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
@@ -136,14 +137,10 @@ def node_grade_contexts(state: RAGState) -> RAGState:
             max_tokens=1500,
             timeout=remaining_timeout(cfg.LLM_TIMEOUT),
         )
-        choice = resp.choices[0]
-        raw = (choice.message.content or "").strip()
-        if not raw:
-            rc = getattr(choice.message, "reasoning_content", None) or ""
-            if rc and "[" in rc and "]" in rc:
-                raw = rc
-            else:
-                raise ValueError(f"Empty grade response (finish_reason={choice.finish_reason!r})")
+        final_text = text_from_choice(resp.choices[0] if resp.choices else None)
+        if final_text.completion_status != 'complete':
+            raise ValueError('Grade response is not complete final content')
+        raw = str(final_text)
         if "```" in raw:
             raw = raw.split("```")[1].lstrip("json").strip()
         s, e = raw.find("["), raw.rfind("]") + 1
@@ -236,7 +233,17 @@ def get_graph():
 
 def run_graph(request: AgentRequest, memory=None) -> AgentResponse:
     """Run Self-RAG workflow and return AgentResponse."""
+    from agents.general_agent import direct_general_response, GeneralAgent
+    from agents.coordinator import classify_intent
+    remaining_timeout(cfg.LLM_TIMEOUT)
+    direct = direct_general_response(request.query)
+    if direct is not None:
+        return direct
     history = memory.to_messages() if memory else None
+    intent = classify_intent(request.query, history=history)
+    remaining_timeout(cfg.LLM_TIMEOUT)
+    if intent == IntentType.GENERAL:
+        return GeneralAgent().run(request, memory=memory)
     state: RAGState = {
         "query": request.query,
         "rewritten_query": "",

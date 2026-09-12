@@ -164,6 +164,19 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
                  tool_backend=cfg.AGENT_TOOL_BACKEND)
     with use_run_context(context):
         try:
+            # Deterministic greetings bypass planning only for a fresh run.
+            # Identity setup above and the cancellation/deadline check still
+            # apply; restored checkpoints must retain their recovery contract.
+            remaining_timeout(cfg.LLM_TIMEOUT)
+            if checkpoint is None:
+                from agents.general_agent import direct_general_response
+                direct = direct_general_response(request.query)
+                if direct is not None:
+                    answer = direct.answer
+                    status = 'success'
+                    result = _response(answer, context, steps, trace.trace_id, status, direct.metadata)
+                    result.intent = direct.intent
+                    return result
             from core.session_context import apply_session_context, context_for_stage
             context.task_context = context_for_stage(context.task_context, "agent_plan",
                 model=cfg.AGENT_PLANNER_MODEL, model_revision=getattr(cfg,"MODEL_REVISION",None))

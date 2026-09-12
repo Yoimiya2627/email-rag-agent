@@ -171,8 +171,13 @@ class JobStore:
         if status not in {'succeeded','incomplete','cancelled','failed'}:
             raise ValueError('Invalid terminal status')
         encoded = _encode(result) if result is not None else None
+        completed_checkpoint = (_encode({'safe': True, 'kind': 'completed_result', 'result': result})
+                                if status == 'succeeded' else None)
         with self._db() as db:
-            db.execute("UPDATE jobs SET status=?,result=?,error_code=?,updated=? WHERE id=? AND owner=? AND status='running'", (status, encoded, error_code, time.time(), job_id, owner))
+            # Publish the completed result and its recovery boundary together.
+            # A separate checkpoint write could fail after the runner committed
+            # its transcript and leave an older planning checkpoint replayable.
+            db.execute("UPDATE jobs SET status=?,result=?,checkpoint=COALESCE(?,checkpoint),error_code=?,updated=? WHERE id=? AND owner=? AND status='running'", (status, encoded, completed_checkpoint, error_code, time.time(), job_id, owner))
 
     def cancel(self, owner, job_id):
         self.get(owner, job_id)
@@ -289,8 +294,6 @@ class JobManager:
             complete = metadata.get('status') in {'success','approval_required'} and metadata.get('completion_status','complete')=='complete'
             status = ('succeeded' if complete else 'cancelled' if event.is_set() else
                       'succeeded' if metadata.get('status','success') in {'success','approval_required'} else 'incomplete')
-            if status=='succeeded':
-                self.store.checkpoint(owner,job_id,{'safe':True,'kind':'completed_result','result':result})
             self.store.finish(owner,job_id,status,result=result)
         except Exception as exc:
             # Store only a type code. The API maps it to a safe recovery message.

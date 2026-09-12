@@ -23,6 +23,7 @@ from core.chunker import chunk_email
 from core.embedder import index_chunks, clear_collection, get_collection_stats, verify_collection_readiness
 from core.storage_paths import validate_chroma_path
 from agents.coordinator import route
+from agents.general_agent import direct_general_response
 from agents.approvals import ApprovalStore
 from agents.mail_providers import MailProviderError, create_mail_provider_from_settings
 from agents.mcp_adapter import MCPAuditLogger
@@ -327,9 +328,12 @@ def _chat_turn(request, identity, runner, *, context=None, admitted=False):
         failure = None
         with (nullcontext() if admitted else admission.slot()), use_execution_scope(scope), use_run_context(context), sessions.turn(identity.owner_id, session_id) as memory:
             try:
-                _prepare_session_context(identity.owner_id,session_id,request.query,memory,context,scope)
                 remaining_timeout(cfg.LLM_TIMEOUT)
-                response = finalize_response(runner(request, memory))
+                direct = None if context.resuming else direct_general_response(request.query)
+                if direct is None:
+                    _prepare_session_context(identity.owner_id,session_id,request.query,memory,context,scope)
+                    remaining_timeout(cfg.LLM_TIMEOUT)
+                response = finalize_response(direct if direct is not None else runner(request, memory))
                 if context.cancel_event is not None and context.cancel_event.is_set():
                     response.metadata.update(status='cancelled', completion_status='incomplete')
             except Exception as exc:
@@ -337,7 +341,7 @@ def _chat_turn(request, identity, runner, *, context=None, admitted=False):
                 response = AgentResponse(answer=str(getattr(exc,'partial_text','')),
                     metadata=getattr(exc,'metadata',None) or {'status':'cancelled' if isinstance(exc,RunCancelled) else 'error','completion_status':'error'})
             response.metadata = {**(response.metadata or {}), 'session_id':session_id,'run_id':response.metadata.get('run_id',context.run_id)}
-            response.metadata['session_context'] = {key:value for key,value in context.task_context.items() if key!='text'}
+            response.metadata['session_context'] = {key:value for key,value in (context.task_context or {}).items() if key!='text'}
             response.metadata.setdefault('context_metrics',dict(context.context_metrics))
             response.metadata['model_usage'] = model_metrics_snapshot(context)
             refs = _recorded_evidence(response.metadata,context,response.answer)
@@ -407,13 +411,18 @@ async def chat_stream(request: AgentRequest, identity: Identity = Depends(requir
                 answer, sources, error = '', [], None
                 metadata = {'status':'incomplete','completion_status':'incomplete'}
                 try:
-                    _prepare_session_context(identity.owner_id,session_id,request.query,memory,context,scope)
-                    history = memory.to_messages()
                     remaining_timeout(cfg.LLM_TIMEOUT)
-                    intent = classify_intent(request.query, history=history)
+                    direct = direct_general_response(request.query)
+                    if direct is None:
+                        _prepare_session_context(identity.owner_id,session_id,request.query,memory,context,scope)
+                        history = memory.to_messages()
+                        remaining_timeout(cfg.LLM_TIMEOUT)
+                        intent = classify_intent(request.query, history=history)
+                    else:
+                        intent = direct.intent
                     if not emit({'intent': intent.value, 'session_id': session_id}):
                         return
-                    if intent in (IntentType.RETRIEVE, IntentType.GENERAL):
+                    if intent == IntentType.RETRIEVE:
                         contexts = retrieve(request.query, history=history)
                         sources = [item.model_dump() for item in contexts]
                         remaining_timeout(cfg.LLM_TIMEOUT)
@@ -430,7 +439,7 @@ async def chat_stream(request: AgentRequest, identity: Identity = Depends(requir
                         metadata = outcome_metadata(answer)
                     else:
                         remaining_timeout(cfg.LLM_TIMEOUT)
-                        response = finalize_response(route(request,memory=memory,intent=intent))
+                        response = finalize_response(direct if direct is not None else route(request,memory=memory,intent=intent))
                         answer, metadata = response.answer,response.metadata
                         sources = [item.model_dump() for item in response.sources]
                         if not emit({'token':answer}):
@@ -447,7 +456,7 @@ async def chat_stream(request: AgentRequest, identity: Identity = Depends(requir
                     refs = _recorded_evidence(metadata,context,answer)
                     metadata.update(session_id=session_id,run_id=context.run_id)
                     metadata.update(context_metrics=dict(context.context_metrics),model_usage=model_metrics_snapshot(context))
-                    metadata['session_context'] = {key:value for key,value in context.task_context.items() if key!='text'}
+                    metadata['session_context'] = {key:value for key,value in (context.task_context or {}).items() if key!='text'}
                     turn_id = memory.append_turn(request.query,answer,metadata,
                         include_in_context=can_commit_answer(answer,metadata),evidence_refs=refs)
                     metadata['turn_id'] = turn_id

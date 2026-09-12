@@ -13,6 +13,8 @@ from core.memory import build_model_messages
 from agents.runtime import remaining_timeout, RunCancelled, ContextBudgetExceeded
 
 from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
+from core.model_outcomes import text_from_choice
+from agents.general_agent import GeneralAgent, direct_general_response
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,10 @@ _INTENT_SYSTEM = """你是一个邮件助手的任务协调器，负责分析用
 - summarize：用户想获得邮件摘要或综述（如"总结最近邮件"、"X话题都讨论了什么"）
 - write_reply：用户想要回复邮件或起草回信（如"帮我回复这封邮件"、"写一封拒绝邮件"）
 - analyze：用户想要统计或数据分析（如"谁发邮件最多"、"标签分布"、"每日邮件量"）
-- general：其他一般性问题
+- general：问候、致谢、助手使用说明，或尚未说明具体邮件任务、需要澄清的输入；不需要检索邮箱
+
+只根据当前消息判断是否提出邮件任务。历史仅用于理解明确的追问，不要把独立的问候或致谢当成继续处理历史邮件。
+问候与明确任务同时出现（如“你好，帮我找一下报价邮件”）时，按具体邮件任务分类。
 
 返回格式（严格JSON）：{"intent": "<类型>", "reason": "<简短判断理由>"}"""
 
@@ -37,6 +42,9 @@ def _get_client() -> OpenAI:
 
 
 def classify_intent(query: str, history=None) -> IntentType:
+    remaining_timeout(cfg.LLM_TIMEOUT)
+    if direct_general_response(query) is not None:
+        return IntentType.GENERAL
     messages = build_model_messages(_INTENT_SYSTEM, query, history, stage="intent", model=cfg.DEEPSEEK_MODEL, model_revision=getattr(cfg, "MODEL_REVISION", None), max_output_tokens=1500)
     try:
         resp = create_completion(_get_client(), stage="intent",
@@ -47,14 +55,10 @@ def classify_intent(query: str, history=None) -> IntentType:
             max_tokens=1500,
             timeout=remaining_timeout(cfg.LLM_TIMEOUT),
         )
-        choice = resp.choices[0]
-        raw = (choice.message.content or "").strip()
-        if not raw:
-            rc = getattr(choice.message, "reasoning_content", None) or ""
-            if rc and "{" in rc and "}" in rc:
-                raw = rc
-            else:
-                raise ValueError(f"Empty intent response (finish_reason={choice.finish_reason!r})")
+        choice = text_from_choice(resp.choices[0] if resp.choices else None)
+        if choice.completion_status != "complete":
+            raise ValueError("Incomplete intent response")
+        raw = str(choice)
         if "```" in raw:
             raw = raw.split("```")[1].lstrip("json").strip()
         s, e = raw.find("{"), raw.rfind("}") + 1
@@ -87,7 +91,7 @@ def route(request: AgentRequest, memory=None, *, intent: IntentType | None = Non
         IntentType.SUMMARIZE: SummarizerAgent,
         IntentType.WRITE_REPLY: WriterAgent,
         IntentType.ANALYZE: AnalyzerAgent,
-        IntentType.GENERAL: RetrieverAgent,
+        IntentType.GENERAL: GeneralAgent,
     }
     agent = agent_map[intent]()
     response = agent.run(request, memory=memory)

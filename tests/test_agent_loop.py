@@ -47,7 +47,7 @@ def test_loop_returns_immediately_when_no_tool_calls(monkeypatch):
     client = _ScriptedClient([_response(content="直接回答")])
     _use_client(monkeypatch, client)
 
-    out = run_agent_loop(AgentRequest(query="你好"))
+    out = run_agent_loop(AgentRequest(query="帮我核对邮件内容"))
     assert out.answer == "直接回答"
     assert out.metadata["steps"] == []
     assert len(client.calls) == 1
@@ -103,7 +103,7 @@ def test_loop_passes_tool_schemas(monkeypatch):
     client = _ScriptedClient([_response(content="ok")])
     _use_client(monkeypatch, client)
 
-    run_agent_loop(AgentRequest(query="hi"))
+    run_agent_loop(AgentRequest(query="search the project emails"))
     assert client.calls[0]["tools"] is loop_mod.TOOL_SCHEMAS
 
 

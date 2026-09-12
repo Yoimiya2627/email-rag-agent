@@ -240,7 +240,7 @@ def test_real_graph_and_sse_model_boundaries_retain_constraint_and_commit(fixtur
         stages={'intent','stream_generate'}
     else:
         assert response.json()['answer']=='合成回答'
-        metadata=response.json()['metadata'];stages={'rewrite','graph_grade','generate'}
+        metadata=response.json()['metadata'];stages={'intent','rewrite','graph_grade','generate'}
     assert {call['stage'] for call in metadata['model_usage']['calls']}==stages
     assert metadata['completion_status']=='complete'
     assert metadata['model_usage']['actual_total_tokens']==120*len(stages)

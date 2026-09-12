@@ -412,7 +412,7 @@ INTENT_LABELS = {
     "summarize": "📝 摘要",
     "write_reply": "✉️ 回复草稿",
     "analyze": "📊 统计分析",
-    "general": "💬 问答",
+    "general": "💬 对话 / 需求澄清",
 }
 
 QUICK_QUESTIONS = [

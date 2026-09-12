@@ -204,7 +204,8 @@ class ResolvedQueryTests(unittest.TestCase):
         with patch.object(graph,'generate_answer',return_value=ModelText('partial',completion_status='incomplete',finish_reason='length')):
             graph.node_generate(state)
         state['answer']=str(state['answer'])
-        with patch.object(graph,'get_graph',return_value=SimpleNamespace(invoke=lambda _:state)):
+        with patch.object(graph,'get_graph',return_value=SimpleNamespace(invoke=lambda _:state)), \
+             patch('agents.coordinator.classify_intent',return_value='retrieve'):
             response=graph.run_graph(AgentRequest(query='q'))
         self.assertEqual(response.metadata['completion_status'],'incomplete')
         self.assertEqual(response.metadata['finish_reason'],'length')
