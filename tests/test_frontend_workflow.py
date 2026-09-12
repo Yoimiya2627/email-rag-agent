@@ -22,13 +22,14 @@ def get(url,**kwargs):
     return response({'sessions':[],'facts':[],'turns':[],'approvals':[]})
 
 
-def test_normal_chat_renders_response_without_uninitialized_result():
+@pytest.mark.parametrize('workspace', ['问答工作台', '我的邮箱'])
+def test_normal_chat_renders_response_without_uninitialized_result(workspace):
     path=Path(__file__).resolve().parents[1]/'frontend'/'app.py'
     with patch('requests.get',side_effect=get),patch('requests.post',return_value=response({
         'answer':'synthetic answer','intent':'general','sources':[],
         'metadata':{'status':'incomplete','completion_status':'incomplete','finish_reason':'length'}})):
         app=st_testing.AppTest.from_file(str(path),default_timeout=15)
-        app.session_state['workspace_page']='问答工作台'
+        app.session_state['workspace_page']=workspace
         app.run()
         assert not app.exception
         app.chat_input[0].set_value('hello').run()
@@ -37,12 +38,13 @@ def test_normal_chat_renders_response_without_uninitialized_result():
         assert any('incomplete' in str(element.value) for element in app.warning)
 
 
-def test_agent_submission_can_enable_jobs_after_sidebar_widgets_exist():
+@pytest.mark.parametrize('workspace', ['问答工作台', '我的邮箱'])
+def test_agent_submission_can_enable_jobs_after_sidebar_widgets_exist(workspace):
     path=Path(__file__).resolve().parents[1]/'frontend'/'app.py'
     with patch('requests.get',side_effect=get),patch('requests.post',return_value=response({
         'id':'job-synthetic','kind':'agent','status':'queued','resumable':False})):
         app=st_testing.AppTest.from_file(str(path),default_timeout=15)
-        app.session_state['workspace_page']='问答工作台'
+        app.session_state['workspace_page']=workspace
         app.run()
         # The mode control belongs to the sidebar; use its actual options.
         control=next(item for item in app.radio if any(str(option).startswith('Agent') for option in item.options))

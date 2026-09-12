@@ -1,6 +1,6 @@
 """Visual identity for 邮序, a local mailbox client.
 
-Plan: 240px deep-sea navigation | quiet inbox heading | 38% list / 62% reader.
+Plan: 240px deep-sea navigation | list + reader | always-open Agent conversation.
 Tokens: sea #173238, canvas #F1F5F6, paper #FFFFFF, action #0F766E,
 ink #20343B, muted #657780; rules #DCE5E8. Bahnschrift is reserved for
 headings, Segoe UI for reading, and Consolas for small utility labels.
@@ -45,7 +45,7 @@ _CSS = """
   line-height: 1.6;
 }
 [data-testid="stMainBlockContainer"] {
-  max-width: 1540px;
+  max-width: 1920px;
   padding: 4.5rem 2rem 3rem;
 }
 [data-testid="stMarkdownContainer"] p,
@@ -173,7 +173,8 @@ _CSS = """
   border-bottom: 1px solid var(--mail-rule);
 }
 .st-key-mail_list,
-.st-key-mail_reader {
+.st-key-mail_reader,
+.st-key-mail_agent {
   min-width: 0;
   padding: 1.1rem 1.15rem;
   border: 1px solid var(--mail-rule);
@@ -183,6 +184,16 @@ _CSS = """
 }
 .st-key-mail_list { border-top: 3px solid var(--mail-action); }
 .st-key-mail_reader { padding: 1.25rem 1.5rem; }
+.st-key-mail_agent { border-top: 3px solid var(--mail-action); padding: 1.1rem; }
+.st-key-mail_agent [data-testid="stChatMessage"] { padding: .7rem; min-width: 0; }
+.st-key-mail_agent [data-testid="stChatMessageContent"] { min-width: 0; overflow-wrap: anywhere; }
+.st-key-mail_agent [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p { font-size: 14px; }
+.st-key-mail_agent [data-testid="stChatInput"] { border: 1px solid var(--mail-action); border-radius: 8px; }
+.st-key-mail_agent [data-testid="stChatInput"] textarea { font-family: var(--mail-body-font); font-size: 14px; }
+.st-key-mail_agent [data-testid="stAlert"] { padding: .65rem .8rem; }
+.st-key-mail_agent [data-testid="stCaptionContainer"] p { font-size: 12px; }
+.st-key-mail_agent_history { border-top: 1px solid var(--mail-rule); padding-top: .8rem; }
+.st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"] { min-width: 0; }
 .mail-body { white-space: pre-wrap; overflow-wrap: anywhere; font: 15px/1.9 var(--mail-body-font); color: var(--mail-ink); }
 .mail-address { overflow-wrap: anywhere; color: var(--mail-muted); font: 13px/1.6 var(--mail-body-font); }
 .mail-address b { font-weight: 500; display: inline-block; min-width: 54px; }
@@ -294,6 +305,19 @@ _CSS = """
   outline-color: #A9E1D9;
 }
 
+/* On narrow screens the assistant comes first, keeping the composer discoverable. */
+@media (max-width: 1150px) {
+  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) { flex-wrap: wrap; }
+  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"] {
+    width: 100%; flex: 1 1 100%; min-width: 0;
+  }
+  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"]:first-child { order: 2; }
+  .st-key-mail_workspace [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_agent) > [data-testid="stColumn"]:last-child { order: 1; }
+  .st-key-mail_agent_history,
+  .st-key-mail_agent [data-testid="stLayoutWrapper"]:has(> .st-key-mail_agent_history) {
+    height: 190px !important; flex: 0 0 190px !important;
+  }
+}
 @media (max-width: 1000px) {
   [data-testid="stMainBlockContainer"] { padding: 4.5rem 1rem 2rem; }
   .st-key-mail_list { padding: .9rem; }

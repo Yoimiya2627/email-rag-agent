@@ -425,6 +425,45 @@ QUICK_QUESTIONS = [
 ]
 
 
+def _open_chat_workspace():
+    st.session_state['workspace_page'] = '问答工作台'
+
+
+def _save_chat_option(name, widget):
+    # Preserve the choice even when Streamlit removes widgets on the settings page.
+    st.session_state[name] = st.session_state[widget]
+
+
+def _render_chat_options():
+    mode = st.radio(
+        '问答模式', ['普通（多 Agent 路由）', 'Self-RAG（反思工作流）', 'Agent（自主工具调用）'],
+        index=['普通（多 Agent 路由）', 'Self-RAG（反思工作流）', 'Agent（自主工具调用）'].index(
+            st.session_state.get('chat_mode_value', '普通（多 Agent 路由）')),
+        key='chat_mode_picker', on_change=_save_chat_option,
+        args=('chat_mode_value', 'chat_mode_picker'),
+        help='普通模式按需求选择助手；Self-RAG 复核检索结果；Agent 自主规划并调用工具。',
+    )
+    use_stream = st.toggle(
+        '流式输出', value=st.session_state.get('chat_stream_value', False), key='chat_stream_picker',
+        on_change=_save_chat_option, args=('chat_stream_value', 'chat_stream_picker'),
+        help='仅普通模式支持逐字输出。',
+    )
+    return mode, use_stream
+
+
+def _render_agent_panel():
+    with st.container(key='mail_agent'):
+        st.subheader('Agent 邮件助手')
+        st.caption('对话资料：独立问答资料 · 与问答工作台共用会话')
+        st.info('真实邮箱尚未接入对话；左侧邮件不会自动发送给模型。')
+        st.button('展开问答工作台', on_click=_open_chat_workspace, use_container_width=True)
+        with st.expander('会话与模式'):
+            _render_session_controls()
+            mode, use_stream = _render_chat_options()
+            st.checkbox('显示后台任务', key='show_jobs')
+        _render_conversation(mode, use_stream, embedded=True)
+
+
 def _render_chat_workspace():
     st.title('问答工作台')
     st.caption('针对导入的问答资料，检索、总结或起草回复。')
@@ -490,16 +529,7 @@ def _render_chat_workspace():
 
         st.divider()
         st.subheader("⚙️ 模式")
-        mode = st.radio(
-            "问答模式",
-            ["普通（多 Agent 路由）", "Self-RAG（反思工作流）", "Agent（自主工具调用）"],
-            help=(
-                "普通=意图路由到专家 agent；"
-                "Self-RAG=LangGraph 反思重试；"
-                "Agent=function-calling 自主规划并多轮调用工具"
-            ),
-        )
-        use_stream = st.toggle("流式输出", value=False, help="SSE 流式返回 token（仅普通模式）")
+        mode, use_stream = _render_chat_options()
 
         st.divider()
         if st.button("🗑️ 清空对话", use_container_width=True):
@@ -514,9 +544,12 @@ def _render_chat_workspace():
             except Exception:
                 st.error('清空失败，可能仍有任务在执行；保留当前对话，请稍后重试。')
 
-    # ── main chat area ────────────────────────────────────────────────────────────
+    _render_conversation(mode, use_stream)
 
-    _render_approvals()
+
+def _render_conversation(mode, use_stream, *, embedded=False):
+    if not embedded:
+        _render_approvals()
     _render_jobs()
     _render_submission_recovery()
 
@@ -526,11 +559,14 @@ def _render_chat_workspace():
         import uuid
         st.session_state["session_id"] = str(uuid.uuid4())
 
-    _render_history_tools()
+    if not embedded:
+        _render_history_tools()
+
+    history = st.container(height=280, border=False, key='mail_agent_history') if embedded else st.container()
 
     # Render history
     for message_index, msg in enumerate(st.session_state["messages"]):
-        with st.chat_message(msg["role"]):
+        with history, st.chat_message(msg["role"]):
             if msg.get("intent"):
                 st.caption(f"意图识别：{INTENT_LABELS.get(msg['intent'], msg['intent'])}")
             st.markdown(msg["content"])
@@ -540,14 +576,21 @@ def _render_chat_workspace():
 
             _render_metadata(msg.get("extra_metadata"))
 
+    if embedded and not st.session_state['messages']:
+        with history:
+            st.markdown('**你好，我在这里。**')
+            st.write('你可以直接和我对话，或让我检索、总结已经导入的问答资料。')
+            st.caption('当前阅读的邮件不会成为对话上下文。真实邮件请使用左侧的本地搜索。')
+
     # Handle pending quick query
     pending = st.session_state.pop("pending_query", None)
-    user_input = st.chat_input("针对问答资料提问，例如：总结项目进展") or pending
+    user_input = st.chat_input("和 Agent 说点什么…" if embedded else
+                               "针对问答资料提问，例如：总结项目进展", key='agent_chat_input') or pending
 
     if user_input:
         session_id = st.session_state["session_id"]
         # Show user bubble
-        with st.chat_message("user"):
+        with history, st.chat_message("user"):
             st.markdown(user_input)
         st.session_state["messages"].append({"role": "user", "content": user_input})
 
@@ -561,7 +604,7 @@ def _render_chat_workspace():
         else:
             endpoint = "/chat"
 
-        with st.chat_message("assistant"):
+        with history, st.chat_message("assistant"):
             if use_stream and mode.startswith("普通"):
                 # SSE streaming
                 import sseclient
@@ -696,15 +739,26 @@ with st.sidebar:
     st.caption('阅读与搜索仅在本机处理')
     st.caption('更多邮箱服务将陆续接入')
 
-if workspace_page == '问答工作台':
-    _render_chat_workspace()
-else:
+def _render_mail_page():
     if accounts_response is None:
         st.title(workspace_page)
         st.error('邮箱账号暂时无法读取，请确认本地服务正在运行后刷新。')
     else:
         render_mailboxes(st,_get,_post,view='settings' if workspace_page=='同步与设置' else 'inbox',
                          accounts=mail_accounts,account_id=selected_account)
+
+
+if workspace_page == '问答工作台':
+    _render_chat_workspace()
+elif workspace_page == '我的邮箱':
+    with st.container(key='mail_workspace'):
+        mail, agent = st.columns([.68, .32], gap='medium')
+        with mail:
+            _render_mail_page()
+        with agent:
+            _render_agent_panel()
+else:
+    _render_mail_page()
     if workspace_page == '同步与设置':
         st.checkbox('显示后台任务',key='show_jobs')
         _render_jobs()

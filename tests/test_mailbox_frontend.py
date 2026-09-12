@@ -84,7 +84,7 @@ def navigate(app, page):
     assert not app.exception
 
 
-def test_default_workspace_shows_mail_without_chat_or_demo_index():
+def test_default_workspace_shows_mail_and_agent_without_automatic_chat_or_demo_index():
     http = MailboxHTTP()
     with patch('requests.get',side_effect=http.get),patch('requests.post',side_effect=http.post):
         app = st_testing.AppTest.from_file(str(APP),default_timeout=15).run()
@@ -92,7 +92,9 @@ def test_default_workspace_shows_mail_without_chat_or_demo_index():
         assert any(item.value == '我的邮箱' for item in app.title)
         assert any(item.label == '合成邮件' for item in app.button)
         assert any('mail-body' in item.value for item in app.markdown)
-        assert not app.chat_input
+        assert len(app.chat_input) == 1
+        assert any(item.value == 'Agent 邮件助手' for item in app.subheader)
+        assert any('真实邮箱尚未接入对话' in item.value for item in app.info)
         assert not any(url.endswith('/index/status') for url,_ in http.gets)
         assert not any(item.label == '邮件数据路径' for item in app.text_input)
         assert http.posts == []
@@ -100,7 +102,70 @@ def test_default_workspace_shows_mail_without_chat_or_demo_index():
         assert len(app.chat_input) == 1
         assert any('尚未连接你的真实邮箱' in item.value for item in app.info)
         navigate(app,'我的邮箱')
-        assert not app.chat_input and http.posts == []
+        assert len(app.chat_input) == 1 and http.posts == []
+
+
+@pytest.mark.parametrize('configured', [True, False])
+def test_embedded_chat_shares_conversation_without_adding_mail_context(configured):
+    http = MailboxHTTP(configured=configured)
+    def chat_post(url, **kwargs):
+        http.posts.append((url, kwargs.get('json')))
+        assert url.endswith('/chat')
+        return response({'answer':'合成对话回复', 'intent':'general', 'sources':[]})
+
+    with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=chat_post):
+        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        assert not app.exception and http.posts == []
+        app.chat_input[0].set_value('你好').run()
+        assert not app.exception
+        assert any(item.value == '合成对话回复' for item in app.markdown)
+        assert len(http.posts) == 1
+        payload = http.posts[0][1]
+        assert set(payload) == {'query', 'session_id', 'operation_key'}
+        assert payload['query'] == '你好'
+        session_id = app.session_state['session_id']
+        messages = list(app.session_state['messages'])
+        button(app, '展开问答工作台').click().run()
+        assert not app.exception
+        assert app.session_state['workspace_page'] == '问答工作台'
+        assert app.session_state['session_id'] == session_id
+        assert app.session_state['messages'] == messages
+        navigate(app, '同步与设置')
+        navigate(app, '我的邮箱')
+        assert app.session_state['session_id'] == session_id
+        assert app.session_state['messages'] == messages
+        assert len(http.posts) == 1
+        button(app, '新会话').click().run()
+        assert not app.exception
+        assert app.session_state['session_id'] != session_id
+        assert app.session_state['messages'] == []
+        if configured:
+            assert app.session_state['mail_selected_'+ACCOUNT['id']] == 'message-1'
+
+
+def test_chat_mode_and_history_survive_account_and_workspace_switches():
+    http = MailboxHTTP()
+    second = {**ACCOUNT, 'id':'b'*32, 'address':'second@163.com', 'display_name':'第二个邮箱'}
+    http.accounts.append(second)
+    with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
+        app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
+        mode = next(item for item in app.radio if item.label == '问答模式')
+        mode.set_value('Agent（自主工具调用）').run()
+        app.toggle[0].set_value(True).run()
+        next(item for item in app.checkbox if item.label == '显示后台任务').check().run()
+        session_id = app.session_state['session_id']
+        app.session_state['messages'] = [{'role':'user', 'content':'合成历史记录'}]
+        next(item for item in app.selectbox if item.label == '当前邮箱').set_value(second['id']).run()
+        navigate(app, '同步与设置')
+        navigate(app, '问答工作台')
+        navigate(app, '我的邮箱')
+        app.run()
+        assert next(item for item in app.radio if item.label == '问答模式').value == 'Agent（自主工具调用）'
+        assert app.toggle[0].value is True
+        assert next(item for item in app.checkbox if item.label == '显示后台任务').value is True
+        assert app.session_state['session_id'] == session_id
+        assert app.session_state['messages'] == [{'role':'user', 'content':'合成历史记录'}]
+        assert http.posts == []
 
 
 def test_empty_workspace_leads_to_account_setup_without_network_actions():
@@ -267,7 +332,7 @@ def test_real_report_and_mail_html_are_displayed_safely_on_separate_pages():
     with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
         app = st_testing.AppTest.from_file(str(APP), default_timeout=15).run()
         assert not app.exception
-        assert not app.chat_input
+        assert len(app.chat_input) == 1
         assert any('mail-body' in item.value and escape(HTML) in item.value for item in app.markdown)
         attachment = next(item for item in app.text_area if item.label == '附件提取文本')
         assert attachment.value == HTML and attachment.disabled
