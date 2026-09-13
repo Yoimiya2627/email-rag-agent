@@ -325,6 +325,14 @@ def _recorded_evidence(metadata, context, answer):
     return refs
 
 
+def _direct_chat_reply(request, owner):
+    direct = direct_general_response(request.query)
+    if direct is not None:
+        return direct
+    from agents.mailbox_status_agent import direct_mailbox_status_response
+    return direct_mailbox_status_response(request, owner)
+
+
 def _chat_turn(request, identity, runner, *, context=None, admitted=False):
     session_id = request.session_id or (str(uuid.uuid5(uuid.NAMESPACE_URL,identity.owner_id+':'+request.operation_key))
         if request.operation_key else str(uuid.uuid4()))
@@ -339,7 +347,7 @@ def _chat_turn(request, identity, runner, *, context=None, admitted=False):
         with (nullcontext() if admitted else admission.slot()), use_execution_scope(scope), use_run_context(context), sessions.turn(identity.owner_id, session_id) as memory:
             try:
                 remaining_timeout(cfg.LLM_TIMEOUT)
-                direct = None if context.resuming else direct_general_response(request.query)
+                direct = None if context.resuming else _direct_chat_reply(request, identity.owner_id)
                 if direct is None:
                     _prepare_session_context(identity.owner_id,session_id,request.query,memory,context,scope)
                     remaining_timeout(cfg.LLM_TIMEOUT)
@@ -356,7 +364,8 @@ def _chat_turn(request, identity, runner, *, context=None, admitted=False):
             response.metadata['model_usage'] = model_metrics_snapshot(context)
             refs = _recorded_evidence(response.metadata,context,response.answer)
             turn_id = memory.append_turn(request.query,response.answer,response.metadata,
-                include_in_context=can_commit_answer(response.answer,response.metadata),evidence_refs=refs)
+                include_in_context=(can_commit_answer(response.answer,response.metadata)
+                                    and not response.metadata.get('exclude_from_model_context')),evidence_refs=refs)
             response.metadata['turn_id'] = turn_id
         if failure is not None:
             raise failure
@@ -422,7 +431,7 @@ async def chat_stream(request: AgentRequest, identity: Identity = Depends(requir
                 metadata = {'status':'incomplete','completion_status':'incomplete'}
                 try:
                     remaining_timeout(cfg.LLM_TIMEOUT)
-                    direct = direct_general_response(request.query)
+                    direct = _direct_chat_reply(request, identity.owner_id)
                     if direct is None:
                         _prepare_session_context(identity.owner_id,session_id,request.query,memory,context,scope)
                         history = memory.to_messages()
@@ -468,7 +477,8 @@ async def chat_stream(request: AgentRequest, identity: Identity = Depends(requir
                     metadata.update(context_metrics=dict(context.context_metrics),model_usage=model_metrics_snapshot(context))
                     metadata['session_context'] = {key:value for key,value in (context.task_context or {}).items() if key!='text'}
                     turn_id = memory.append_turn(request.query,answer,metadata,
-                        include_in_context=can_commit_answer(answer,metadata),evidence_refs=refs)
+                        include_in_context=(can_commit_answer(answer,metadata)
+                                            and not metadata.get('exclude_from_model_context')),evidence_refs=refs)
                     metadata['turn_id'] = turn_id
             event = {'sources':sources,'session_id':session_id,'metadata':metadata}
             if error:

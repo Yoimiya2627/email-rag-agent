@@ -50,6 +50,7 @@ class IntentType(str, Enum):
     WRITE_REPLY = "write_reply"
     ANALYZE = "analyze"
     GENERAL = "general"
+    MAILBOX_STATUS = "mailbox_status"
 
 
 def _nonblank_query(value: str) -> str:
@@ -67,6 +68,7 @@ class AgentRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
     session_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
     operation_key: Optional[str] = Field(default=None, min_length=1, max_length=128, pattern=r'^[A-Za-z0-9._:-]+$')
+    mailbox_account_id: Optional[str] = Field(default=None, pattern=r'^[0-9a-f]{32}$')
 
 
 class AgentResponse(BaseModel):

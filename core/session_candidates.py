@@ -53,7 +53,7 @@ def extract_candidates(repo,owner_id,session_id,*,generate,budget=None,max_attem
         task=repo._active_task(db,identity)
         rows=db.execute('''SELECT t.turn_id,t.seq,t.query FROM session_turns t JOIN context_turn_tasks m
             ON m.owner_id=t.owner_id AND m.session_id=t.session_id AND m.turn_id=t.turn_id
-            WHERE t.owner_id=? AND t.session_id=? AND m.task_id=? ORDER BY t.seq DESC LIMIT ?''',(*identity,task,max_turns)).fetchall()
+            WHERE t.owner_id=? AND t.session_id=? AND m.task_id=? AND NOT COALESCE(json_extract(t.metadata,'$.exclude_from_model_context'),0) ORDER BY t.seq DESC LIMIT ?''',(*identity,task,max_turns)).fetchall()
         turns=[]
         for row in rows:
             if not row['query'].strip():continue

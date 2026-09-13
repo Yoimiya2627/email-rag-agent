@@ -156,6 +156,14 @@ def mailbox_router(admission, manager):
         except Exception as exc:
             raise mailbox_error(exc) from None
 
+    @router.get('/{account_id}/status')
+    def status(account_id: str, identity: Identity = Depends(require_identity)):
+        from core.mailbox_status import read_mailbox_status
+        result = read_mailbox_status(identity.owner_id, account_id)
+        if result['account_state'] == 'not_accessible':
+            raise HTTPException(404, '邮箱不存在或不可访问')
+        return result
+
     @router.get('/{account_id}/schedule')
     def schedule(account_id: str, identity: Identity = Depends(require_identity)):
         try:

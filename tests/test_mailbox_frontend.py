@@ -1,4 +1,6 @@
 """Run the real Streamlit app and inspect mailbox controls and safe text output."""
+from contextlib import nullcontext
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -115,24 +117,126 @@ def test_chat_home_is_simple_and_mail_opens_only_when_requested():
         assert len(app.chat_input) == 1 and http.posts == []
 
 
-@pytest.mark.parametrize('mode', ['普通（多 Agent 路由）', 'Self-RAG（反思工作流）', 'Agent（自主工具调用）'])
-def test_mailbox_access_question_uses_local_report_without_calling_chat_or_reading_bodies(mode):
-    http = MailboxHTTP()
-    with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post):
+CHAT_MODES = [
+    ('普通（多 Agent 路由）', False, '/chat'),
+    ('普通（多 Agent 路由）', True, '/chat/stream'),
+    ('Self-RAG（反思工作流）', False, '/chat/graph'),
+    ('Agent（自主工具调用）', False, '/jobs/agent'),
+]
+
+
+class StatusChatHTTP(MailboxHTTP):
+    """Synthetic backend replies keep UI routing separate from status logic."""
+
+    def __init__(self):
+        super().__init__()
+        self.jobs = {}
+
+    def post(self, url, **kwargs):
+        payload = kwargs['json']
+        self.posts.append((url, payload))
+        assert url.endswith(('/chat', '/chat/stream', '/chat/graph', '/jobs/agent'))
+        count = 5 if payload['mailbox_account_id'] == ACCOUNT['id'] else 12
+        result = {
+            'answer': f'本地已解析 {count} 封。当前 AI 对话还不能读取这些真实邮件。',
+            'intent': 'mailbox_status', 'sources': [],
+            'metadata': {'session_id': payload['session_id'], 'local_only': True,
+                         'mailbox_status': {'account_state': 'configured', 'parsed': count}},
+        }
+        if url.endswith('/jobs/agent'):
+            identifier = f'status-job-{len(self.jobs)}'
+            self.jobs[identifier] = {'id': identifier, 'kind': 'agent', 'status': 'succeeded',
+                                     'result': result}
+            return response({'id': identifier, 'kind': 'agent', 'status': 'queued'})
+        if url.endswith('/chat/stream'):
+            stream = response(result)
+            stream.status_reply = result
+            return nullcontext(stream)
+        return response(result)
+
+    def get(self, url, **kwargs):
+        identifier = url.rsplit('/', 1)[-1]
+        if '/jobs/' in url and identifier in self.jobs:
+            self.gets.append((url, kwargs))
+            return response(self.jobs[identifier])
+        return super().get(url, **kwargs)
+
+
+def status_sse_client(stream):
+    result = stream.status_reply
+    events = [{'intent': result['intent']}, {'token': result['answer']},
+              {'sources': [], 'metadata': result['metadata']}]
+    return SimpleNamespace(events=lambda: iter([
+        *(SimpleNamespace(data=json.dumps(event)) for event in events),
+        SimpleNamespace(data='[DONE]'),
+    ]))
+
+
+@pytest.mark.parametrize('mode,use_stream,endpoint', CHAT_MODES)
+def test_status_chat_uses_backend_with_selected_account_and_no_mail_content(mode, use_stream, endpoint):
+    http = StatusChatHTTP()
+    second = {**ACCOUNT, 'id': 'b'*32, 'address': 'second@163.com', 'display_name': '第二个邮箱'}
+    http.accounts.append(second)
+    with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=http.post), \
+         patch('sseclient.SSEClient', side_effect=status_sse_client):
         app = _mail_app('问答工作台').run()
         next(item for item in app.radio if item.label == '问答模式').set_value(mode).run()
-        app.chat_input[0].set_value('你现在可以看到我163的邮件吗？').run()
+        next(item for item in app.toggle if item.label == '流式输出').set_value(use_stream).run()
+        session_id = app.session_state['session_id']
+        for account, count, question in [
+            (ACCOUNT, 5, '你现在连接上了163了吗？'),
+            (second, 12, '你现在可以看到我163的邮件吗？'),
+        ]:
+            next(item for item in app.selectbox if item.label == '当前邮箱').set_value(account['id']).run()
+            app.chat_input[0].set_value(question).run()
+            assert not app.exception
+            assert http.posts[-1][0].endswith(endpoint)
+            payload = http.posts[-1][1]
+            assert set(payload) == {'query', 'session_id', 'operation_key', 'mailbox_account_id'}
+            assert payload['query'] == question
+            assert payload['session_id'] == session_id
+            assert payload['mailbox_account_id'] == account['id']
+            assert payload['operation_key']
+            answer = app.session_state['messages'][-1]
+            assert answer['role'] == 'assistant'
+            assert f'{count} 封' in answer['content'] and 'AI 对话还不能读取' in answer['content']
+            assert answer['intent'] == 'mailbox_status'
+            assert answer['sources'] == []
+            assert 'local_status' not in answer
+            app.run()
+            assert not app.exception
+        assert len(http.posts) == 2
+        assert http.posts[0][1]['operation_key'] != http.posts[1][1]['operation_key']
+        assert len(app.session_state['messages']) == 4
+        assert not any('/messages' in url or url.endswith(('/report', '/search')) for url, _ in http.gets)
+        sent = json.dumps(http.posts, ensure_ascii=False)
+        assert all(value not in sent for value in [ACCOUNT['address'], second['address'], HTML, '合成邮件'])
+
+
+@pytest.mark.parametrize('mode,use_stream,endpoint', CHAT_MODES)
+def test_status_chat_backend_offline_does_not_invent_mailbox_connection_state(mode, use_stream, endpoint):
+    import requests
+    http = MailboxHTTP()
+
+    def offline_post(url, **kwargs):
+        http.posts.append((url, kwargs['json']))
+        raise requests.exceptions.ConnectionError('offline fixture')
+
+    with patch('requests.get', side_effect=http.get), patch('requests.post', side_effect=offline_post):
+        app = _mail_app('问答工作台').run()
+        next(item for item in app.radio if item.label == '问答模式').set_value(mode).run()
+        next(item for item in app.toggle if item.label == '流式输出').set_value(use_stream).run()
+        app.chat_input[0].set_value('你现在连接上了163了吗？').run()
         assert not app.exception
+        assert len(http.posts) == 1 and http.posts[0][0].endswith(endpoint)
+        assert http.posts[0][1]['mailbox_account_id'] == ACCOUNT['id']
+        notices = ' '.join(item.value for item in [*app.error, *app.warning])
+        assert '请求失败' in notices if use_stream else '无法连接到后端服务' in notices
         answer = app.session_state['messages'][-1]
-        assert '5 封' in answer['content'] and 'AI 对话还不能读取' in answer['content']
-        assert answer['local_status'] is True
-        assert not any(item.value == '想聊些什么？' for item in app.subheader)
-        assert http.posts == []
-        assert any(url.endswith('/report') for url, _ in http.gets)
-        assert not any('/messages' in url or '/search' in url for url, _ in http.gets)
-        app.run()
-        assert len(app.session_state['messages']) == 2
-        assert http.posts == []
+        assert all(phrase not in answer['content'] for phrase in ['未配置邮箱', '没有连接163', '已连接163', '5 封'])
+        assert not any('/messages' in url or url.endswith(('/report', '/search')) for url, _ in http.gets)
+        if mode.startswith('Agent'):
+            assert app.session_state['unconfirmed_submission'] == http.posts[0][1]
 
 
 @pytest.mark.parametrize('configured', [True, False])
@@ -155,7 +259,11 @@ def test_embedded_chat_shares_conversation_without_adding_mail_context(configure
         assert any(item.value == '合成对话回复' for item in app.markdown)
         assert len(http.posts) == 1
         payload = http.posts[0][1]
-        assert set(payload) == {'query', 'session_id', 'operation_key'}
+        expected_fields = {'query', 'session_id', 'operation_key'}
+        if configured:
+            expected_fields.add('mailbox_account_id')
+            assert payload['mailbox_account_id'] == ACCOUNT['id']
+        assert set(payload) == expected_fields
         assert payload['query'] == '你好'
         session_id = app.session_state['session_id']
         messages = list(app.session_state['messages'])

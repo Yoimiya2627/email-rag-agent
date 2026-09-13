@@ -10,6 +10,7 @@ import config.settings as cfg
 from frontend.client import StreamAccumulator, http_error
 from frontend.evidence_view import render_evidence
 from frontend.context_view import render_context_metrics, render_task_context, render_history_hit
+from core.mail_capabilities import CHAT_SCOPE_LABEL
 
 API_URL = cfg.API_URL
 
@@ -357,6 +358,8 @@ def _render_metadata(metadata: dict | None, *, compact=False):
     """Render assistant-message metadata — agent tool-call steps, or stats."""
     if not metadata:
         return
+    if metadata.get('mailbox_status'):
+        st.caption('邮箱状态 · 根据本地记录查询')
     if not compact:
         render_context_metrics(st,metadata)
     status = metadata.get('status', 'success')
@@ -485,7 +488,7 @@ def _render_agent_panel():
             with st.expander('高级选项'):
                 mode, use_stream = _render_chat_options()
                 st.button('打开高级工具', on_click=_open_advanced_chat, use_container_width=True)
-        st.caption('对话资料：导入资料 · 尚未连接真实邮件')
+        st.caption(CHAT_SCOPE_LABEL)
     _render_conversation(mode, use_stream, embedded=True)
 
 
@@ -634,20 +637,11 @@ def _render_conversation(mode, use_stream, *, embedded=False):
             st.markdown(user_input)
         st.session_state["messages"].append({"role": "user", "content": user_input})
 
-        from frontend.mailbox_capability import is_mailbox_access_question, mailbox_access_answer
-        if is_mailbox_access_question(user_input):
-            # This is a transient UI status check, not a model conversation turn.
-            # Only aggregate connection state is read; no message bodies are fetched.
-            answer = mailbox_access_answer(accounts_response, selected_account, _get)
-            with history, st.chat_message('assistant', avatar=':material/auto_awesome:'):
-                st.markdown(answer)
-                st.caption('本机状态说明 · 未调用模型')
-            st.session_state['messages'].append({'role':'assistant', 'content':answer, 'local_status':True})
-            return
-
         # Call API and show assistant bubble
         import uuid
         payload = {"query": user_input, "session_id": session_id, "operation_key":str(uuid.uuid4())}
+        if selected_account:
+            payload['mailbox_account_id'] = selected_account
         if mode.startswith("Agent"):
             endpoint = "/chat/agent"
         elif mode.startswith("Self-RAG"):

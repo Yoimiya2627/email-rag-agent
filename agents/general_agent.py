@@ -3,19 +3,20 @@ import unicodedata
 
 from core.model_outcomes import outcome_metadata
 from models.schemas import AgentRequest, AgentResponse, IntentType
+from core.mail_capabilities import GREETING, CHAT_SCOPE_EXPLANATION
 
 
-_GREETING = "你好！我是邮件助手，可以帮你搜索邮件、总结内容、统计信息和起草回复。你想先做什么？"
-_THANKS = "不客气！有需要查找或整理的邮件时，告诉我具体需求就可以。"
+_GREETING = GREETING
+_THANKS = "不客气！需要查询同步状态或对导入资料提问时，告诉我就可以。"
 _HELP = (
     "我可以对已导入的邮件进行搜索、摘要、统计和回复草稿撰写，并提供原文核对。"
     "例如：找一下关于某个项目的邮件、总结某个话题，或帮我起草回复。"
     "163 邮箱面板支持后台只读同步、正文和附件解析，以及独立的本地关键词搜索，具体覆盖情况可查看解析报告。"
-    "这些邮件不会自动加入问答索引或发送给模型；自动移动归档邮件尚未支持。"
+    + CHAT_SCOPE_EXPLANATION + "自动移动归档邮件尚未支持。"
 )
 _CLARIFY = (
-    "请具体说明你想做什么，例如查找哪个主题的邮件、总结哪段往来、统计什么信息，"
-    "或为哪封邮件起草回复。我还没有根据这条消息检索或修改邮件。"
+    "请具体说明你想查询的邮箱状态，或想对哪些导入资料进行问答、总结和草稿撰写。"
+    "我还没有根据这条消息检索或修改邮件。" + CHAT_SCOPE_EXPLANATION
 )
 _REPLIES = {
     **dict.fromkeys(("你好", "您好", "你好呀", "你好啊", "嗨", "哈喽", "hello", "hi", "hey",

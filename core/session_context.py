@@ -140,6 +140,9 @@ def assemble_session_context(facts=None, history_matches=None, *, char_limit=400
     # Intent/rewrite reserve history space for identifying the present object;
     # final-answer calls also admit a versioned derived summary after evidence.
     for row in history_matches or []:
+        if isinstance(row, dict) and (row.get('metadata') or {}).get('exclude_from_model_context'):
+            omit('history', 'excluded_from_model_context')
+            continue
         if not isinstance(row, dict) or not row.get('turn_id'):
             omit('history', 'missing_source')
             continue

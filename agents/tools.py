@@ -169,6 +169,7 @@ def search_history(query: str, limit: int = 5) -> dict:
     try:
         context = _history_scope()
         rows = context.session_repository.search_history(context.owner_id, context.session_id, query, limit=limit)
+        rows = [row for row in rows if not (row.get('metadata') or {}).get('exclude_from_model_context')]
         _history_scope()  # recheck invalidation after read
         items = [{key: row[key] for key in ('turn_id', 'id', 'seq', 'hits', 'retrieval', 'metadata', 'include_in_context') if key in row} for row in rows]
         return {'items': items, 'material_type': 'historical_conversation',
@@ -184,6 +185,8 @@ def get_turn(turn_id: str, field: str = 'answer', offset: int = 0, limit: int = 
                 field=field, offset=offset, limit=limit, expected_epoch=context.context_epoch),
                 'material_type': 'historical_conversation', 'evidence_status': 'historical_claim_not_email_evidence'}
         _history_scope()
+        if (page.get('metadata') or {}).get('exclude_from_model_context'):
+            return tool_error('history_unavailable', 'This turn is excluded from model context.')
         return page
     except (ValueError, KeyError, PermissionError, OSError, sqlite3.Error):
         return tool_error('history_unavailable', 'Trusted session turn is unavailable or invalidated.')

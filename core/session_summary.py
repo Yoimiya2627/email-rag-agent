@@ -87,8 +87,8 @@ def get_summary(repo,owner_id,session_id):
         if row is None: return None
         summary=json.loads(row[0])
         for source in summary.get('sources',[]):
-            original=db.execute('SELECT query,answer FROM session_turns WHERE owner_id=? AND session_id=? AND turn_id=?',(*identity,source['turn_id'])).fetchone()
-            if original is None or any(hashlib.sha256(original[field].encode()).hexdigest()!=source[field+'_sha256'] for field in ('query','answer')):
+            original=db.execute('SELECT query,answer,metadata FROM session_turns WHERE owner_id=? AND session_id=? AND turn_id=?',(*identity,source['turn_id'])).fetchone()
+            if original is None or json.loads(original['metadata']).get('exclude_from_model_context') or any(hashlib.sha256(original[field].encode()).hexdigest()!=source[field+'_sha256'] for field in ('query','answer')):
                 return None
         return summary
 
@@ -150,7 +150,7 @@ def generate_summary(repo,owner_id,session_id,*,generate,budget=None,force=False
     existing=get_summary(repo,*identity)
     if existing and not force:
         with repo._connect() as db:
-            uncovered=db.execute('SELECT count(*) FROM session_turns t JOIN context_turn_tasks m ON m.owner_id=t.owner_id AND m.session_id=t.session_id AND m.turn_id=t.turn_id WHERE t.owner_id=? AND t.session_id=? AND m.task_id=? AND t.seq>?',(*identity,existing['task_id'],existing['covered_seq'])).fetchone()[0]
+            uncovered=db.execute('SELECT count(*) FROM session_turns t JOIN context_turn_tasks m ON m.owner_id=t.owner_id AND m.session_id=t.session_id AND m.turn_id=t.turn_id WHERE t.owner_id=? AND t.session_id=? AND m.task_id=? AND NOT COALESCE(json_extract(t.metadata,"$.exclude_from_model_context"),0) AND t.seq>?',(*identity,existing['task_id'],existing['covered_seq'])).fetchone()[0]
         if uncovered<min_turns: return {'status':'cached','summary':existing,'uncovered_turns':uncovered}
     attempt_id=uuid.uuid4().hex
     with repo._connect() as db:
@@ -159,7 +159,7 @@ def generate_summary(repo,owner_id,session_id,*,generate,budget=None,force=False
         epoch=db.execute('SELECT epoch FROM session_epochs WHERE owner_id=? AND session_id=?',identity).fetchone()[0]
         task=repo._active_task(db,identity)
         # Rebuild from original turns each time; never recursively summarize a summary.
-        rows=db.execute('SELECT t.seq FROM session_turns t JOIN context_turn_tasks m ON m.owner_id=t.owner_id AND m.session_id=t.session_id AND m.turn_id=t.turn_id WHERE t.owner_id=? AND t.session_id=? AND m.task_id=? ORDER BY t.seq DESC LIMIT ?',(*identity,task,max_turns+1)).fetchall()
+        rows=db.execute('SELECT t.seq FROM session_turns t JOIN context_turn_tasks m ON m.owner_id=t.owner_id AND m.session_id=t.session_id AND m.turn_id=t.turn_id WHERE t.owner_id=? AND t.session_id=? AND m.task_id=? AND NOT COALESCE(json_extract(t.metadata,"$.exclude_from_model_context"),0) ORDER BY t.seq DESC LIMIT ?',(*identity,task,max_turns+1)).fetchall()
         turns=[]
         for index_row in rows[:max_turns]:
             row=db.execute('SELECT * FROM session_turns WHERE seq=? AND owner_id=? AND session_id=?',(index_row['seq'],*identity)).fetchone()
