@@ -477,14 +477,15 @@ def _render_chat_options():
 
 def _render_agent_panel():
     with st.container(key='assistant_header'):
-        heading, controls = st.columns([5, 1], vertical_alignment='center')
+        heading, controls = st.columns([5, 1.2], vertical_alignment='center')
         with heading:
-            st.title('邮件助手')
-        with controls, st.popover('对话设置', use_container_width=True):
-            mode, use_stream = _render_chat_options()
+            st.title('助手对话')
+        with controls, st.popover('会话', use_container_width=True):
             _render_session_controls()
-            st.button('打开高级工具', on_click=_open_advanced_chat, use_container_width=True)
-        st.caption('当前可自由对话、对导入资料提问。你的真实邮件尚未接入 AI 对话，可在「查看邮件」中阅读和搜索。')
+            with st.expander('高级选项'):
+                mode, use_stream = _render_chat_options()
+                st.button('打开高级工具', on_click=_open_advanced_chat, use_container_width=True)
+        st.caption('对话资料：导入资料 · 尚未连接真实邮件')
     _render_conversation(mode, use_stream, embedded=True)
 
 
@@ -595,7 +596,7 @@ def _render_conversation(mode, use_stream, *, embedded=False):
 
     # Render history
     for message_index, msg in enumerate(st.session_state["messages"]):
-        with history, st.chat_message(msg["role"]):
+        with history, st.chat_message(msg["role"], avatar=':material/person:' if msg['role'] == 'user' else ':material/auto_awesome:'):
             if msg.get("intent") and not embedded:
                 st.caption(f"意图识别：{INTENT_LABELS.get(msg['intent'], msg['intent'])}")
             st.markdown(msg["content"])
@@ -609,20 +610,27 @@ def _render_conversation(mode, use_stream, *, embedded=False):
 
     # Handle pending quick query
     pending = st.session_state.pop("pending_query", None)
-    user_input = st.chat_input("输入你想问的问题…" if embedded else
-                               "针对问答资料提问，例如：总结项目进展", key='agent_chat_input', disabled=busy) or pending
-
-    if embedded and not st.session_state['messages'] and not user_input:
+    # The empty conversation keeps the invitation and composer together. The
+    # submitted widget value is available before rendering, so its first reply
+    # already uses the bottom composer without an extra API call or rerun.
+    starting = (embedded and not st.session_state['messages'] and not pending
+                and not st.session_state.get('agent_chat_input') and not busy)
+    if starting:
         with history, st.container(key='assistant_welcome'):
-            st.subheader('你好，想聊点什么？')
-            st.write('在下方输入问题。想先看邮件，也可以直接打开邮箱。')
-            st.button('查看我的邮件' if mail_accounts else '连接我的邮箱', type='primary',
+            st.subheader('想聊些什么？')
+            st.write('直接输入问题，或打开邮箱查看邮件。')
+        with st.container(key='assistant_start'):
+            user_input = st.chat_input('输入你想问的问题…', key='agent_chat_input', disabled=busy)
+            st.button('查看我的邮件' if mail_accounts else '连接我的邮箱',
                       on_click=_open_workspace, args=('我的邮箱' if mail_accounts else '同步与设置',))
+    else:
+        user_input = st.chat_input("输入你想问的问题…" if embedded else
+                                   "针对问答资料提问，例如：总结项目进展", key='agent_chat_input', disabled=busy) or pending
 
     if user_input:
         session_id = st.session_state["session_id"]
         # Show user bubble
-        with history, st.chat_message("user"):
+        with history, st.chat_message("user", avatar=':material/person:'):
             st.markdown(user_input)
         st.session_state["messages"].append({"role": "user", "content": user_input})
 
@@ -631,7 +639,7 @@ def _render_conversation(mode, use_stream, *, embedded=False):
             # This is a transient UI status check, not a model conversation turn.
             # Only aggregate connection state is read; no message bodies are fetched.
             answer = mailbox_access_answer(accounts_response, selected_account, _get)
-            with history, st.chat_message('assistant'):
+            with history, st.chat_message('assistant', avatar=':material/auto_awesome:'):
                 st.markdown(answer)
                 st.caption('本机状态说明 · 未调用模型')
             st.session_state['messages'].append({'role':'assistant', 'content':answer, 'local_status':True})
@@ -647,7 +655,7 @@ def _render_conversation(mode, use_stream, *, embedded=False):
         else:
             endpoint = "/chat"
 
-        with history, st.chat_message("assistant"):
+        with history, st.chat_message("assistant", avatar=':material/auto_awesome:'):
             if use_stream and mode.startswith("普通"):
                 # SSE streaming
                 import sseclient
@@ -752,47 +760,46 @@ accounts_response = _get('/mailboxes')
 mail_accounts = (accounts_response or {}).get('accounts',[])
 with st.sidebar:
     render_brand(st)
-    st.button('＋ 新对话', on_click=_new_conversation, use_container_width=True)
+    st.button('新对话', icon=':material/add:', on_click=_new_conversation, use_container_width=True)
     with st.container(key='mail_nav'):
         workspace_page = st.radio('工作区',['问答工作台','我的邮箱','同步与设置'],
             format_func={'问答工作台':'助手对话','我的邮箱':'查看邮件','同步与设置':'邮箱设置'}.get,
             key='workspace_page',label_visibility='collapsed')
-    st.divider()
-    st.caption('当前邮箱')
-    if mail_accounts:
-        account_ids = [row['id'] for row in mail_accounts]
-        saved_account = st.session_state.get('mail_account_id')
-        if saved_account not in account_ids:
-            saved_account = account_ids[0]
-        if st.session_state.get('mail_account_picker') != saved_account:
-            st.session_state['mail_account_picker'] = saved_account
-        def choose_mail_account():
-            st.session_state['mail_account_id'] = st.session_state['mail_account_picker']
-        selected_account = st.selectbox('当前邮箱',account_ids,
-            format_func=lambda aid:next((row.get('display_name') or row['address']) for row in mail_accounts if row['id']==aid),
-            key='mail_account_picker',on_change=choose_mail_account,label_visibility='collapsed')
-        st.session_state['mail_account_id'] = selected_account
-        current_account = next(row for row in mail_accounts if row['id']==selected_account)
-        provider_name = {'163':'网易163','qq':'QQ邮箱'}.get(current_account.get('provider'),current_account.get('provider','邮箱'))
-        st.caption(provider_name+' · 已连接')
-        st.text(current_account.get('address',''))
-    else:
-        selected_account = None
-        st.caption('还没有连接账号' if accounts_response is not None else '暂时无法读取账号')
-    def open_mail_settings():
-        st.session_state['workspace_page'] = '同步与设置'
-    st.button('添加 / 管理邮箱',on_click=open_mail_settings,use_container_width=True)
-    st.divider()
-    health = _get('/health')
-    st.caption('● 服务正常' if health else '服务未连接，请先启动服务')
+    with st.container(key='sidebar_account'):
+        st.caption('我的邮箱')
+        if mail_accounts:
+            account_ids = [row['id'] for row in mail_accounts]
+            saved_account = st.session_state.get('mail_account_id')
+            if saved_account not in account_ids:
+                saved_account = account_ids[0]
+            if st.session_state.get('mail_account_picker') != saved_account:
+                st.session_state['mail_account_picker'] = saved_account
+            def choose_mail_account():
+                st.session_state['mail_account_id'] = st.session_state['mail_account_picker']
+            selected_account = st.selectbox('当前邮箱',account_ids,
+                format_func=lambda aid:next((row.get('display_name') or row['address']) for row in mail_accounts if row['id']==aid),
+                key='mail_account_picker',on_change=choose_mail_account,label_visibility='collapsed')
+            st.session_state['mail_account_id'] = selected_account
+            with st.popover('账号详情', use_container_width=True):
+                current_account = next(row for row in mail_accounts if row['id']==selected_account)
+                st.text(current_account.get('address',''))
+                st.caption('账号已保存；连接和同步状态请在邮箱设置中查看。')
+                st.button('添加 / 管理邮箱', on_click=_open_workspace, args=('同步与设置',), use_container_width=True)
+        else:
+            selected_account = None
+            st.caption('还没有连接账号' if accounts_response is not None else '暂时无法读取账号')
+        health = _get('/health')
+        if not health:
+            st.caption('服务未连接，请先启动服务')
 
 def _render_mail_page():
     if accounts_response is None:
         st.title(workspace_page)
         st.error('邮箱账号暂时无法读取，请确认本地服务正在运行后刷新。')
     else:
-        render_mailboxes(st,_get,_post,view='settings' if workspace_page=='同步与设置' else 'inbox',
-                         accounts=mail_accounts,account_id=selected_account)
+        with st.container(key='mail_settings' if workspace_page=='同步与设置' else 'mail_inbox'):
+            render_mailboxes(st,_get,_post,view='settings' if workspace_page=='同步与设置' else 'inbox',
+                             accounts=mail_accounts,account_id=selected_account)
 
 
 if workspace_page == '问答工作台':
@@ -806,7 +813,7 @@ elif workspace_page == '我的邮箱':
 else:
     _render_mail_page()
     if workspace_page == '同步与设置':
-        with st.expander('后台任务与高级工具', expanded=False):
+        with st.container(key='settings_tools'), st.expander('后台任务与高级工具', expanded=False):
             _render_job_toggle()
             _render_jobs()
             st.button('打开高级工具', on_click=_open_advanced_chat)

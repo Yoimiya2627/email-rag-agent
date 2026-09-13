@@ -249,13 +249,13 @@ def _render_inbox(st, get, post, account, schedule, report):
         st.warning(_sync_description(schedule)+'，请前往「同步与设置」处理。')
     request_key = 'imap_search_request_'+aid
     saved_search = st.session_state.get(request_key) or {}
-    with st.form('imap_search_'+aid):
-        search, submit = st.columns([5,1],vertical_alignment='bottom')
+    with st.form('imap_search_'+aid, border=False):
+        search, submit, filters = st.columns([5,1,1],vertical_alignment='bottom')
         with search:
             query = st.text_input('搜索邮件',value=saved_search.get('q',''),max_chars=500,placeholder='搜索主题、发件人、正文或附件',label_visibility='collapsed',key='mail_query_'+aid)
         with submit:
             submitted = st.form_submit_button('搜索',use_container_width=True)
-        with st.expander('搜索范围与条件'):
+        with filters, st.popover('筛选', use_container_width=True):
             scope, flags = st.columns([2,1])
             with scope:
                 folder_names = [r['name'] for r in report.get('folders',[])]
@@ -344,92 +344,104 @@ def _render_account_form(st, get, post, configured):
 
 
 def _render_settings(st, get, post, account, accounts):
-    st.title('同步与设置')
-    st.caption('管理邮箱账号、收取范围和自动同步。这里的操作不会发送或删除服务器邮件。')
-    saved = _render_account_form(st,get,post,bool(accounts))
-    if saved:
-        # The persistent account choice is separate from the sidebar widget.
-        st.session_state['mail_account_id'] = saved['id']
-        st.rerun()
+    st.title('邮箱设置')
+    st.caption('管理账号与邮件同步。')
+    if st.session_state.pop('mail_account_saved_notice', False):
+        st.success('账号已加密保存。测试连接后即可同步邮件。')
+    if account:
+        sync_tab, account_tab, report_tab = st.tabs(['收取设置', '邮箱账号', '同步记录'])
+    else:
+        account_tab = st.container()
+    with account_tab:
+        if account:
+            st.text(account.get('address', ''))
+        saved = _render_account_form(st,get,post,bool(accounts))
+        if saved:
+            # The persistent account choice is separate from the sidebar widget.
+            st.session_state['mail_account_id'] = saved['id']
+            st.session_state['mail_account_saved_notice'] = True
+            st.rerun()
     if not account:
         return
     aid, prefix = account['id'], '/mailboxes/'+account['id']
-    st.subheader('当前账号的同步设置')
-    st.text(account.get('address',''))
-    schedule = get(prefix+'/schedule')
-    if schedule is None:
-        st.error('同步设置暂时无法读取，请刷新后重试。已保存的设置不会被覆盖。')
-        return
-    if st.session_state.pop('imap_reset_auto_'+aid,False):
-        st.session_state['imap_auto_'+aid] = bool(schedule.get('enabled'))
-    cached = 'imap_folders_'+aid
-    if st.button('测试连接并读取文件夹',key='imap_connect'):
-        with st.spinner('正在连接邮箱…'):
-            result = post(prefix+'/connect',timeout=100)
-        if result.get('error'):
-            st.error(result['error'])
-        else:
-            st.session_state[cached] = result['folders']
-            st.success('只读连接成功。')
-    folders = [row for row in st.session_state.get(cached,[]) if row.get('selectable')]
-    if folders:
-        names = [row['name'] for row in folders]
-        defaults = [name for name in schedule.get('folders',[]) if name in names] if schedule.get('revision') else [
-            row['name'] for row in folders if not {'\\junk','\\trash','\\drafts'}.intersection(flag.lower() for flag in row.get('flags',[]))
-            and row['display_name'].casefold() not in {'垃圾邮件','已删除','草稿箱','junk','spam','trash','drafts'}]
-        chosen = st.multiselect('同步文件夹',names,default=defaults or names[:1],
-            format_func=lambda name:next(row.get('display_name') or folder_label(name) for row in folders if row['name']==name),key='imap_scope_'+aid)
-        count = st.number_input('每批最多处理邮件数',min_value=1,max_value=2000,value=int(schedule.get('max_messages',100)),step=50,key='imap_batch_'+aid)
-        retry = st.checkbox('重新尝试此前多次失败的邮件',key='imap_retry_'+aid)
-        if st.button('开始本地同步与解析',disabled=not chosen):
-            _start_sync(st,post,aid,chosen,count,retry)
-        st.divider()
-        st.subheader('自动同步')
-        st.caption('后台服务运行时，关闭浏览器仍会同步。历史邮件会分批补齐，之后按间隔检查新邮件和状态变化。')
-        enabled = st.checkbox('启用后台自动同步',value=bool(schedule.get('enabled')),key='imap_auto_'+aid)
-        interval = st.number_input('增量检查间隔（分钟）',min_value=1,max_value=1440,
-            value=max(1,int(schedule.get('interval_seconds',300))//60),key='imap_interval_'+aid)
-        if st.button('保存自动同步设置',disabled=not chosen,type='primary'):
-            result = post(prefix+'/schedule',{'enabled':enabled,'folders':chosen,'interval_seconds':int(interval)*60,'max_messages':int(count)},timeout=100)
+    with sync_tab:
+        st.subheader('邮件收取')
+        st.text(account.get('address',''))
+        schedule = get(prefix+'/schedule')
+        if schedule is None:
+            st.error('同步设置暂时无法读取，请刷新后重试。已保存的设置不会被覆盖。')
+            return
+        if st.session_state.pop('imap_reset_auto_'+aid,False):
+            st.session_state['imap_auto_'+aid] = bool(schedule.get('enabled'))
+        cached = 'imap_folders_'+aid
+        if st.button('测试连接并读取文件夹',key='imap_connect'):
+            with st.spinner('正在连接邮箱…'):
+                result = post(prefix+'/connect',timeout=100)
             if result.get('error'):
                 st.error(result['error'])
             else:
-                st.success('自动同步设置已保存。正在执行的批次会完成后应用新设置。')
-                schedule = result
-    else:
-        st.caption('点击上方测试连接，可查看文件夹并调整同步范围。已保存的自动同步仍按原设置运行。')
-    if schedule.get('enabled') and st.button('暂停自动同步',key='imap_pause_'+aid):
-        result = post(prefix+'/schedule',{key:schedule[key] for key in ('folders','interval_seconds','max_messages')} | {'enabled':False})
-        if result.get('error'):
-            st.error(result['error'])
+                st.session_state[cached] = result['folders']
+                st.success('只读连接成功。')
+        folders = [row for row in st.session_state.get(cached,[]) if row.get('selectable')]
+        if folders:
+            names = [row['name'] for row in folders]
+            defaults = [name for name in schedule.get('folders',[]) if name in names] if schedule.get('revision') else [
+                row['name'] for row in folders if not {'\\junk','\\trash','\\drafts'}.intersection(flag.lower() for flag in row.get('flags',[]))
+                and row['display_name'].casefold() not in {'垃圾邮件','已删除','草稿箱','junk','spam','trash','drafts'}]
+            chosen = st.multiselect('同步文件夹',names,default=defaults or names[:1],
+                format_func=lambda name:next(row.get('display_name') or folder_label(name) for row in folders if row['name']==name),key='imap_scope_'+aid)
+            count = st.number_input('每批最多处理邮件数',min_value=1,max_value=2000,value=int(schedule.get('max_messages',100)),step=50,key='imap_batch_'+aid)
+            retry = st.checkbox('重新尝试此前多次失败的邮件',key='imap_retry_'+aid)
+            if st.button('开始本地同步与解析',disabled=not chosen):
+                _start_sync(st,post,aid,chosen,count,retry)
+            st.divider()
+            st.subheader('自动同步')
+            st.caption('后台服务运行时，关闭浏览器仍会同步。历史邮件会分批补齐，之后按间隔检查新邮件和状态变化。')
+            enabled = st.checkbox('启用后台自动同步',value=bool(schedule.get('enabled')),key='imap_auto_'+aid)
+            interval = st.number_input('增量检查间隔（分钟）',min_value=1,max_value=1440,
+                value=max(1,int(schedule.get('interval_seconds',300))//60),key='imap_interval_'+aid)
+            if st.button('保存自动同步设置',disabled=not chosen,type='primary'):
+                result = post(prefix+'/schedule',{'enabled':enabled,'folders':chosen,'interval_seconds':int(interval)*60,'max_messages':int(count)},timeout=100)
+                if result.get('error'):
+                    st.error(result['error'])
+                else:
+                    st.success('自动同步设置已保存。正在执行的批次会完成后应用新设置。')
+                    schedule = result
         else:
-            st.session_state['imap_reset_auto_'+aid] = True
+            st.caption('点击上方测试连接，可查看文件夹并调整同步范围。已保存的自动同步仍按原设置运行。')
+        if schedule.get('enabled') and st.button('暂停自动同步',key='imap_pause_'+aid):
+            result = post(prefix+'/schedule',{key:schedule[key] for key in ('folders','interval_seconds','max_messages')} | {'enabled':False})
+            if result.get('error'):
+                st.error(result['error'])
+            else:
+                st.session_state['imap_reset_auto_'+aid] = True
+                st.rerun()
+    with report_tab:
+        _render_sync_progress(st,get,aid,schedule)
+        if st.button('刷新同步与解析报告'):
             st.rerun()
-    _render_sync_progress(st,get,aid,schedule)
-    if st.button('刷新同步与解析报告'):
-        st.rerun()
-    with st.expander('同步与解析报告'):
-        report = get(prefix+'/report')
-        if report is None:
-            st.error('同步报告暂时无法读取，请稍后刷新。')
-            return
-        cols = st.columns(4)
-        for col,label,key in zip(cols,['已扫描邮件','解析成功','解析/下载失败','尚未下载'],
-                ['remote_snapshot_count','parsed','failed','not_downloaded']):
-            col.metric(label,report.get(key,0))
-        st.caption('范围为已扫描文件夹的最近快照；解析成功不表示每个附件或字符都完整。')
-        if report.get('issues'):
-            st.write('需要核查的项目',report['issues'])
-        st.write({'正文为空':report.get('body_empty',0),'解码需核查':report.get('decode_suspect',0),'附件解析状态':report.get('attachments',{})})
-        if report.get('folders'):
-            st.dataframe([dict(row,name=folder_label(row['name'])) for row in report['folders']],hide_index=True,use_container_width=True)
-        failed = get(prefix+'/messages',params={'failures_only':True,'limit':25})
-        if failed is None:
-            st.warning('失败记录暂时无法读取，请稍后刷新。')
-            return
-        if failed.get('items'):
-            st.caption(f"未成功解析 {failed.get('total',0)} 封；下方最多显示25条。")
-            st.dataframe([{key:row.get(key) for key in ('subject','folder','error_code')} for row in failed['items']],hide_index=True,use_container_width=True)
+        with st.expander('同步与解析报告'):
+            report = get(prefix+'/report')
+            if report is None:
+                st.error('同步报告暂时无法读取，请稍后刷新。')
+                return
+            cols = st.columns(4)
+            for col,label,key in zip(cols,['已扫描邮件','解析成功','解析/下载失败','尚未下载'],
+                    ['remote_snapshot_count','parsed','failed','not_downloaded']):
+                col.metric(label,report.get(key,0))
+            st.caption('范围为已扫描文件夹的最近快照；解析成功不表示每个附件或字符都完整。')
+            if report.get('issues'):
+                st.write('需要核查的项目',report['issues'])
+            st.write({'正文为空':report.get('body_empty',0),'解码需核查':report.get('decode_suspect',0),'附件解析状态':report.get('attachments',{})})
+            if report.get('folders'):
+                st.dataframe([dict(row,name=folder_label(row['name'])) for row in report['folders']],hide_index=True,use_container_width=True)
+            failed = get(prefix+'/messages',params={'failures_only':True,'limit':25})
+            if failed is None:
+                st.warning('失败记录暂时无法读取，请稍后刷新。')
+                return
+            if failed.get('items'):
+                st.caption(f"未成功解析 {failed.get('total',0)} 封；下方最多显示25条。")
+                st.dataframe([{key:row.get(key) for key in ('subject','folder','error_code')} for row in failed['items']],hide_index=True,use_container_width=True)
 
 
 def render_mailboxes(st, get, post, *, view='inbox', accounts=None, account_id=None):

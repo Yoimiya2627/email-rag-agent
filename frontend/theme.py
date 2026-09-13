@@ -1,384 +1,162 @@
-"""Visual identity for 邮序, a local mailbox client.
+"""Quiet personal mailbox UI: a light rail, an undivided conversation.
 
-Plan: clear assistant/mail/settings navigation; a full-width conversation first.
-Mail is opened deliberately on its own page. Sync diagnostics stay in settings.
-Tokens: sea #173238, canvas #F1F5F6, paper #FFFFFF, action #0F766E,
-ink #20343B, muted #657780; rules #DCE5E8. Bahnschrift is reserved for
-headings, Segoe UI for reading, and Consolas for small utility labels.
-The single signature is a compact 邮 postage mark next to the Chinese name;
-provider labels belong to individual accounts, so future QQ accounts fit here.
-
-Plan critique: discard decorative dashboard cards and oversized metrics; this
-screen's primary purpose is conversation, with a separate mail reading page. Use a real list/reader boundary
-instead of unrelated floating cards. Final review: no external assets, no mail
-HTML, no hidden controls, visible focus, flexible small-screen panels, and no
-animation required. Actual app rendering is checked by the integrating caller.
+Plan: paper #FFFFFF, rail #F6F7F9, ink #273349, muted #667389,
+blue #3568D4, rule #E6E9EF. DengXian headings, Microsoft YaHei body,
+Segoe UI utility text; installed fonts with local fallbacks.
+Compared [top navigation / conversation] with [rail | conversation].
+The rail keeps chat, mail and settings stable. Empty: invitation + composer;
+active: messages + bottom composer. The envelope wordmark is the signature.
+Critique: remove postage decoration, dark rail, repeated branding and colored
+cards. Whitespace groups tasks; popovers/tabs hold details. No animation.
 """
-
 
 _CSS = """
 <style>
 :root {
-  --mail-sea: #173238;
-  --mail-canvas: #F1F5F6;
-  --mail-paper: #FFFFFF;
-  --mail-action: #0F766E;
-  --mail-ink: #20343B;
-  --mail-muted: #657780;
-  --mail-rule: #DCE5E8;
-  --mail-sidebar-muted: #B7CBCF;
-  --mail-action-soft: #E7F3F0;
-  --mail-focus: #0F766E;
-  --mail-body-font: "Segoe UI", "Microsoft YaHei", sans-serif;
-  --mail-display-font: "Bahnschrift", "Microsoft YaHei UI", sans-serif;
-  --mail-utility-font: "Consolas", "Microsoft YaHei", monospace;
+ --mail-paper:#FFFFFF; --mail-canvas:#F6F7F9; --mail-ink:#273349;
+ --mail-muted:#667389; --mail-action:#3568D4; --mail-rule:#E6E9EF;
+ --mail-action-soft:#EEF3FE;
+ --mail-body-font:"Microsoft YaHei","Segoe UI",sans-serif;
+ --mail-display-font:"DengXian","Microsoft YaHei",sans-serif;
+ --mail-utility-font:"Segoe UI","Microsoft YaHei",sans-serif;
 }
+[data-testid="stAppViewContainer"],[data-testid="stMain"],[data-testid="stHeader"] {background:var(--mail-paper);color:var(--mail-ink)}
+[data-testid="stAppViewContainer"] {font:14px/1.7 var(--mail-body-font)}
+[data-testid="stMainBlockContainer"] {max-width:1400px;padding:3rem 2.5rem 2rem}
+[data-testid="stMarkdownContainer"] p,[data-testid="stText"],[data-testid="stWidgetLabel"] p,[data-testid="stCaptionContainer"] p {font:14px/1.7 var(--mail-body-font);color:var(--mail-ink)}
+[data-testid="stMarkdownContainer"] :is(h1,h2,h3) {font-family:var(--mail-display-font);color:var(--mail-ink);font-weight:600;line-height:1.4;letter-spacing:0}
+[data-testid="stMarkdownContainer"] h1 {font-size:23px;padding:0 0 .35rem}
+[data-testid="stMarkdownContainer"] h2 {font-size:20px}
+[data-testid="stMarkdownContainer"] h3 {font-size:17px}
+[data-testid="stCaptionContainer"] p {color:var(--mail-muted);font-size:12px}
+[data-testid="stMarkdownContainer"] a {color:var(--mail-action)}
+[data-testid="stMarkdownContainer"] hr {border:0;border-top:1px solid var(--mail-rule);margin:.8rem 0}
 
-[data-testid="stAppViewContainer"],
-[data-testid="stMain"],
-[data-testid="stHeader"] {
-  background: var(--mail-canvas);
-  color: var(--mail-ink);
-}
-[data-testid="stAppViewContainer"] {
-  font-family: var(--mail-body-font);
-  font-size: 14px;
-  line-height: 1.6;
-}
-[data-testid="stMainBlockContainer"] {
-  max-width: 1540px;
-  padding: 4.5rem 2rem 3rem;
-}
-[data-testid="stMarkdownContainer"] p,
-[data-testid="stText"],
-[data-testid="stWidgetLabel"] p,
-[data-testid="stCaptionContainer"] p {
-  font-family: var(--mail-body-font);
-  font-size: 14px;
-  line-height: 1.6;
-}
-[data-testid="stMarkdownContainer"] h1,
-[data-testid="stMarkdownContainer"] h2,
-[data-testid="stMarkdownContainer"] h3 {
-  font-family: var(--mail-display-font);
-  color: var(--mail-ink);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -.025em;
-}
-[data-testid="stMarkdownContainer"] h1 {
-  font-size: 28px;
-  padding: 0 0 .45rem;
-}
-[data-testid="stMarkdownContainer"] h2 { font-size: 21px; }
-[data-testid="stMarkdownContainer"] h3 { font-size: 17px; }
-[data-testid="stCaptionContainer"] { color: var(--mail-muted); }
-[data-testid="stWidgetLabel"] { color: var(--mail-muted); }
-[data-testid="stMarkdownContainer"] a { color: var(--mail-action); }
-[data-testid="stMarkdownContainer"] hr {
-  border: 0;
-  border-top: 1px solid var(--mail-rule);
-  margin: 1rem 0;
-}
+/* Native mobile navigation, error messages and service controls remain usable. */
+[data-testid="stSidebar"] {width:216px!important;min-width:216px!important;max-width:216px!important;background:var(--mail-canvas);color:var(--mail-ink);border-right:1px solid var(--mail-rule)}
+[data-testid="stSidebarContent"] {padding:0 14px}
+[data-testid="stSidebarUserContent"] {padding:.3rem .125rem 1rem;margin:0;width:100%}
+[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {min-height:calc(100dvh - 90px);gap:1rem}
+[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(> .st-key-sidebar_account) {margin-top:auto}
+.mail-brand {display:flex;align-items:center;gap:9px;margin:0 0 .6rem;color:var(--mail-ink)}
+.mail-brand svg {width:25px;height:25px;color:var(--mail-action);flex:none}
+.mail-brand__name {white-space:nowrap;font:600 18px/1.5 var(--mail-display-font)}
+.st-key-mail_nav [role="radiogroup"] {gap:4px}
+.st-key-workspace_page {width:100%}
+.st-key-mail_nav [role="radiogroup"] > label {width:100%;min-height:42px;padding:8px 12px;margin:0;border-radius:7px;gap:10px;color:var(--mail-muted)}
+/* Inputs remain accessible by keyboard; only the circular art is removed. */
+.st-key-mail_nav [role="radiogroup"] > label > div:first-child {display:none}
+.st-key-mail_nav [role="radiogroup"] > label [data-testid="stMarkdownContainer"] p {color:var(--mail-muted);font-size:14px;line-height:1.5}
+.st-key-mail_nav [role="radiogroup"] > label:has(input:checked) {background:var(--mail-action-soft)}
+.st-key-mail_nav [role="radiogroup"] > label:has(input:checked) [data-testid="stMarkdownContainer"] p {color:var(--mail-action);font-weight:600}
+.st-key-mail_nav [role="radiogroup"] > label:hover {background:var(--mail-rule)}
+.st-key-mail_nav [role="radiogroup"] > label:focus-within {outline:2px solid var(--mail-action);outline-offset:2px}
+.st-key-sidebar_account {margin-top:auto;padding-top:1rem;border-top:1px solid var(--mail-rule)}
+.st-key-sidebar_account [data-testid="stVerticalBlock"] {gap:.4rem}
+.st-key-sidebar_account [data-testid="stPopover"] button {border:0;padding:0 .1rem;color:var(--mail-muted);background:transparent;min-height:30px}
+[data-testid="stSidebar"] [data-testid="stText"] {overflow-wrap:anywhere;font-size:13px}
 
-/* Keep the native sidebar toggle, toolbar, status and error surfaces intact. */
-[data-testid="stSidebar"] {
-  width: 240px !important;
-  min-width: 240px !important;
-  max-width: 240px !important;
-  background: var(--mail-sea);
-  color: var(--mail-paper);
-  border-right: 1px solid var(--mail-sea);
-}
-[data-testid="stSidebarUserContent"] { padding: 1rem 0 1.5rem; }
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
-  color: var(--mail-paper);
-}
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
-  color: var(--mail-sidebar-muted);
-}
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] a {
-  color: #A9E1D9;
-}
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] hr {
-  border-top-color: #385057;
-}
-[data-testid="stSidebar"] [data-testid="stIconMaterial"] {
-  color: inherit;
-}
+/* One border style, one action color and a visible keyboard focus. */
+:is([data-testid="stTextInput"],[data-testid="stTextArea"],[data-testid="stNumberInput"]) :is(input,textarea) {font:14px/1.6 var(--mail-body-font);color:var(--mail-ink)}
+:is([data-testid="stTextInput"],[data-testid="stTextArea"],[data-testid="stNumberInput"]) > div,[data-baseweb="select"] > div {border-color:var(--mail-rule);border-radius:7px;background:var(--mail-canvas);color:var(--mail-ink)}
+[data-testid="stBaseButton-primary"],[data-testid="stBaseButton-primaryFormSubmit"] {background:var(--mail-action);border:1px solid var(--mail-action);color:var(--mail-paper);border-radius:7px;min-height:38px}
+[data-testid="stBaseButton-primary"]:hover,[data-testid="stBaseButton-primaryFormSubmit"]:hover {filter:brightness(.94);color:var(--mail-paper)}
+[data-testid="stBaseButton-primary"] p,[data-testid="stBaseButton-primaryFormSubmit"] p {color:inherit}
+[data-testid="stBaseButton-secondary"],[data-testid="stBaseButton-secondaryFormSubmit"] {background:var(--mail-paper);border:1px solid var(--mail-rule);color:var(--mail-ink);border-radius:7px;min-height:36px}
+[data-testid="stBaseButton-secondary"]:hover,[data-testid="stBaseButton-secondaryFormSubmit"]:hover {background:var(--mail-action-soft);border-color:var(--mail-action);color:var(--mail-action)}
+[data-testid="stMain"] button:disabled {opacity:.5}
+[data-testid="stExpander"] > details {border-color:var(--mail-rule);border-radius:7px;background:var(--mail-paper)}
+[data-testid="stForm"] {border-color:var(--mail-rule)}
+:is(button,a,input,textarea,select,[role="radio"],[role="tab"]):focus-visible {outline:2px solid var(--mail-action);outline-offset:3px}
+[data-baseweb="tab-highlight"] {background-color:var(--mail-action)}
+[data-baseweb="tab"][aria-selected="true"] {color:var(--mail-action)}
+[data-testid="stMetricValue"] {font:600 24px/1.4 var(--mail-display-font)}
 
-.mail-brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  margin: 0 0 1.2rem;
-  padding-top: .15rem;
-  color: var(--mail-paper);
-}
-.mail-brand__stamp {
-  display: grid;
-  place-items: center;
-  flex: 0 0 42px;
-  height: 44px;
-  border: 1px dashed var(--mail-sidebar-muted);
-  outline: 1px solid #385057;
-  outline-offset: 3px;
-  color: var(--mail-paper);
-  font: 600 19px/1 var(--mail-display-font);
-  letter-spacing: -.03em;
-}
-.mail-brand__name {
-  font: 600 20px/1.2 var(--mail-display-font);
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-.mail-brand__caption {
-  margin-top: 5px;
-  color: var(--mail-sidebar-muted);
-  font: 11px/1.2 var(--mail-utility-font);
-  letter-spacing: .04em;
-}
-.st-key-mail_nav [role="radiogroup"] { gap: 5px; }
-.st-key-mail_nav [role="radiogroup"] > label {
-  width: 100%;
-  min-height: 42px;
-  margin: 0;
-  padding: 9px 10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--mail-sidebar-muted);
-}
-.st-key-mail_nav [role="radiogroup"] > label [data-testid="stMarkdownContainer"] p { color: var(--mail-sidebar-muted); font-size: 14px; }
-.st-key-mail_nav [role="radiogroup"] > label:has(input:checked) [data-testid="stMarkdownContainer"] p { color: var(--mail-paper); font-weight: 600; }
-.st-key-mail_nav [role="radiogroup"] > label:has(input:checked) > div:first-child { background-color: var(--mail-action); }
-.st-key-mail_nav [role="radiogroup"] > label:hover {
-  background: #25434A;
-  color: var(--mail-paper);
-}
-.st-key-mail_nav [role="radiogroup"] > label:has(input:checked) {
-  border-color: #45636B;
-  background: #2B4B52;
-  color: var(--mail-paper);
-}
-.st-key-mail_nav [role="radiogroup"] > label:focus-within {
-  outline: 2px solid #A9E1D9;
-  outline-offset: 2px;
-}
+/* Empty conversations group the invitation and composer. */
+[data-testid="stMainBlockContainer"]:has(.st-key-assistant_header) {max-width:940px;padding-top:2.5rem}
+.st-key-assistant_header {padding-bottom:.75rem}
+.st-key-assistant_header [data-testid="stVerticalBlock"] {gap:0}
+.st-key-assistant_header [data-testid="stPopover"] button {border:0;color:var(--mail-muted)}
+.st-key-assistant_header [data-testid="stHorizontalBlock"] {flex-wrap:nowrap;gap:.75rem}
+.st-key-assistant_header [data-testid="stColumn"]:first-child {min-width:0}
+.st-key-assistant_header [data-testid="stColumn"]:last-child {min-width:78px}
+.st-key-assistant_welcome {padding:clamp(2rem,14vh,9rem) 0 1.25rem;text-align:center}
+.st-key-assistant_welcome [data-testid="stVerticalBlock"] {gap:.3rem}
+.st-key-assistant_welcome [data-testid="stMarkdownContainer"] h3 {font-size:30px;font-weight:500;text-align:center;padding:0 0 .6rem}
+.st-key-assistant_welcome [data-testid="stMarkdownContainer"] p {font-size:14px;color:var(--mail-muted);text-align:center}
+.st-key-assistant_start {max-width:680px;margin:0 auto}
+.st-key-assistant_start [data-testid="stElementContainer"]:has([data-testid="stButton"]) {align-self:center}
+.st-key-assistant_start [data-testid="stButton"] {text-align:center}
+.st-key-assistant_start [data-testid="stButton"] button {border:0;color:var(--mail-muted);background:transparent;font-size:13px}
+.st-key-assistant_history [data-testid="stChatMessage"] {background:transparent;padding:1.15rem 0;border-radius:0;gap:12px}
+[data-testid^="stChatMessageAvatar"] {background:var(--mail-action-soft);color:var(--mail-action)}
+[data-testid="stBottomBlockContainer"] {max-width:940px;padding:.75rem 2.5rem 1.2rem}
+[data-testid="stBottom"],[data-testid="stBottom"] > div {background:var(--mail-paper)}
+[data-testid="stChatInput"] {background:var(--mail-canvas);border:1px solid var(--mail-rule);border-radius:16px;padding:.55rem .7rem}
+[data-testid="stChatInput"]:focus-within {border-color:var(--mail-action);box-shadow:0 0 0 2px var(--mail-action-soft)}
+[data-testid="stChatInput"] textarea {font:15px/1.7 var(--mail-body-font)}
+[data-testid="stChatInput"] [data-baseweb="textarea"],[data-testid="stChatInput"] textarea {background:transparent}
+.st-key-assistant_start [data-testid="stChatInput"] textarea {min-height:64px}
+[data-testid="stChatInputSubmitButton"] {color:var(--mail-action)}
 
-/* These keys are integration hooks, not selectors for private widget IDs. */
-.st-key-mail_header {
-  padding-bottom: .85rem;
-  margin-bottom: .25rem;
-  border-bottom: 1px solid var(--mail-rule);
-}
-.st-key-mail_list,
-.st-key-mail_reader {
-  min-width: 0;
-  padding: 1.1rem 1.15rem;
-  border: 1px solid var(--mail-rule);
-  border-radius: 8px;
-  background: var(--mail-paper);
-  color: var(--mail-ink);
-}
-.st-key-mail_list { border-top: 3px solid var(--mail-action); }
-.st-key-mail_reader { padding: 1.25rem 1.5rem; }
-.mail-body { white-space: pre-wrap; overflow-wrap: anywhere; font: 15px/1.9 var(--mail-body-font); color: var(--mail-ink); }
-.mail-address { overflow-wrap: anywhere; color: var(--mail-muted); font: 13px/1.6 var(--mail-body-font); }
-.mail-address b { font-weight: 500; display: inline-block; min-width: 54px; }
-.mail-subject { overflow-wrap: anywhere; }
-.mail-table-row { display:flex; flex-wrap:wrap; gap:1rem; margin:.4rem 0; padding:.4rem 0; border-bottom:1px solid var(--mail-rule); white-space:pre-wrap; }
-.mail-table-cell { flex:1 1 120px; min-width:0; overflow-wrap:anywhere; }
-.mail-table-cell:empty { display:none; }
-.mail-table-cell small { display:block; color:var(--mail-muted); font-size:12px; }
-.st-key-mail_rows [class*="st-key-mail_row_"] { padding: .2rem 0 .65rem; border-bottom: 1px solid var(--mail-rule); }
-.st-key-mail_rows [data-testid="stButton"] button { justify-content: flex-start; text-align: left; min-height: 2.6rem; }
-.st-key-mail_rows [data-testid="stBaseButton-primary"] { background: var(--mail-action-soft); color: var(--mail-action); border-color: var(--mail-action-soft); }
-.st-key-mail_rows [data-testid="stBaseButton-secondary"] { border-color: transparent; padding-left: .2rem; }
-.st-key-mail_rows [data-testid="stCaptionContainer"] p { font-size: 12px; margin: 0; }
-.st-key-mail_list [data-testid="stVerticalBlock"],
-.st-key-mail_reader [data-testid="stVerticalBlock"] { gap: .75rem; }
-.st-key-mail_list [data-testid="stBaseButton-secondary"] {
-  justify-content: flex-start;
-  text-align: left;
-}
-.st-key-mail_reader [data-testid="stText"] {
-  overflow-wrap: anywhere;
-  line-height: 1.75;
-}
-.st-key-mail_reader [data-testid="stTextArea"] textarea {
-  background: var(--mail-paper);
-  font-size: 15px;
-  line-height: 1.85;
-}
-.st-key-mail_reader [data-testid="stTextArea"] textarea:disabled {
-  color: var(--mail-ink);
-  -webkit-text-fill-color: var(--mail-ink);
-  opacity: 1;
-  cursor: text;
-}
-.st-key-mail_reader [data-testid="stJson"] {
-  font-family: var(--mail-utility-font);
-  font-size: 12px;
-}
+/* Mail reading uses one list/reader boundary, not a stack of cards. */
+.st-key-mail_header {padding-bottom:.6rem}
+.st-key-mail_list,.st-key-mail_reader {min-width:0;background:var(--mail-paper)}
+.st-key-mail_list {padding:.75rem 1.25rem .75rem 0;border-right:1px solid var(--mail-rule)}
+.st-key-mail_reader {padding:.75rem 0 .75rem 1rem}
+.st-key-mail_list [data-testid="stVerticalBlock"],.st-key-mail_reader [data-testid="stVerticalBlock"] {gap:.7rem}
+.mail-subject {overflow-wrap:anywhere}
+.mail-body {white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.9 var(--mail-body-font);color:var(--mail-ink)}
+.mail-address {overflow-wrap:anywhere;color:var(--mail-muted);font:12px/1.7 var(--mail-body-font)}
+.mail-address b {font-weight:500;display:inline-block;min-width:54px}
+.mail-table-row {display:flex;flex-wrap:wrap;gap:1rem;margin:.4rem 0;padding:.4rem 0;border-bottom:1px solid var(--mail-rule);white-space:pre-wrap}
+.mail-table-cell {flex:1 1 120px;min-width:0;overflow-wrap:anywhere}
+.mail-table-cell:empty {display:none}
+.mail-table-cell small {display:block;color:var(--mail-muted);font-size:12px}
+.st-key-mail_rows [class*="st-key-mail_row_"] {padding:.15rem 0 .65rem;border-bottom:1px solid var(--mail-rule)}
+.st-key-mail_rows [data-testid="stButton"] button {justify-content:flex-start;text-align:left;min-height:2.6rem}
+.st-key-mail_rows [data-testid="stBaseButton-primary"] {background:var(--mail-action-soft);color:var(--mail-action);border-color:transparent}
+.st-key-mail_rows [data-testid="stBaseButton-secondary"] {border:0;padding-left:.2rem}
+.st-key-mail_rows [data-testid="stButton"] p {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.5;text-align:left;width:100%}
+.st-key-mail_rows [data-testid="stButton"] [data-testid="stMarkdownContainer"] {width:100%}
+.st-key-mail_rows [data-testid="stCaptionContainer"] p {margin:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-key-mail_reader textarea:disabled {color:var(--mail-ink);-webkit-text-fill-color:var(--mail-ink);opacity:1;cursor:text}
+.st-key-mail_settings,.st-key-settings_tools {max-width:860px;margin:0 auto}
+.st-key-mail_settings [data-baseweb="tab-panel"] {padding-top:1.25rem}
+.st-key-mail_inbox [data-testid="stForm"] {padding:0 0 1rem}
 
-[data-testid="stTextInput"] input,
-[data-testid="stTextArea"] textarea,
-[data-testid="stNumberInput"] input {
-  font-family: var(--mail-body-font);
-  font-size: 14px;
-  color: var(--mail-ink);
+@media (max-width:1000px) {
+ [data-testid="stMainBlockContainer"] {padding:3rem 1.25rem 2rem}
 }
-[data-testid="stTextInput"] > div,
-[data-testid="stTextArea"] > div,
-[data-testid="stNumberInput"] > div,
-[data-baseweb="select"] > div {
-  border-color: var(--mail-rule);
-  border-radius: 6px;
-  background: var(--mail-paper);
-  color: var(--mail-ink);
+@media (max-width:720px) {
+ [data-testid="stMainBlockContainer"],[data-testid="stMainBlockContainer"]:has(.st-key-assistant_header) {padding:3rem 1rem 2rem}
+ [data-testid="stBottomBlockContainer"] {padding:.5rem 1rem 1rem}
+ .st-key-assistant_welcome {padding-top:10vh}
+ .st-key-assistant_welcome [data-testid="stMarkdownContainer"] h3 {font-size:26px}
+ [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_reader) {flex-wrap:wrap;gap:1rem}
+ [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_reader) > [data-testid="stColumn"] {width:100%;flex:1 1 100%;min-width:0}
+ .st-key-mail_list {padding:.75rem 0;border-right:0;border-bottom:1px solid var(--mail-rule)}
+ .st-key-mail_reader {padding:.75rem 0}
 }
-[data-testid="stBaseButton-primary"],
-[data-testid="stBaseButton-primaryFormSubmit"] {
-  background: var(--mail-action);
-  color: var(--mail-paper);
-  border: 1px solid var(--mail-action);
-  border-radius: 6px;
-  font-weight: 600;
-  min-height: 38px;
-}
-[data-testid="stBaseButton-primary"]:hover,
-[data-testid="stBaseButton-primaryFormSubmit"]:hover {
-  background: #0B605A;
-  border-color: #0B605A;
-  color: var(--mail-paper);
-}
-[data-testid="stBaseButton-secondary"],
-[data-testid="stBaseButton-secondaryFormSubmit"] {
-  background: var(--mail-paper);
-  color: var(--mail-ink);
-  border: 1px solid var(--mail-rule);
-  border-radius: 6px;
-  min-height: 36px;
-}
-[data-testid="stBaseButton-secondary"]:hover,
-[data-testid="stBaseButton-secondaryFormSubmit"]:hover {
-  background: var(--mail-action-soft);
-  border-color: var(--mail-action);
-  color: var(--mail-action);
-}
-[data-testid="stMain"] button:disabled { opacity: .52; }
-[data-testid="stExpander"] > details {
-  border-color: var(--mail-rule);
-  border-radius: 6px;
-  background: var(--mail-paper);
-  color: var(--mail-ink);
-}
-[data-testid="stSidebar"] [data-testid="stExpander"] > details {
-  background: #203E45;
-  border-color: #385057;
-  color: var(--mail-paper);
-}
-[data-testid="stForm"] { border-color: var(--mail-rule); }
-[data-testid="stMetricValue"] {
-  font-family: var(--mail-display-font);
-  font-size: 23px;
-  color: var(--mail-ink);
-}
-
-:is(button, a, input, textarea, select, [role="radio"], [role="tab"]):focus-visible {
-  outline: 2px solid var(--mail-focus);
-  outline-offset: 3px;
-}
-[data-testid="stSidebar"] :is(button, a, [role="radio"]):focus-visible {
-  outline-color: #A9E1D9;
-}
-
-@media (max-width: 1000px) {
-  [data-testid="stMainBlockContainer"] { padding: 4.5rem 1rem 2rem; }
-  .st-key-mail_list { padding: .9rem; }
-  .st-key-mail_reader { padding: 1rem; }
-}
-@media (max-width: 720px) {
-  [data-testid="stMainBlockContainer"] { padding: 4rem .75rem 2rem; }
-  [data-testid="stMarkdownContainer"] h1 { font-size: 25px; }
-  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_reader) {
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-mail_reader)
-    > [data-testid="stColumn"] {
-    width: 100%;
-    flex: 1 1 100%;
-    min-width: 0;
-  }
-  .st-key-mail_reader { padding: 1rem; }
-}
-
-/* The assistant has one primary action: the native, bottom-pinned composer. */
-[data-testid="stMainBlockContainer"]:has(.st-key-assistant_header) {
-  max-width: 1080px;
-  padding-top: 3.5rem;
-}
-[data-testid="stAppViewContainer"]:has(.st-key-assistant_header),
-[data-testid="stAppViewContainer"]:has(.st-key-assistant_header) [data-testid="stHeader"] {
-  background: var(--mail-paper);
-}
-.st-key-assistant_header { border-bottom: 1px solid var(--mail-rule); padding-bottom: 1rem; }
-.st-key-assistant_header [data-testid="stCaptionContainer"] p { font-size: 14px; }
-.st-key-assistant_welcome { padding: 7vh 0 4vh; }
-.st-key-assistant_welcome [data-testid="stMarkdownContainer"] h3 { font-size: 30px; letter-spacing: -.035em; }
-.st-key-assistant_welcome [data-testid="stMarkdownContainer"] p { font-size: 16px; color: var(--mail-muted); }
-.st-key-assistant_welcome [data-testid="stButton"] { padding-top: .75rem; }
-.st-key-assistant_welcome [data-testid="stButton"] p { color: inherit; font-size: 14px; }
-.st-key-assistant_history [data-testid="stChatMessage"] { background: var(--mail-canvas); border-radius: 10px; }
-[data-testid="stBottomBlockContainer"] { max-width: 1080px; padding: .75rem 2rem 1.2rem; }
-[data-testid="stChatInput"] { border: 1px solid var(--mail-rule); border-radius: 12px; }
-[data-testid="stChatInput"]:focus-within { border-color: var(--mail-action); }
-[data-testid="stChatInput"] textarea { font-family: var(--mail-body-font); font-size: 16px; }
-[data-testid="stCaptionContainer"] p { color: var(--mail-muted); }
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color: var(--mail-sidebar-muted); }
-[data-testid="stSidebar"] [data-testid="stText"] { color: var(--mail-paper); font-size: 13px; overflow-wrap: anywhere; }
-.st-key-mail_rows [data-testid="stButton"] p {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden; line-height: 1.5;
-}
-.st-key-mail_rows [data-testid="stCaptionContainer"] p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 720px) {
-  [data-testid="stMainBlockContainer"]:has(.st-key-assistant_header) { padding-top: 3rem; }
-  [data-testid="stBottomBlockContainer"] { padding: .5rem .75rem 1rem; }
-  .st-key-assistant_welcome { padding-top: 3vh; }
-  .st-key-assistant_welcome [data-testid="stMarkdownContainer"] h3 { font-size: 25px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  [data-testid="stAppViewContainer"] *,
-  [data-testid="stAppViewContainer"] *::before,
-  [data-testid="stAppViewContainer"] *::after {
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .01ms !important;
-    scroll-behavior: auto !important;
-  }
+@media (prefers-reduced-motion:reduce) {
+ [data-testid="stAppViewContainer"] *,[data-testid="stAppViewContainer"] *::before,[data-testid="stAppViewContainer"] *::after {animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
 </style>
 """
 
 
 def apply_theme(st):
-    """Apply static, local CSS. No user-controlled text is interpolated."""
+    """Static CSS only; no user-controlled text is interpolated."""
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
 def render_brand(st):
-    """Render the static wordmark inside the caller's sidebar context."""
+    """Static envelope wordmark with no external assets."""
     st.markdown(
         '<div class="mail-brand">'
-        '<span class="mail-brand__stamp" aria-hidden="true">邮</span>'
-        '<div><div class="mail-brand__name">邮件助手</div>'
-        '<div class="mail-brand__caption">你的邮箱助手</div></div>'
-        '</div>',
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">'
+        '<rect x="2.5" y="4.5" width="19" height="15" rx="3"/>'
+        '<path d="m3.5 6 8.5 6.5L20.5 6"/></svg>'
+        '<span class="mail-brand__name">邮件助手</span></div>',
         unsafe_allow_html=True,
     )

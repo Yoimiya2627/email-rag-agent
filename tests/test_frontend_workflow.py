@@ -38,7 +38,7 @@ def test_normal_chat_renders_response_without_uninitialized_result(advanced):
         assert not app.exception
         assert any('synthetic answer' in element.value for element in app.markdown)
         assert any('incomplete' in str(element.value) for element in app.warning)
-        assert not any(item.value == '你好，想聊点什么？' for item in app.subheader)
+        assert not any(item.value == '想聊些什么？' for item in app.subheader)
         assert any('任务编号' in item.value for item in app.caption) == advanced
 
 

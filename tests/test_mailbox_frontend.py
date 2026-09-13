@@ -99,7 +99,7 @@ def test_chat_home_is_simple_and_mail_opens_only_when_requested():
         app.session_state['show_jobs'] = True
         app.run()
         assert not app.exception
-        assert any(item.value == '邮件助手' for item in app.title)
+        assert any(item.value == '助手对话' for item in app.title)
         assert len(app.chat_input) == 1 and not app.chat_input[0].disabled
         assert not any(url.endswith('/jobs') or url.endswith('/index/status') or url.endswith('/messages') for url,_ in http.gets)
         assert not any(item.label in {'邮件数据路径','搜索邮件'} for item in app.text_input)
@@ -126,7 +126,7 @@ def test_mailbox_access_question_uses_local_report_without_calling_chat_or_readi
         answer = app.session_state['messages'][-1]
         assert '5 封' in answer['content'] and 'AI 对话还不能读取' in answer['content']
         assert answer['local_status'] is True
-        assert not any(item.value == '你好，想聊点什么？' for item in app.subheader)
+        assert not any(item.value == '想聊些什么？' for item in app.subheader)
         assert http.posts == []
         assert any(url.endswith('/report') for url, _ in http.gets)
         assert not any('/messages' in url or '/search' in url for url, _ in http.gets)
