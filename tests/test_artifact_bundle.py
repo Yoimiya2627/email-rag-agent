@@ -145,12 +145,6 @@ from core.chunker import chunk_email
 from models.schemas import Email
 embedder.embed_texts=lambda texts:[[1.0,0.0] for text in texts]
 if sys.argv[2]=='build':
-    client=embedder._get_client()
-    create=client.get_or_create_collection
-    def persisted_collection(*args,**kwargs):
-        kwargs['metadata']={**kwargs.get('metadata',{}),'hnsw:batch_size':3,'hnsw:sync_threshold':3}
-        return create(*args,**kwargs)
-    client.get_or_create_collection=persisted_collection
     chunks=[]
     for number in range(3):
         email=Email(id=str(number),subject='synthetic',sender='a@example.invalid',recipients=[],date='2026-09-10',body='Synthetic evidence. '*10)

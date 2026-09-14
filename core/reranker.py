@@ -237,17 +237,27 @@ def _rerank_with_llm(query: str, results: List[SearchResult], top_n: int) -> Lis
     return [_copy_with_score(r, s) for r, s in scored[:top_n]]
 
 
-def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[SearchResult]:
+def rerank(query: str, results: List[SearchResult], top_n: int = None, *, diagnostics: dict | None = None) -> List[SearchResult]:
+    """Optionally expose this call's outcome without changing result semantics."""
+    def mark(status, reason=None, backend=None):
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update(status=status, reason=reason, backend=backend)
+
     top_n = top_n or cfg.RERANK_TOP_N
+    mark('skipped', 'empty_candidates')
     if not results:
         return []
     if not cfg.ENABLE_RERANKER:
+        mark('disabled', 'disabled')
         return results[:top_n]
     if len(results) <= 1:
+        mark('skipped', 'insufficient_candidates')
         return results[:top_n]
 
     ticket = _claim_attempt()
     if ticket is None:
+        mark('skipped', 'circuit_open')
         logger.warning("Reranker circuit breaker open, skipping rerank")
         return results[:top_n]
 
@@ -259,14 +269,18 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None) -> List[S
             reranked = _rerank_with_llm(query, results, top_n)
         else:
             logger.warning("Unknown reranker backend %r, falling back to LLM rerank", backend)
+            backend = 'llm'
             reranked = _rerank_with_llm(query, results, top_n)
         _finish_attempt(ticket, True)
+        mark('succeeded', backend=backend)
         return reranked
-    except (RunDeadlineExceeded, ContextBudgetExceeded, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded):
+    except (RunDeadlineExceeded, ContextBudgetExceeded, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded) as exc:
         _finish_attempt(ticket, None)
+        mark('failed', type(exc).__name__)
         raise
     except Exception as exc:
         _finish_attempt(ticket, False)
+        mark('failed', type(exc).__name__)
         logger.warning(
             "Reranker failed (%s), consecutive=%s, returning original order",
             type(exc).__name__,

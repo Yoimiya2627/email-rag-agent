@@ -1,25 +1,27 @@
-﻿# Email RAG Agent
+# Email RAG Agent
 
-2026-09-13 前端以聊天为首页：左侧分为「助手对话」「查看邮件」「邮箱设置」，输入框固定在底部。需要时再打开邮件，后台同步日志放在设置中。真实邮件仍仅在本地读取与搜索，尚未接入AI对话。当前支持163，QQ等接入后续补充。设计与验证见 [多邮箱界面说明](docs/frontend-mail-workspace-2026-09-13.md)。
-
-2026-09-12 新增 163 邮箱历史分批回补、后台定时增量同步及独立本地全文搜索。真实邮件不自动进入模型问答索引；使用与本轮实测范围见 [163 后台同步与验证说明](docs/163-background-sync-validation-2026-09-12.md)。
+面向个人使用的邮件智能助手：对导入资料和同步入索引的163邮件进行混合检索、带来源的问答和回复草稿生成；Agent 可调用邮件工具，高风险动作进入人工审批。
 
 > **Author**: 赵伟鑫 (Yoimiya2627) — Agent 开发工程师 / 大模型应用开发工程师
 > **Contact**: a1486807398@163.com | [GitHub](https://github.com/Yoimiya2627)
 
-2026-09-11 已修复 Gmail 审批账号/授权绑定、完整原件版本重放、草稿附件覆盖提示，以及未完成模型结果误作检索条件四处问题。兼容变化与回家后的验证步骤见 [修复与验收说明](docs/bugfix-2026-09-11.md)。当前离线验证仍有 Chroma/gRPC 原生 DLL 环境阻碍，尚未完成真实模型和邮箱验收。
+## 当前状态（2026-09-14）
 
-2026-09-10 上下文开发已加入中文/编号历史检索、命中窗口、任务与约束版本、可选语义摘要/候选记忆、工具结果分页、闭合交互引用压缩及 checkpoint v2。使用、开关、迁移和验收边界见 [上下文优化说明](docs/context-development-2026-09-10.md)。语义摘要与候选抽取默认关闭，确定性回归不代表真实模型质量成绩。
+- **已实现**：向量 + BM25 + RRF 检索、来源回读、普通问答 / 自主工具调用 / 可选 Self-RAG、会话与后台任务持久化、执行预算、人工审批及索引恢复。
+- **已验证**：最新 Windows 1526 项回归、190 项子测试通过，3 项平台相关跳过；163 账号当前8个文件夹38封真实邮件的正文索引、逐封问答和一次日常定时任务验收通过，见 [真实邮件验收](docs/validation/2026-09-14/163-auto-index.md)。此前两种 Linux 环境各1476项、本机16项及 Docker 9项通过；这些是历史结果，本次功能增量未重跑 Linux / Docker，不能跨环境相加当成独立用例数。
+- **此前演示验收**：固定合成数据评测、操作演示和当轮修改验收见 [2026-09-14 验收记录](docs/validation/2026-09-14/README.md)。历史 V1–V7 指标不代表当前版本成绩。
+- **支持边界**：单 owner、单 API 实例、单 worker。Windows 的 163 邮箱可开启同步后自动更新 AI 索引，见下方说明；Linux 容器不能使用 Windows DPAPI 邮箱凭据。
+- **执行边界**：审批默认只做本地模拟；Gmail provider 只创建草稿，真实发送未实现。上面的合成演示与历史回归不能代替真实邮箱验收。
 
-一个面向邮件场景的 Agentic RAG 系统。底层是向量检索 + BM25 + RRF + 可选 Cross-Encoder reranker 的混合检索 RAG；上层是 DeepSeek 原生 function calling 的 ReAct-style agent loop；工具层已经升级为 MCP-ready backend，支持 FastMCP tools/resources/prompts、可选 MCP 鉴权、工具级权限策略、审计查询、人审审批、Gmail draft-only provider、Gmail read-only 增量同步和 EvalOps trace/report/gate。
+前端以聊天为首页，侧栏提供「助手对话」「查看邮件」「邮箱设置」。部署前阅读 [个人单机部署](docs/personal-deployment.md)；状态维护见 [备份与留存](docs/state-retention-and-recovery.md)。模型权重需显式准备，容器构建默认不下载权重。
 
-2026-09-09 优化版已补齐检索约束、运行预算、事务审批、API 身份和评测一致性检查。迁移、兼容变化和验证范围见 [本次优化说明](docs/optimization-2026-09-09.md)。下方历史模型成绩不代表本次修改后的实测成绩。
+### 163 同步后自动进入 AI 索引
 
-后续 Astra 复审发现的 MCP、同步持久化、邮件正文保真、历史预算、索引预检与评分校验问题已修复。新旧数据和评测格式的迁移要求见 [BUG 修复与兼容说明](docs/bugfix-2026-09-09.md)。
+在 `.env` 中设置 `MAIL_AI_INDEX_ENABLED=true`，重启 API 后执行一次同步；后台计划和手动同步使用相同流程，已经下载的邮件也会补入索引。默认关闭。`MAIL_SCHEDULER_ENABLED=true` 且已保存启用的同步计划时，API 运行期间会持续自动同步并更新索引。
 
-当前个人单机部署采用一个 API worker、持久会话/后台任务和审批结果核对。先读 [部署指南](docs/personal-deployment.md)、[状态备份与留存](docs/state-retention-and-recovery.md) 和 [离线验证说明](docs/offline-validation.md)。容器构建与依赖安装默认不下载模型权重；实际 Docker 启动、托管 CI 和真实模型质量需要在目标环境验收。
+每次使用该账号本地已扫描快照中仍存在、解析成功且未标记删除的邮件正文更新当前 AI 索引；原始来源、发件人、日期、表格位置及附件解析覆盖信息保留。附件文本仍作为独立解析结果，不单独进入正文向量索引。已核实消失或标记删除的邮件会从当前索引移除；其他导入资料和同一 owner 的其他邮箱数据保留。无变化时复用原索引代和向量；失败或取消时保留上一版索引，下次同步重试。「邮箱设置」和邮箱面板显示索引数量及失败状态。
 
-2026-09-10 的会话恢复、证据回读、后台任务与迁移操作见 [个人使用与接口说明](docs/personal-use-2026-09-10.md)。本轮测试记录与验收边界单独保存，下面的旧演示和模型分数均为历史结果。
+索引由本地嵌入模型计算，不调用远端聊天模型；问答会向已配置的模型提交相关真实邮件片段。对话检索的是当前 owner 的共享资料，左侧邮箱选择只控制邮箱面板和同步状态查询。关闭开关只停止后续自动更新，不会删除已经入索引的内容；旧索引代也会为恢复保留，清理遵循备份与留存说明。
 
 ## 目录
 
@@ -42,21 +44,27 @@
 
 ## 核心亮点
 
-- **Function-calling Agent Loop**：`/chat/agent` 使用 DeepSeek 原生 tool calls，多轮执行 `plan -> tool_call -> observe -> re-plan`。
-- **MCP-ready Tool Backend**：工具定义集中在 `agents/tool_registry.py`，同源派生本地 function schema 和 FastMCP 注册。
-- **MCP 生产化基础**：MCP client 支持 bearer token header；server 可启用 token verifier；工具调用写 JSONL 审计；MCP tools/list 有 schema cache；MCP server 支持 allowed-tools 和 read-only 工具可见性策略。
-- **Human-in-the-loop 安全链路**：高风险 `send_email` 只创建 pending approval；审批通过后默认 simulated，配置 `MAIL_PROVIDER=gmail` 时只创建 Gmail draft，不直接发送。
-- **真实邮箱 read-only 接入**：Gmail read-only provider 使用独立只读 OAuth scope，把真实邮件增量同步到本地忽略 JSON，再复用清洗、切分、embedding 索引链路。
-- **Agent EvalOps**：105 条 agent 任务集覆盖多步、异常、歧义、权限、高风险发信和 Gmail draft；eval record 关联 `trace_id`，可输出失败归因、Markdown 报告和 CI gate。
-- **RAG 消融评测**：7 版 RAGAS-style 对比，量化 BM25、RRF、LLM reranker、Cross-Encoder reranker、query rewrite 的 ROI；新增 synthetic gold chunk baseline 和 `context_recall` 确定性评测，历史 V7 在 30 题上达到 `mean_context_recall=0.8000`。
-- **工程护栏**：max steps、重复工具调用检测、坏 JSON 降级、参数校验、工具异常回灌、工具输出截断、rerank 输入截断、生成上下文预算。
-- **离线回归**：pytest 用例与可独立执行的 unittest 覆盖检索、API、审批事务、MCP、运行预算、证据来源和评测门禁；具体执行范围见本次优化说明。
+- **混合检索与证据**：bge-m3 向量检索与 BM25 经 RRF 合并；保留邮件、片段和来源版本，支持按需回读证据。可选重排和 query rewrite 默认关闭。
+- **工具调用 Agent**：DeepSeek 原生 function calling 驱动多轮工具调用；本地工具 schema 与 MCP 注册来自共享 registry。
+- **执行与审批**：限制步骤、重复调用、上下文和 token 预算；SQLite 保存审批状态并去重，不确定的外部执行结果需人工核对。
+- **持久状态**：会话、任务检查点和约束版本落盘，后台任务中断后可按状态显式恢复。
+- **可检查的验收证据**：跨平台回归、真实模型的小规模评测、逐题回答与来源、演示步骤均明确标注数据和适用范围。
 
 ## Demo
 
-[![Demo preview](docs/demo.png)](docs/demo.mp4)
+[![当前版本操作演示](docs/validation/2026-09-14/demo-preview.png)](docs/validation/2026-09-14/demo.mp4)
 
-约 1 分 40 秒：邮件检索、预算查询、统计分析、evaluation 表格。点击预览图打开 MP4。
+使用 12 封合成邮件演示「导入 → 索引 → 问答及来源 → 回复草稿 → 人工审批」。审批使用 simulated provider，不发送邮件、不创建远端草稿。录像说明、操作步骤与逐步验收见 [演示说明](docs/validation/2026-09-14/demo.md)。
+
+复现隔离演示（需已配置模型 API key、准备好本地嵌入模型缓存；运行目录必须是全新的 ASCII 路径）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_portfolio_eval.py --demo --run-dir E:/email-agent-validation/my-demo
+```
+
+打开命令输出的本机地址，在高级工具中填写 `data/portfolio_demo/emails.json` 后索引。结束时在运行目录新建 `STOP` 文件；启动器会停止它创建的 API 和前端。运行状态隔离在指定目录，不会替换日常索引。
+
+[原演示视频](docs/demo.mp4)及其 5000 封样本场景保留为历史材料，不作为当前容量验收证据。
 
 ## 功能能力
 
@@ -348,54 +356,26 @@ Agent eval：
 
 ## 评测结果
 
-RAG 消融脚本：
+当前版本使用 [12 封固定合成邮件](data/portfolio_demo/emails.json)和 [12 道固定题目](data/portfolio_demo/cases.json)，通过真实 `/query` 接口、真实 bge-m3 嵌入和配置的远端模型逐题运行。记录预设事实/引用检查通过率、gold 邮件召回、引用 ID 有效性、HTTP 耗时和 provider token 用量。逐题语义审阅与自动规则分开记录；引用 ID 有效不等于所有陈述有依据。
+
+结果与口径见 [本轮评测报告](docs/validation/2026-09-14/evaluation.md)。这是一次小样本功能评测，未执行历史 105 题 Agent gate、真实邮箱质量评测或并发容量测试。
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_ragas_eval.py --versions V2
-.\.venv\Scripts\python.exe scripts\run_ragas_eval.py
-.\.venv\Scripts\python.exe scripts\measure_latency.py --limit 10
-.\.venv\Scripts\python.exe scripts\measure_reranker_latency.py --versions V2,V7
-.\.venv\Scripts\python.exe scripts\evaluate_context_recall.py --init-template --gold data\gold_chunks.json --limit 30
-.\.venv\Scripts\python.exe scripts\evaluate_context_recall.py --gold data\gold_chunks.json --versions V2,V7
+.\.venv\Scripts\python.exe scripts/run_portfolio_eval.py --run-dir E:/email-agent-validation/my-evaluation
 ```
 
-7 个版本：
+每次使用新目录，保留失败题和错误；不会用重试结果覆盖首次结果。报告包含源码、数据及评分脚本指纹，模型答案可能随服务端版本或采样变化。需配置模型 API key，API 调用可能计费；嵌入模型仅使用已有缓存。
 
-| Version | BM25 | RRF | Reranker | Backend | Rewrite | answer_relevancy | faithfulness | context_precision |
-|---|---:|---:|---:|---|---:|---:|---:|---:|
-| V1 | false | false | false | llm | false | 0.8667 | 0.9233 | 0.5937 |
-| V2 | true | true | false | llm | false | 0.9567 | 0.9000 | 0.5713 |
-| V3 | true | true | true | llm | false | 0.9333 | 0.9017 | **0.7147** |
-| V4 | true | true | true | llm | true | 0.9533 | 0.8783 | 0.6427 |
-| V5 | true | false | true | llm | true | 0.9467 | 0.9083 | 0.6147 |
-| V6 | true | true | false | llm | true | 0.9600 | 0.8967 | 0.6050 |
-| V7 | true | true | true | cross_encoder | false | **0.9750** | **0.9267** | 0.6103 |
-
-确定性 context_recall（`data/gold_chunks.json`，前 30 题 synthetic gold chunks）：
-
-| Version | n | mean_context_recall | chunk_hit_rate | perfect_recall_rate |
-|---|---:|---:|---:|---:|
-| V2 | 30 | 0.6167 | 0.6333 | 0.6000 |
-| V7 | 30 | **0.8000** | **0.8000** | **0.8000** |
-
-当前结论：
-
-- V2 仍适合作为默认对话路径：组件少、延迟低，relevancy 处于第一梯队。
-- V7 验证了 Cross-Encoder 的工程价值：不再把 rerank 变成一次额外 LLM 评分调用，本次 30 题实测 relevancy / faithfulness 最高，precision 比 V2 有提升但低于旧 LLM V3；在同一批 gold chunks 上，`mean_context_recall` 从 V2 的 0.6167 提升到 0.8000。
-- V3 的旧 LLM reranker 仍拿到最高 context_precision，但代价是额外 LLM 延迟和评分方差；生产路径更适合作为可选高精度模式，而不是默认模式。
-- Phase 8 已补 `core.reranker_policy` 和 `scripts/measure_reranker_latency.py`：默认对话仍选 V2；质量优先选 V7；需要高 precision 且允许额外 LLM scorer 时才把 V3 当对照。
-- Phase 10 已补 `scripts/evaluate_context_recall.py`、`data/gold_chunks.json` 和 `data/eval_results/context_recall.json`：可从 RAGAS testset 生成人工 gold chunk 模板，并用 `gold_chunk_ids` 对 V2/V7 等版本计算确定性的 `context_recall`。
-- Query rewrite 在部分场景提升 relevancy，但需要更稳 benchmark 和真实数据集验证。
-
-详细数据见 [docs/evaluation.md](docs/evaluation.md)。
+V1–V7 消融、30 题 context recall 和旧延迟实验集中在 [历史评测文档](docs/evaluation.md)，不用于描述本轮效果或容量。现有消融与 Agent gate 脚本仍可独立运行。
 
 ## 测试
 
 ```powershell
+$env:PYTHONUTF8='1'
 .\.venv\Scripts\python.exe scripts/offline_tests.py tests/ -q
 ```
 
-旧版记录的 `146 passed` 属于历史结果。当前离线 runner 禁用网络与 dotenv、隔离临时状态并阻止源码目录写入；依赖快照和 CI 验证范围见 [离线验证说明](docs/offline-validation.md)。本地通过的测试不代表 Docker 或托管 CI 已成功运行。HTTP 延迟/TTFT、并发与 24 小时验收步骤见 [服务测量指南](docs/service-performance-experiments.md)。
+2026-09-14 工程验收已经执行 Windows、Linux 与实际 API 镜像中的回归，并完成本机与 Docker 运行验收，计数、平台跳过项和本轮增量检查见 [验收记录](docs/validation/2026-09-14/README.md)。离线 runner 禁用网络与 dotenv、隔离临时状态并阻止源码目录写入。托管 CI、长期运行和并发容量尚未在本轮验证；测量方法见 [服务测量指南](docs/service-performance-experiments.md)。
 
 覆盖重点：
 

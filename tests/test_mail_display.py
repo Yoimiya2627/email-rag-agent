@@ -95,3 +95,28 @@ def test_empty_cells_with_arbitrary_text_field_do_not_remove_prose():
     body = 'User-authored prose'
     email = {'body': body, 'table_rows': [{'cells': [], 'start': 0, 'end': len(body), 'text': body}]}
     assert body_for_display(email) == escape(body)
+
+
+def test_mail_authored_markdown_uses_html_only_renderer():
+    from contextlib import nullcontext
+    from html.parser import HTMLParser
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from frontend.mailbox_view import _render_message
+
+    payload = 'Paragraph\n\n![tracker](https://tracking.invalid/pixel)\n\n[link](https://tracking.invalid/)'
+    email = {'subject':payload,'sender':payload,'recipients':[payload],'body':payload+'<img src="https://tracking.invalid/raw">'}
+    st = SimpleNamespace(html=Mock(), markdown=Mock(), caption=Mock(), divider=Mock(), json=Mock(),
+                         container=lambda **k:nullcontext(), expander=lambda *a,**k:nullcontext())
+    _render_message(st,lambda endpoint:{'email':email,'flags':[],'folder':'INBOX'},'/fixture','one')
+    st.markdown.assert_not_called()
+    assert st.html.call_count == 4
+    class Tags(HTMLParser):
+        def __init__(self):
+            super().__init__();self.tags=[];self.text=[]
+        def handle_starttag(self,tag,attrs): self.tags.append(tag)
+        def handle_data(self,data): self.text.append(data)
+    parsed=Tags()
+    for call in st.html.call_args_list: parsed.feed(call.args[0])
+    assert not {'img','a','script'}.intersection(parsed.tags)
+    assert payload in ''.join(parsed.text)

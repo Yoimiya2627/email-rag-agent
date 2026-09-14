@@ -200,16 +200,17 @@ def _render_message(st, get, prefix, selected, namespace='imap'):
         return
     # Mail content is always escaped, including subjects and addresses. Never
     # render the original HTML, Markdown links, images or tracking resources.
-    st.markdown('<h2 class="mail-subject">'+escape(email.get('subject') or '无主题')+'</h2>',unsafe_allow_html=True)
+    st.html('<h2 class="mail-subject">'+escape(email.get('subject') or '无主题')+'</h2>')
     flags = record.get('flags') or email.get('labels',[])
     st.caption(('已读' if '\\Seen' in flags else '未读')+' · '+('已加星标 · ' if '\\Flagged' in flags else '')+
                _plain_label(folder_label(record.get('folder','')))+' · '+_date(email.get('date')))
-    st.markdown('<div class="mail-address"><b>发件人</b> '+escape(str(email.get('sender','')))+'</div>',unsafe_allow_html=True)
+    st.html('<div class="mail-address"><b>发件人</b> '+escape(str(email.get('sender','')))+'</div>')
     if email.get('recipients'):
-        st.markdown('<div class="mail-address"><b>收件人</b> '+escape(', '.join(email['recipients']))+'</div>',unsafe_allow_html=True)
+        st.html('<div class="mail-address"><b>收件人</b> '+escape(', '.join(email['recipients']))+'</div>')
     st.divider()
     with st.container(height=470,border=False,key=namespace+'_body_scroll_'+selected):
-        st.markdown('<div class="mail-body">'+body_for_display(email)+'</div>',unsafe_allow_html=True)
+        # HTML-only rendering keeps literal Markdown images/links inert.
+        st.html('<div class="mail-body">'+body_for_display(email)+'</div>')
     parts = email.get('attachments',[])
     if parts:
         st.caption(f'附件 · {len(parts)} 个')
@@ -229,6 +230,20 @@ def _render_message(st, get, prefix, selected, namespace='imap'):
         st.json({'source':email.get('source',{}),'decode_quality':email.get('decode_quality',{})})
 
 
+def _render_ai_index(st, value):
+    state = value.get('state')
+    if state == 'ready':
+        st.caption(f"AI 索引已更新 · {value.get('email_count',0)} 封正文可参与问答")
+    elif state in {'error', 'unavailable', 'needs_sync'}:
+        st.warning('AI 索引尚未确认更新，问答可能使用上一版资料。请再次同步并检查报告。')
+    elif state == 'running':
+        st.caption('邮件已保存，正在更新 AI 索引；已有资料仍可查询。')
+    elif state == 'disabled':
+        st.caption('自动 AI 索引未开启。开启 MAIL_AI_INDEX_ENABLED 后重启服务并同步即可生效；关闭不会删除已有索引。')
+    elif value.get('enabled'):
+        st.caption('已启用自动 AI 索引，等待首次同步完成。')
+
+
 def _render_inbox(st, get, post, account, schedule, report):
     aid, prefix = account['id'], '/mailboxes/'+account['id']
     with st.container(key='mail_header'):
@@ -243,6 +258,7 @@ def _render_inbox(st, get, post, account, schedule, report):
             if st.button('立即同步',use_container_width=True,type='primary'):
                 scope = schedule.get('folders') or [r['name'] for r in report.get('folders',[])] or ['INBOX']
                 _start_sync(st,post,aid,scope,schedule.get('max_messages',100))
+    _render_ai_index(st, report.get('ai_index', {}))
     if report.get('failed') or report.get('not_downloaded'):
         st.warning(f"还有 {report.get('not_downloaded',0)} 封未下载、{report.get('failed',0)} 封未成功解析，可在「同步与设置」查看。")
     if schedule.get('state') == 'blocked' or (schedule.get('enabled') and schedule.get('worker_enabled') is False):
@@ -430,6 +446,7 @@ def _render_settings(st, get, post, account, accounts):
                     ['remote_snapshot_count','parsed','failed','not_downloaded']):
                 col.metric(label,report.get(key,0))
             st.caption('范围为已扫描文件夹的最近快照；解析成功不表示每个附件或字符都完整。')
+            _render_ai_index(st, report.get('ai_index', {}))
             if report.get('issues'):
                 st.write('需要核查的项目',report['issues'])
             st.write({'正文为空':report.get('body_empty',0),'解码需核查':report.get('decode_suspect',0),'附件解析状态':report.get('attachments',{})})

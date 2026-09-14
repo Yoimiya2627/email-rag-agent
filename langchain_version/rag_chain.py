@@ -3,7 +3,7 @@ LangChain-based RAG chain — parallel implementation alongside the custom pipel
 
 Uses:
   - langchain_openai.ChatOpenAI → DeepSeek API
-  - langchain_community.vectorstores.Chroma → same ChromaDB collection
+  - core.embedder.search_similar → current published ChromaDB generation
   - langchain.chains.RetrievalQA with ConversationalRetrievalChain
   - ConversationBufferWindowMemory for multi-turn context
 
@@ -23,12 +23,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config.settings as cfg
-from core.embedder import _get_embedding_fn  # reuse same embedding model
+from core.embedder import search_similar
 
 # Lazy imports to avoid mandatory dependency on langchain
 try:
     from langchain_openai import ChatOpenAI
-    from langchain_community.vectorstores import Chroma
+    from langchain_core.documents import Document
+    from langchain_core.retrievers import BaseRetriever
     from langchain.memory import ConversationBufferWindowMemory
     from langchain.chains import ConversationalRetrievalChain
     from langchain.prompts import PromptTemplate
@@ -72,13 +73,16 @@ def build_chain(k: int = 5, window: int = 5):
         request_timeout=cfg.LLM_TIMEOUT,
     )
 
-    embedding_fn = _get_embedding_fn()
-    vectorstore = Chroma(
-        collection_name=cfg.CHROMA_COLLECTION,
-        embedding_function=embedding_fn,
-        persist_directory=cfg.CHROMA_PERSIST_DIR,
-    )
-    retriever = vectorstore.as_retriever(search_kwargs={"k": k})
+    class SharedIndexRetriever(BaseRetriever):
+        top_k: int = k
+
+        def _get_relevant_documents(self, query, *, run_manager=None):
+            # The shared query pins the current manifest and validates the
+            # embedding revision/dimension for each retrieval operation.
+            return [Document(page_content=row['content'], metadata=row['metadata'])
+                    for row in search_similar(query, top_k=self.top_k)]
+
+    retriever = SharedIndexRetriever()
 
     memory = ConversationBufferWindowMemory(
         memory_key="chat_history",

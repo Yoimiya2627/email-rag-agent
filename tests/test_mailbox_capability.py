@@ -35,7 +35,7 @@ def test_unknown_state_never_claims_connection_or_invents_zero_messages():
     assert '尚未找到' in format_mailbox_status({'account_state':'not_configured'})
     answer = format_mailbox_status({'account_state':'configured','local_sync':{'state':'unavailable'}})
     assert '不能确认邮件数量' in answer
-    assert '0 封' not in answer and '还不能读取' in answer
+    assert '0 封' not in answer and '尚不能确认' in answer
 
 
 def test_unfamiliar_status_phrase_uses_only_question_for_classification(monkeypatch):

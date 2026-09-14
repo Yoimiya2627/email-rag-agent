@@ -1,5 +1,6 @@
 """Real local Chroma, deterministic vectors; never downloads models."""
 import threading
+from pathlib import Path
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
@@ -273,6 +274,9 @@ def test_rollback_after_hnsw_reader_cache_eviction(tmp_path, monkeypatch):
     try:
         db.index_chunks([chunk("old")], replace=True)
         old = active()
+        # A one-chunk generation must reach disk before cache eviction can
+        # discard its only usable HNSW reader.
+        assert list(Path(cfg.CHROMA_PERSIST_DIR).glob("*/index_metadata.pickle"))
         for index in range(5):
             db.index_chunks([chunk(f"new{index}")], replace=True)
             assert db.search_similar("evidence", top_k=1)[0]["email_id"] == f"new{index}"

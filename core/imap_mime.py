@@ -33,9 +33,10 @@ class MailParseError(ValueError):
 
 
 def parser_version() -> str:
-    from core import attachment_text, cleaner
+    from core import attachment_text, cleaner, html_tables
+    from models import schemas
     digest = hashlib.sha256(b''.join(Path(module).read_bytes() for module in
-        (__file__, attachment_text.__file__, cleaner.__file__))).hexdigest()
+        (__file__, attachment_text.__file__, cleaner.__file__, html_tables.__file__, schemas.__file__))).hexdigest()
     return 'imap-rfc822-v1:' + digest
 
 

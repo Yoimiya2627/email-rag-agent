@@ -44,8 +44,10 @@ class GmailPageTokenError(MailProviderError):
 
 
 def parser_version():
-    from core import mail_quality
-    digest = hashlib.sha256(Path(__file__).read_bytes() + Path(mail_quality.__file__).read_bytes()).hexdigest()
+    from core import mail_quality, cleaner, html_tables
+    from models import schemas
+    digest = hashlib.sha256(b''.join(Path(module).read_bytes() for module in
+        (__file__, mail_quality.__file__, cleaner.__file__, html_tables.__file__, schemas.__file__))).hexdigest()
     return "gmail-mime-v2:" + digest
 
 

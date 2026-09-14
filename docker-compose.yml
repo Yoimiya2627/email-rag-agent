@@ -26,6 +26,9 @@ services:
       APPROVAL_STORE_PATH: /app/data/approvals/pending_actions.json
       SESSION_STORE_PATH: /app/data/sessions/sessions.sqlite3
       TOOL_RESULT_STORE_PATH: /app/data/sessions/tool_results.sqlite3
+      MAIL_ACCOUNTS_PATH: /app/data/mail_sync/accounts.sqlite3
+      IMAP_DATA_ROOT: /app/data/real_emails/imap
+      MAIL_SCHEDULE_PATH: /app/data/mail_sync/mail-schedules.sqlite3
       JOB_STORE_PATH: /app/data/jobs/jobs.sqlite3
       AGENT_TRACE_LOG_PATH: /app/data/traces/agent_traces.jsonl
       MCP_AUDIT_LOG_PATH: /app/data/audit/mcp_audit.jsonl

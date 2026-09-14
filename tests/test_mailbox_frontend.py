@@ -110,9 +110,9 @@ def test_chat_home_is_simple_and_mail_opens_only_when_requested():
         assert not app.exception
         assert not app.chat_input
         assert any(item.value == '我的邮箱' for item in app.title)
-        assert not any('<div class="mail-body">' in item.value for item in app.markdown)
+        assert not any('<div class="mail-body">' in item.proto.body for item in app.get('html'))
         button(app,'合成邮件').click().run()
-        assert any('<div class="mail-body">' in item.value for item in app.markdown)
+        assert any('<div class="mail-body">' in item.proto.body for item in app.get('html'))
         navigate(app,'问答工作台')
         assert len(app.chat_input) == 1 and http.posts == []
 
@@ -474,7 +474,7 @@ def test_real_report_and_mail_html_are_displayed_safely_on_separate_pages():
         assert not app.exception
         assert not app.chat_input
         button(app, '合成邮件').click().run()
-        assert any('mail-body' in item.value and escape(HTML) in item.value for item in app.markdown)
+        assert any('mail-body' in item.proto.body and escape(HTML) in item.proto.body for item in app.get('html'))
         attachment = next(item for item in app.text_area if item.label == '附件提取文本')
         assert attachment.value == HTML and attachment.disabled
         assert not app.get('imgs') and not app.get('iframe')

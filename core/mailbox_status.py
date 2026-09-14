@@ -84,6 +84,18 @@ def _latest_job(owner, account_id, credential_version):
             'current_authorization': row['credential_version'] == credential_version}
 
 
+def _ai_index(owner, account_id):
+    if not cfg.MAIL_AI_INDEX_ENABLED or owner != cfg.API_OWNER_ID:
+        return {'state': 'disabled', 'enabled': False}
+    path = get_data_dir(cfg.IMAP_DATA_ROOT, owner, account_id)/'mail.sqlite3'
+    if not path.is_file():
+        return {'state': 'not_started', 'enabled': True}
+    with _read_db(path) as db:
+        row = db.execute("SELECT value FROM meta WHERE key='ai_index'").fetchone()
+    from core.mail_index import status_from_record
+    return status_from_record(json.loads(row[0]) if row else {'state': 'not_started'})
+
+
 def read_mailbox_status(owner, account_id=None, provider=None):
     """Owner comes from authenticated server context, never query text/model args."""
     result = {'account_state': 'unavailable', 'checked_at': time.time(),
@@ -114,11 +126,13 @@ def read_mailbox_status(owner, account_id=None, provider=None):
             ('local_sync', lambda: _counts(get_data_dir(cfg.IMAP_DATA_ROOT, owner, account['id'])/'mail.sqlite3', account['id'])),
             ('schedule', lambda: _schedule(owner, account['id'])),
             ('latest_job', lambda: _latest_job(owner, account['id'], account['credential_version'])),
+            ('ai_index', lambda: _ai_index(owner, account['id'])),
         ):
             try:
                 result[key] = read()
             except (OSError, sqlite3.Error, ValueError, TypeError):
                 result[key] = {'state': 'unavailable'}
+        result['ai_read_enabled'] = result.get('ai_index', {}).get('state') == 'ready'
         return result
     except (OSError, sqlite3.Error, ValueError, TypeError):
         return result
@@ -181,5 +195,12 @@ def format_mailbox_status(value):
     else:
         lines.append('自动同步未开启。')
     lines.append('本次只查询本地记录，未进行实时连接测试。')
+    ai = value.get('ai_index', {})
+    if ai.get('state') == 'ready':
+        lines.append(f"该邮箱最近已将 {ai['email_count']} 封正文更新到 AI 索引。")
+    elif ai.get('state') == 'disabled':
+        lines.append('自动 AI 索引未开启；已有索引不会因关闭开关而自动删除。')
+    else:
+        lines.append('尚不能确认该邮箱的当前 AI 索引已更新，请查看邮箱设置中的索引状态。')
     lines.append(CHAT_SCOPE_EXPLANATION)
     return '\n\n'.join(lines)

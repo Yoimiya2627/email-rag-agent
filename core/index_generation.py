@@ -146,7 +146,10 @@ def verify_generation(state, *, batch_size=256):
 
 
 @index_operation
-def build_index(chunks, batch_size=64, *, replace=False, force_reembed=False):
+def build_index(chunks, batch_size=64, *, replace=False, force_reembed=False, allow_empty=False,
+                on_complete=None):
+    if type(allow_empty) is not bool or (allow_empty and not replace):
+        raise ValueError("allow_empty requires a replacement snapshot")
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
         raise ValueError("batch_size must be positive")
     start_fingerprint = manifests.configuration_fingerprint()
@@ -160,6 +163,12 @@ def build_index(chunks, batch_size=64, *, replace=False, force_reembed=False):
             raise manifests.IndexCompatibilityError("Chunk configuration changed after preparation; prepare input again")
     backend = _backend()
     with backend._corpus_write():
+        def complete(count):
+            # The callback observes our exact result while still holding the
+            # writer lock, even when a concurrent writer replaces it afterwards.
+            if on_complete is not None:
+                on_complete(manifests.read_active_manifest())
+            return count
         active = manifests.read_active_manifest(validate_compatibility=not replace)
         if not replace and active is None:
             legacy = backend._legacy_collection()
@@ -198,17 +207,25 @@ def build_index(chunks, batch_size=64, *, replace=False, force_reembed=False):
                 os.fsync(output.fileno())
             if manifests.configuration_fingerprint() != start_fingerprint:
                 raise manifests.IndexCompatibilityError("Index configuration changed during input preparation")
-            if not count:
+            if not count and not allow_empty:
                 source_path.unlink(missing_ok=True)
                 if replace:
                     raise ValueError("replacement index input must contain chunks")
                 set_outcome("unchanged")
-                return 0
+                return complete(0)
         except BaseException:
             source_path.unlink(missing_ok=True)
             raise
         add_count("input_chunks", count)
         add_count("input_emails", len(email_ids))
+        if not count and active and active.get('chunk_count') == 0:
+            manifests.check_compatibility(active)
+            metrics = verify_generation(active)
+            if any(active.get(key) != value for key, value in metrics.items()):
+                raise ValueError('Empty base generation verification failed')
+            source_path.unlink(missing_ok=True)
+            set_outcome('unchanged')
+            return complete(0)
         if not active or not active.get("chunk_count"):
             add_count("new_emails", len(email_ids))
         configuration = manifests.configuration()
@@ -235,9 +252,9 @@ def build_index(chunks, batch_size=64, *, replace=False, force_reembed=False):
                             run.progress("index_unchanged", completed_chunks=count, total_chunks=count,
                                          reused_chunks=count, embedded_chunks=0)
                         source_path.unlink(missing_ok=True)
-                        return count
-                return _create_and_resume(generation, source_path, count, email_ids, configuration,
-                    active, batch_size, replace, force_reembed, reuse)
+                        return complete(count)
+                return complete(_create_and_resume(generation, source_path, count, email_ids, configuration,
+                    active, batch_size, replace, force_reembed, reuse))
         except BaseException:
             # Once a manifest exists the source is a checkpoint. Before that,
             # the file is an uncommitted private preflight spool.
@@ -298,8 +315,13 @@ def _resume_body(state, reuse):
     with measure_stage("source_verify"):
         if not state.get("source_complete") or _file_digest(path) != state["source_sha256"]:
             raise ValueError("Stored index input is incomplete or changed; create a new build")
+    # Immutable generations can contain only one chunk. Persist every applied
+    # batch so eviction cannot strand a generation below Chroma's default
+    # 1000-record sync threshold. Use the configuration API (legacy metadata
+    # rejects thresholds below 3).
     stage = backend._get_client().get_or_create_collection(name=state["collection"],
-        metadata={"hnsw:space": "cosine"}, embedding_function=None)
+        configuration={"hnsw": {"space": "cosine", "sync_threshold": 1}},
+        embedding_function=None)
     batch_size = state["batch_size"]
     updated = set(state["updated_email_ids"])
     try:

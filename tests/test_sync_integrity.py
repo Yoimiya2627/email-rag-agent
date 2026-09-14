@@ -25,7 +25,7 @@ class FakeProvider:
     def list_message_ids(self, **kwargs):
         if self.entered is not None:
             self.entered.set()
-        if self.release is not None and not self.release.wait(10):
+        if self.release is not None and not self.release.wait(60):
             raise TimeoutError("test did not release the first sync")
         return self.ids
 
@@ -39,8 +39,11 @@ class FakeProvider:
         }
 
 
-def _sync_process(output, state, message_id, started, entered, release):
+def _sync_process(output, state, message_id, started, go, attempting, entered, release):
     started.set()
+    if not go.wait(60):
+        raise TimeoutError("test did not start the sync operation")
+    attempting.set()
     sync.sync_gmail_to_json(FakeProvider([message_id], entered, release), output, state, "", 10)
 
 
@@ -181,17 +184,28 @@ class SyncIntegrityTests(unittest.TestCase):
                 output, state = folder / "emails.json", folder / "state.json"
                 second_state = folder / "other-state.json" if distinct_state else state
                 first_started, second_started = context.Event(), context.Event()
+                first_go, second_go = context.Event(), context.Event()
+                first_attempting, second_attempting = context.Event(), context.Event()
                 first_entered, second_entered, release = context.Event(), context.Event(), context.Event()
-                first = context.Process(target=_sync_process, args=(output, state, "one", first_started, first_entered, release))
-                second = context.Process(target=_sync_process, args=(output, second_state, "two", second_started, second_entered, None))
-                first.start()
+                first = context.Process(target=_sync_process, args=(output, state, "one", first_started, first_go, first_attempting, first_entered, release))
+                second = context.Process(target=_sync_process, args=(output, second_state, "two", second_started, second_go, second_attempting, second_entered, None))
                 try:
-                    self.assertTrue(first_entered.wait(10))
+                    # Spawn/import time must not consume the first writer's
+                    # lock-holding deadline. Both workers are ready first.
+                    first.start()
                     second.start()
-                    self.assertTrue(second_started.wait(10))
+                    self.assertTrue(first_started.wait(60), "first worker did not start")
+                    self.assertTrue(second_started.wait(60), "second worker did not start")
+                    first_go.set()
+                    self.assertTrue(first_entered.wait(10), "first writer did not acquire the corpus")
+                    second_go.set()
+                    self.assertTrue(second_attempting.wait(10), "second writer did not attempt sync")
                     self.assertFalse(second_entered.wait(.2), "second writer read while first owned the corpus")
+                    self.assertTrue(first.is_alive(), "first writer exited before release")
                 finally:
                     release.set()
+                    first_go.set()
+                    second_go.set()
                     for process in (first, second):
                         if process.pid is not None:
                             process.join(15)

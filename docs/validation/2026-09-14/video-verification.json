@@ -1,0 +1,19 @@
+{
+  "programs": [],
+  "stream_groups": [],
+  "streams": [
+    {
+      "codec_name": "h264",
+      "width": 1440,
+      "height": 1064,
+      "pix_fmt": "yuv420p"
+    }
+  ],
+  "format": {
+    "duration": "56.520000",
+    "size": "2617672"
+  },
+  "video_sha256": "5f3c947b786791175a2133403b72db9f6f9db84ef33b471005d9f2cea64dbba5",
+  "raw_recording_sha256": "0539d30f85bbe72aa70df8d5f299e7639526512a75d576ed41f4886623d14377",
+  "transformation": "Full browser recording, unchanged playback timing, H.264 conversion and an added footer outside the application viewport; no generated UI or model responses."
+}

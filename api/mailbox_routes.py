@@ -1,4 +1,4 @@
-"""Local mailbox management; credentials and mail never enter a model call."""
+"""Local mailbox management and optional local AI indexing; no LLM calls."""
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -95,9 +95,23 @@ def run_mail_sync(job):
         run.checkpoint({'safe':True, 'kind':'imap_sync', 'account_id':account_id})
         run.progress('imap_connecting')
     with provider:
-        return sync_mailbox(provider, mailbox(owner, account_id), request['folders'],
+        store = mailbox(owner, account_id)
+        result = sync_mailbox(provider, store, request['folders'],
                             max_messages=request['max_messages'], parse_timeout=cfg.IMAP_PARSE_TIMEOUT,
                             retry_failed=request.get('retry_failed',False), check_binding=binding)
+    if cfg.MAIL_AI_INDEX_ENABLED:
+        from core.mail_index import index_mailbox, index_status
+        from agents.runtime import RunCancelled
+        try:
+            binding()
+            result['ai_index'] = index_mailbox(owner, store)
+        except RunCancelled:
+            raise
+        except Exception:
+            result['ai_index'] = index_status(store)
+            result['metadata'] = {'status':'error', 'completion_status':'incomplete',
+                                  'error_code':'mail_index_failed', 'model_calls':0}
+    return result
 
 
 def mailbox_router(admission, manager):
@@ -152,7 +166,9 @@ def mailbox_router(admission, manager):
     @router.get('/{account_id}/report')
     def report(account_id: str, identity: Identity = Depends(require_identity)):
         try:
-            return mailbox(identity.owner_id, account_id).report()
+            from core.mail_index import index_status
+            store = mailbox(identity.owner_id, account_id)
+            return {**store.report(), 'ai_index': index_status(store)}
         except Exception as exc:
             raise mailbox_error(exc) from None
 

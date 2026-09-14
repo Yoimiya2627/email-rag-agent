@@ -8,6 +8,7 @@ from openai import OpenAI, APITimeoutError
 
 from models.schemas import AgentRequest, AgentResponse
 from core.pipeline import retrieve
+from core.generator import format_email_date
 from core.memory import build_model_messages
 from core.evidence import rendered_evidence, source_coverage
 from core.model_outcomes import display_text, outcome_metadata, text_from_choice
@@ -48,7 +49,7 @@ class SummarizerAgent:
                 references.append(ref)
             context_parts.append(
                 f"邮件{i + 1} [{r.email_id}#{r.chunk_id}]（发件人: {m.get('sender','?')}，"
-                f"日期: {m.get('date','?')}，主题: {m.get('subject','?')}）：\n"
+                f"发件日期: {format_email_date(m.get('date','?'))}，主题: {m.get('subject','?')}）：\n"
                 f"覆盖状态（未读附件不作为证据）: {json.dumps(source_coverage(m), ensure_ascii=False)}\n{content}"
             )
         context = "\n\n".join(context_parts)

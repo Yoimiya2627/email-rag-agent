@@ -141,7 +141,7 @@ class ContextHistoryTests(unittest.TestCase):
             memory.add('assistant', f'answer-{index}-' + 'y'*500)
         schemas = [{'type':'function','function':{'name':'inspect','description':'read',
                    'parameters':{'type':'object','properties':{},'additionalProperties':False}}}]
-        first_messages = [{'role':'system','content':loop._SYSTEM}, *memory.to_messages(),
+        first_messages = [{'role':'system','content':loop._system_prompt()}, *memory.to_messages(),
                           {'role':'user','content':'current'}]
         budget = len(json.dumps([first_messages, schemas], ensure_ascii=False)) + 30
         requests = []

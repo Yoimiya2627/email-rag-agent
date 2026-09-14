@@ -38,7 +38,8 @@ def reset_cfg(monkeypatch):
     for name in ("ENABLE_BM25", "ENABLE_RRF", "ENABLE_RERANKER", "ENABLE_QUERY_REWRITE"):
         monkeypatch.setattr(cfg, name, getattr(cfg, name), raising=True)
     for name, value in {'API_AUTH_TOKEN':'', 'API_OWNER_ID':'local', 'MCP_OWNER_ID':'local',
-                        'MAIL_PROVIDER':'simulated', 'ENABLE_REAL_EMAIL_SEND':False}.items():
+                        'MAIL_PROVIDER':'simulated', 'ENABLE_REAL_EMAIL_SEND':False,
+                        'MAIL_AI_INDEX_ENABLED':False}.items():
         monkeypatch.setattr(cfg, name, value)
     yield
 

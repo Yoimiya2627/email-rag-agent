@@ -39,10 +39,23 @@ def _run_child(state, pytest_args):
                       PYTHONDONTWRITEBYTECODE='1')
     def guard(event,arguments):
         if event in {'os.remove','os.rmdir','os.mkdir','os.rename'}:
-            candidates=arguments[:2] if event=='os.rename' else arguments[:1]
-            for candidate in candidates:
+            if event=='os.rename':
+                candidates=((arguments[0],arguments[2]),(arguments[1],arguments[3]))
+            else:
+                candidates=((arguments[0],arguments[2 if event=='os.mkdir' else 1]),)
+            for candidate,dir_fd in candidates:
                 if isinstance(candidate,(str,bytes,os.PathLike)):
-                    target=Path(os.fsdecode(candidate)).resolve()
+                    target=Path(os.fsdecode(candidate))
+                    if not target.is_absolute() and dir_fd not in (None,-1):
+                        # Linux shutil cleanup uses paths relative to an open
+                        # directory, not cwd. Resolve that descriptor before
+                        # enforcing the same protected checkout boundary.
+                        try:
+                            base=Path('/proc/self/fd',str(dir_fd)).resolve(strict=True)
+                        except OSError as exc:
+                            raise RuntimeError('offline test cannot resolve directory descriptor') from exc
+                        target=base/target
+                    target=target.resolve()
                     if target==ROOT or target.is_relative_to(ROOT):
                         raise RuntimeError('offline test attempted to mutate project files')
         if event=='socket.connect':

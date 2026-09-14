@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from openai import OpenAI
 import config.settings as cfg
+from core.model_outcomes import outcome_metadata
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -88,7 +89,8 @@ def run_single(client: OpenAI, question: str, ground_truth: str) -> Dict[str, An
 
     reranked = retrieve(question)
     answer = generate_answer(question, reranked)
-    return {"answer": answer, "contexts": [r.content for r in reranked]}
+    return {"answer": answer, "answer_metadata": outcome_metadata(answer),
+            "contexts": [r.content for r in reranked]}
 
 
 _EVAL_USER_TMPL = """你是RAG系统评测专家。请给下面的检索问答打分。
@@ -212,13 +214,22 @@ def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) ->
         gt = item["ground_truth"]
         logger.info(f"  [{i+1}/{len(samples)}] {q[:60]}")
 
+        answer_metadata = {'status':'error', 'completion_status':'error',
+                           'finish_reason':None, 'error_code':'evaluation_failed'}
         try:
             result = run_single(client, q, gt)
-            scores = score_response(client, q, result["answer"], result["contexts"])
+            answer_metadata = result.get('answer_metadata') or outcome_metadata(result['answer'])
+            if answer_metadata['completion_status'] == 'complete':
+                scores = score_response(client, q, result["answer"], result["contexts"])
+            else:
+                # Keep failed/incomplete generations in the denominator as zero;
+                # scoring success must never hide an unfinished answer.
+                scores = _scored(dict.fromkeys(METRICS, 0.0), 'not_scored', 'skipped')
             records.append({
                 "question": q,
                 "ground_truth": gt,
                 "answer": result["answer"],
+                "answer_metadata": answer_metadata,
                 "contexts": result["contexts"],
                 **validate_scores(scores),
                 'scoring_method': scores.get('scoring_method', 'unknown'),
@@ -227,6 +238,7 @@ def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) ->
         except Exception as exc:
             logger.warning("  Failed; error_type=%s", type(exc).__name__)
             records.append({"question": q, "ground_truth": gt, "error": type(exc).__name__,
+                            "answer_metadata": answer_metadata,
                             **_scored(dict.fromkeys(METRICS, 0.0), 'unavailable', 'error')})
         time.sleep(0.3)
 
@@ -238,6 +250,8 @@ def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) ->
         by_method[method] = {m: round(sum(r[m] for r in group) / len(group), 4) for m in METRICS}
     scoring = {'method_counts': dict(methods), 'averages_by_method': by_method,
                'mixed_methods': len(methods) > 1, 'failed_count': sum(r['scoring_status'] == 'error' for r in records),
+               'unscored_count': sum(r['scoring_status'] == 'skipped' for r in records),
+               'answer_completion_counts': dict(Counter(r['answer_metadata']['completion_status'] for r in records)),
                'average_includes_failed_as_zero': True}
     return {"version": version, "flags": flags, "avg": avg, "records": records, 'scoring': scoring}
 

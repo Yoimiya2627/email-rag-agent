@@ -14,6 +14,8 @@ Windows 的 Chroma 索引目录必须使用完整 ASCII 路径，例如在 `.env
 
 ## Docker Compose
 
+163 本地邮箱的授权码目前使用 Windows 当前用户的 DPAPI 加密，账号配置和同步需要由 Windows 本机 API 执行。Linux 容器不支持这套凭据存储，挂载 Windows 账号数据库也不能解密授权码。本节容器部署可用于导入资料问答；163 接入应按上面的 Windows 本机方式部署。
+
 先提供 `.env` 中的 `DEEPSEEK_API_KEY` 和非空随机 `API_AUTH_TOKEN`，准备 `./data/emails.json` 与持久目录，再执行：
 
 ```text
@@ -24,6 +26,8 @@ docker compose up -d
 默认构建不下载模型权重，也不将邮件数据或 `.env`/凭据/SQLite 打入镜像。若明确希望构建时准备权重，设置 `PRELOAD_EMBEDDING_MODEL=true`，同时配置模型、revision 和 `HF_ENDPOINT` 后重新构建。不要将 API key、HF token 或 OAuth secret 放入 Docker build args；本实现未添加 BuildKit secret 下载流程。模型缓存使用 `hf_cache` 卷；已有卷会保留自己的内容，不会因重建镜像自动替换所有缓存。
 
 Dockerfile 目前从 `requirements.txt` 安装范围依赖；本地 constraints 是 Windows 环境实测版本闭包，不是已经验证的 Linux/ML 镜像锁。目标镜像需要执行 `pip check`、离线用例和索引兼容性检查后保存自己的精确版本记录。不要把镜像可构建等同于依赖或模型质量已验收。
+
+索引运行环境要求 Chroma ≥ 1.5.5。新建索引使用每批落盘的 HNSW 配置，避免小语料未达到默认持久化阈值时，在缓存淘汰后无法读取或回滚。旧索引不会被自动改写；升级后如旧索引出现 `Nothing found on disk`，在维护窗口停止 API，确认完整原始邮件语料后执行 `python scripts/index_emails.py --clear --force-reembed --data-path <完整语料JSON路径>`，再启动 API。此命令生成新版本并保留旧索引；`--force-reembed` 避免相同语料被判为无需更新。更频繁落盘会增加索引写入的磁盘开销。
 
 Compose 将 API 与 Streamlit 端口分别绑定到宿主机 `127.0.0.1:8000`、`127.0.0.1:8501`，容器内 API 使用 `0.0.0.0:8000` 并显式单 worker。`/health` 仅表示进程存活；`/ready` 另外检查预热与索引状态，仍不代表远端模型网络验证成功。Compose 依赖健康检查只等待存活，不会自动预热模型。
 
@@ -44,4 +48,4 @@ services:
 
 停掉 API、UI、MCP 和后台 worker 后，用 [完整状态包](state-retention-and-recovery.md) 一起保存语料、raw 目录、索引目录与审批/任务/会话 SQLite；恢复只写入新目录，原路径不会被覆盖。模型缓存与 OAuth secret 不会自动加入包。核对 manifest 与远端草稿结果后，再显式切换配置或挂载。
 
-本次验证包括离线 Python、配置解析和临时目录 PowerShell 探针；未执行 Docker 构建/启动、托管 CI、真实邮箱/模型或 24 小时运行。目标环境应按 [离线验证](offline-validation.md) 和 [服务性能实验](service-performance-experiments.md) 分层验收，保存实际结果与未验证项。
+目标环境应按 [离线验证](offline-validation.md) 和 [服务性能实验](service-performance-experiments.md) 分层验收，记录代码版本、实际依赖、通过及跳过的用例和未验证项。离线回归、容器健康检查、真实邮箱接入、模型质量和 24 小时稳定性应分别记录结果。

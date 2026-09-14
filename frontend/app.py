@@ -234,13 +234,17 @@ def _render_history_tools():
             if page.get('has_more') and st.button('下一页约束来源'):
                 st.session_state['fact_source_after_'+sid] = page['next_after']
                 st.rerun()
-            facts = (_get('/chat/facts',params={'session_id':sid}) or {}).get('facts',[])
+            fact_history = (_get('/chat/facts',params={'session_id':sid,'include_history':True}) or {}).get('facts',[])
+            facts = [fact for fact in fact_history if fact.get('status','active')=='active']
             for fact in facts:
                 st.write(f"{fact['key']}（版本 {fact['version']}）：{fact['value']}")
                 st.caption(f"来源：{fact['source_turn_id']}。任务资料不替代审批。")
                 if st.button('撤销约束',key=f"revoke-{sid}-{fact.get('scope','task')}-{fact['key']}-{fact['version']}"):
                     result=_post('/chat/facts/revoke',{'session_id':sid,'key':fact['key'],
-                        'source_turn_id':fact['source_turn_id'],'expected_version':fact['version'],
+                        'source_turn_id':fact['source_turn_id'],'expected_version':max(
+                            item['version'] for item in fact_history if item['key']==fact['key']
+                            and item.get('scope','task')==fact.get('scope','task')
+                            and item.get('task_id')==fact.get('task_id')),
                         'scope':fact.get('scope','task'),'task_id':fact.get('task_id')})
                     if result.get('error'): st.error(result['error'])
                     else: st.rerun()
@@ -250,7 +254,8 @@ def _render_history_tools():
                 key = st.text_input('约束名称',max_chars=100)
                 value = st.text_area('约束内容',max_chars=2000)
                 if st.button('保存约束') and key.strip():
-                    version = next((fact['version'] for fact in facts if fact['key']==key),0)
+                    version = max((fact['version'] for fact in fact_history
+                                   if fact['key']==key and fact.get('scope','task')=='task'),default=0)
                     result = _post('/chat/facts',{'session_id':sid,'key':key,'value':value,
                         'source_turn_id':source,'expected_version':version})
                     if result.get('error'):
@@ -731,7 +736,10 @@ def _render_conversation(mode, use_stream, *, embedded=False):
                     st.markdown(answer)
 
                 sources = result.get("sources", [])
-                render_evidence(st,sources,result.get('metadata') or {},_get,_post,'current-response')
+                # Keep widget IDs stable when this answer becomes a history
+                # message on the next rerun (including the first read click).
+                render_evidence(st,sources,result.get('metadata') or {},_get,_post,
+                                'history-'+str(len(st.session_state['messages'])))
 
                 _render_metadata(result.get("metadata"), compact=embedded)
 

@@ -16,13 +16,48 @@ from agents.eval_contract import effective_config
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def test_frontend_docker_source_allowlist_can_run_app_and_shared_helpers(tmp_path):
+    pytest.importorskip('streamlit.testing.v1')
+    import shlex
+    image=tmp_path/'frontend-image';image.mkdir()
+    for line in (ROOT/'Dockerfile.frontend').read_text().splitlines():
+        if not line.startswith('COPY '):continue
+        _,source,target=shlex.split(line)
+        if (ROOT/source).is_dir():
+            shutil.copytree(ROOT/source,image/target,ignore=shutil.ignore_patterns('__pycache__'))
+        else:
+            shutil.copy2(ROOT/source,image/Path(source).name)
+    probe=image/'probe.py'
+    probe.write_text('''import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).parent))
+import dotenv
+dotenv.load_dotenv=lambda *a,**k:False
+import requests
+from types import SimpleNamespace as NS
+requests.get=lambda *a,**k:NS(ok=True,status_code=200,raise_for_status=lambda:None,json=lambda:{'jobs':[],'sessions':[],'accounts':[]})
+from streamlit.testing.v1 import AppTest
+app=AppTest.from_file('frontend/app.py',default_timeout=15).run()
+assert not app.exception, str(app.exception)
+from frontend.mailbox_view import folder_label
+from core.cleaner import _normalize_whitespace
+from core.evidence import source_coverage
+assert folder_label('Archive')=='Archive'
+assert _normalize_whitespace('a  b')=='a b'
+assert source_coverage({})
+''',encoding='utf-8')
+    result=subprocess.run([sys.executable,'-I','-B',str(probe)],cwd=image,capture_output=True,text=True,timeout=40)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
 def test_compose_isolates_host_paths_and_frontend_secrets():
     services=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
     api=services['api']
     env=api['environment']
     assert env['API_HOST']=='0.0.0.0'
     for name in ('CHROMA_PERSIST_DIR','EMAIL_DATA_PATH','APPROVAL_STORE_PATH','SESSION_STORE_PATH','TOOL_RESULT_STORE_PATH','JOB_STORE_PATH',
-                 'AGENT_TRACE_LOG_PATH','MCP_AUDIT_LOG_PATH','MCP_SERVER_AUDIT_LOG_PATH','GMAIL_SYNC_OUTPUT_PATH','GMAIL_SYNC_STATE_PATH'):
+                 'AGENT_TRACE_LOG_PATH','MCP_AUDIT_LOG_PATH','MCP_SERVER_AUDIT_LOG_PATH','GMAIL_SYNC_OUTPUT_PATH','GMAIL_SYNC_STATE_PATH',
+                 'MAIL_ACCOUNTS_PATH','IMAP_DATA_ROOT','MAIL_SCHEDULE_PATH'):
         assert env[name].startswith('/app/')
     for name in ('GMAIL_CREDENTIALS_PATH','GMAIL_TOKEN_PATH','GMAIL_READONLY_TOKEN_PATH'):
         assert env[name].startswith('/run/gmail/')

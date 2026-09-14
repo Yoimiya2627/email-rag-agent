@@ -24,7 +24,7 @@ from core.pipeline import retrieve, extract_filters
 from core.memory import build_model_messages
 from core.generator import generate_answer, build_context
 from core.evidence import evidence_text
-from core.model_outcomes import outcome_metadata, text_from_choice
+from core.model_outcomes import ModelText, outcome_metadata, text_from_choice
 from agents.runtime import remaining_timeout
 from models.schemas import AgentRequest, AgentResponse, SearchResult, IntentType
 
@@ -163,7 +163,11 @@ def node_grade_contexts(state: RAGState) -> RAGState:
 def node_generate(state: RAGState) -> RAGState:
     """Generate answer from relevant contexts."""
     results = state.get("relevant_results", [])
-    answer = generate_answer(state["query"], results, history=state.get("history"))
+    if state.get("grading_error"):
+        answer = ModelText("邮件材料验证失败，任务尚未完成，请稍后重试。",
+                           completion_status="error", error_code=state["grading_error"])
+    else:
+        answer = generate_answer(state["query"], results, history=state.get("history"))
     state["answer"] = answer
     state["answer_metadata"] = outcome_metadata(answer)
     return state

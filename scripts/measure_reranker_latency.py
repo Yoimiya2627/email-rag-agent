@@ -113,7 +113,7 @@ def build_cases(testset: list, limit: int, candidate_count: int) -> List[Reranke
 def summarize_timings(timings: Iterable[float]) -> dict:
     values = list(timings)
     if not values:
-        return {"n": 0, "raw_ms": [], "mean_trimmed_ms": 0.0, "median_ms": 0.0, "p95_ms": 0.0}
+        return {"n": 0, "raw_ms": [], "mean_trimmed_ms": None, "median_ms": None, "p95_ms": None}
 
     raw_ms = [round(value * 1000, 2) for value in values]
     sorted_ms = sorted(raw_ms)
@@ -147,18 +147,32 @@ def measure_target(
     if mock_cross_encoder and target.backend == "cross_encoder":
         reranker_mod._cross_encoder = _MockCrossEncoder()
 
-    timings = []
+    timings, attempts = [], []
     for _ in range(runs):
         for case in cases:
             t0 = time.perf_counter()
-            reranker_mod.rerank(case.query, case.candidates, top_n=cfg.RERANK_TOP_N)
-            timings.append(time.perf_counter() - t0)
+            outcome = {}
+            try:
+                reranker_mod.rerank(case.query, case.candidates, top_n=cfg.RERANK_TOP_N, diagnostics=outcome)
+            except Exception as exc:
+                outcome = {'status':'failed', 'reason':type(exc).__name__, 'backend':None}
+            elapsed = time.perf_counter() - t0
+            attempts.append({**outcome, 'elapsed_ms':round(elapsed * 1000, 2)})
+            if outcome.get('status') in {'succeeded', 'disabled'}:
+                timings.append(elapsed)
 
     summary = summarize_timings(timings)
     return {
         "version": target.version,
         "enable_reranker": target.enable_reranker,
         "backend": target.backend,
+        "attempted": len(attempts),
+        "succeeded": sum(item['status']=='succeeded' for item in attempts),
+        "failed": sum(item['status']=='failed' for item in attempts),
+        "skipped": sum(item['status']=='skipped' for item in attempts),
+        "disabled": sum(item['status']=='disabled' for item in attempts),
+        "attempts": attempts,
+        "latency_population": "successful_reranks_only" if target.enable_reranker else "disabled_baseline_only",
         **summary,
     }
 
@@ -215,12 +229,17 @@ def main() -> None:
     print(f"{'Ver':<4} {'backend':<14} {'n':>4} {'mean(trim)':>12} {'median':>10} {'p95':>10}")
     print("-" * 62)
     for result in results:
+        if not result['n']:
+            print(f"{result['version']:<4} {result['backend']:<14} no successful samples; "
+                  f"failed={result['failed']} skipped={result['skipped']}")
+            continue
         print(
             f"{result['version']:<4} {result['backend']:<14} {result['n']:>4} "
             f"{result['mean_trimmed_ms']:>10.2f}ms "
             f"{result['median_ms']:>8.2f}ms "
             f"{result['p95_ms']:>8.2f}ms"
         )
+    print('Latency excludes failed/skipped reranks; inspect attempted/failed/skipped counts in the report.')
     print(f"saved -> {output_path}")
 
 

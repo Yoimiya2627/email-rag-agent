@@ -64,6 +64,11 @@ def test_entire_tree_stops_including_venv_launcher(tmp_path, parent_exits):
             assert process.wait(timeout=10) == 0
             assert alive(child_pid), 'test must exercise a descendant surviving its parent'
     assert process.poll() is not None
+    # POSIX killpg queues SIGKILL; if the parent was already reaped, waiting
+    # for that Popen does not wait for its descendants to receive the signal.
+    deadline = time.monotonic() + 5
+    while any(alive(pid) for pid in (parent_pid, child_launcher, child_pid)) and time.monotonic() < deadline:
+        time.sleep(.01)
     assert not any(alive(pid) for pid in (parent_pid, child_launcher, child_pid))
 
 

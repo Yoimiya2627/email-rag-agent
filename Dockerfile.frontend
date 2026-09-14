@@ -4,5 +4,9 @@ COPY requirements-frontend.txt ./
 RUN pip install --no-cache-dir -r requirements-frontend.txt
 COPY frontend ./frontend
 COPY config ./config
+# Shared display helpers import these packages; no mailbox state is copied.
+COPY core ./core
+COPY agents ./agents
+COPY models ./models
 EXPOSE 8501
 CMD ["streamlit", "run", "frontend/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

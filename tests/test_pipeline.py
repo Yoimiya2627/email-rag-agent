@@ -1,5 +1,6 @@
 """Tests for core/pipeline.py — post-filters and the unified retrieve() orchestration."""
 from datetime import datetime, timedelta
+import pytest
 
 import core.pipeline as pipeline_mod
 from core.pipeline import apply_post_filters, retrieve
@@ -102,3 +103,38 @@ def test_retrieve_search_query_falls_back_to_rewritten(monkeypatch, make_search_
 
     retrieve("ORIGINAL")
     assert calls["hybrid_q"] == "REWRITTEN_FORM"
+@pytest.mark.parametrize('query,invented_label', [
+    ('请检索导入邮件，星舟项目批准的预算是多少元？', '导入邮件'),
+    ('Search imported emails for the approved project budget.', 'imported'),
+])
+def test_source_description_does_not_become_a_hard_label_filter(monkeypatch,make_search_result,query,invented_label):
+    import json
+    from types import SimpleNamespace
+    import core.pipeline as pipeline
+    raw=json.dumps({'query':'project budget','sender':'','date_hint':'','labels':[invented_label]})
+    monkeypatch.setattr(pipeline,'_get_client',lambda:object())
+    monkeypatch.setattr(pipeline,'create_completion',lambda *a,**k:SimpleNamespace(choices=[
+        SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content=raw))]))
+    monkeypatch.setattr(pipeline,'rewrite_query',lambda text:text)
+    hit=make_search_result('budget_0',metadata={'labels':['synthetic']})
+    seen=[]
+    def search(text,**kwargs):
+        seen.append((text,kwargs))
+        return [hit]
+    monkeypatch.setattr(pipeline,'hybrid_search',search)
+    monkeypatch.setattr(pipeline,'rerank',lambda query,results,**kwargs:results)
+    assert pipeline.retrieve(query)==[hit]
+    assert seen[0][0]==query
+    assert 'filters' not in seen[0][1]
+
+
+@pytest.mark.parametrize('query', ['查找标签为“导入邮件”的预算邮件', 'Find emails labeled imported'])
+def test_explicit_label_request_still_keeps_the_hard_filter(monkeypatch,query):
+    import json
+    from types import SimpleNamespace
+    import core.pipeline as pipeline
+    raw={'query':'budget','sender':'','date_hint':'','labels':['imported']}
+    monkeypatch.setattr(pipeline,'_get_client',lambda:object())
+    monkeypatch.setattr(pipeline,'create_completion',lambda *a,**k:SimpleNamespace(choices=[
+        SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content=json.dumps(raw)))]))
+    assert pipeline.extract_filters(query)==raw

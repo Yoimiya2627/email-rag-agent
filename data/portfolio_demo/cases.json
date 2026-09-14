@@ -1,0 +1,14 @@
+[
+  {"id":"Q01","query":"星舟项目正式批准的预算是多少元？请引用邮件来源。","gold_email_ids":["demo-star-budget"],"required_patterns":["12800"],"forbidden_patterns":[]},
+  {"id":"Q02","query":"星舟项目负责人是谁？请引用邮件来源。","gold_email_ids":["demo-star-budget"],"required_patterns":["林测试"],"forbidden_patterns":[]},
+  {"id":"Q03","query":"星舟项目评审会议的日期、时间和地点是什么？请引用邮件来源。","gold_email_ids":["demo-star-meeting"],"required_patterns":["(?:2026.{0,4})?9.{0,4}18","(?:10|十).{0,3}(?:点|:00|：00)","梧桐"],"forbidden_patterns":[]},
+  {"id":"Q04","query":"星舟预算初稿和正式批准金额分别是多少？目前应以哪一封为准？请引用两封邮件。","gold_email_ids":["demo-star-budget-old","demo-star-budget"],"required_patterns":["9600","12800","(?:正式|确认)"],"forbidden_patterns":[]},
+  {"id":"Q05","query":"星舟项目发票提交截止日期及文件格式是什么？请引用邮件来源。","gold_email_ids":["demo-star-invoice"],"required_patterns":["9.{0,4}25","PDF"],"forbidden_patterns":[]},
+  {"id":"Q06","query":"比较星舟和海岚的正式批准预算，两者各是多少，相差多少元？请引用两份预算确认。","gold_email_ids":["demo-star-budget","demo-sea-budget"],"required_patterns":["12800","8600","4200"],"forbidden_patterns":[]},
+  {"id":"Q07","query":"云桥版本现在能否发布？还有几个阻断缺陷，发布门槛是什么？请引用来源。","gold_email_ids":["demo-release"],"required_patterns":["(?:2|两|二).{0,6}阻断","(?:不能|不允许|不可以|暂不|不可)","(?:全部|两个|2个).{0,12}(?:关闭|修复|解决)"],"forbidden_patterns":[]},
+  {"id":"Q08","query":"北辰服务的支持时间和联系人分别是什么？请引用来源。","gold_email_ids":["demo-support"],"required_patterns":["许示例","(?:09|9).{0,3}(?:00|点)","17.{0,3}(?:00|点)","工作日"],"forbidden_patterns":[]},
+  {"id":"Q09","query":"What is the Orion delivery quantity, date and receiving location? Cite the source email.","gold_email_ids":["demo-orion"],"required_patterns":["24","(?:2026-09-22|September\\s+22|22\\s+September)","Warehouse\\s*B"],"forbidden_patterns":[]},
+  {"id":"Q10","query":"标签为会议的邮件中，海岚项目启动会在哪个会议室举行？请引用来源。","gold_email_ids":["demo-sea-meeting"],"required_patterns":["银杏"],"forbidden_patterns":["梧桐"]},
+  {"id":"Q11","query":"星舟项目的线上会议链接是什么？邮件没有提供就明确说没有，不要猜测。","gold_email_ids":["demo-star-meeting"],"required_patterns":["(?:没有|未提供|未安排|未包含|未提及|未给出)"],"forbidden_patterns":["https?://"],"kind":"insufficient_evidence"},
+  {"id":"Q12","query":"岚谷合同的违约金具体是多少？如果正文没有金额且附件未解析，请明确说明无法确定。","gold_email_ids":["demo-contract"],"required_patterns":["(?:无法|不能|不确定|未能|不可).{0,10}(?:确定|确认|获知|给出|得知|判断)|(?:无法确定|不确定)","附件"],"forbidden_patterns":["(?:12800|9600|8600|4200).{0,3}元"],"kind":"insufficient_evidence"}
+]

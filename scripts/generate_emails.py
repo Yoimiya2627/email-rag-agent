@@ -180,7 +180,12 @@ def generate_batch(client: OpenAI, batch_id: int, count: int, used_ids: set) -> 
                 if not all(k in e for k in ("id", "subject", "sender", "recipients", "date", "body")):
                     continue
                 if e["id"] in used_ids:
-                    e["id"] = e["id"] + f"_b{batch_id}"
+                    base = e["id"] + f"_b{batch_id}"
+                    candidate, suffix = base, 2
+                    while candidate in used_ids:
+                        candidate = f"{base}_{suffix}"
+                        suffix += 1
+                    e["id"] = candidate
                 used_ids.add(e["id"])
                 if not isinstance(e.get("recipients"), list):
                     e["recipients"] = [e["recipients"]]

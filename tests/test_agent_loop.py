@@ -4,6 +4,7 @@ All tests use a scripted fake OpenAI client and a stubbed call_tool, so they
 never hit the network or run real tools.
 """
 import json
+import pytest
 from types import SimpleNamespace
 
 import agents.agent_loop as loop_mod
@@ -51,6 +52,67 @@ def test_loop_returns_immediately_when_no_tool_calls(monkeypatch):
     assert out.answer == "直接回答"
     assert out.metadata["steps"] == []
     assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize(('name', 'offset', 'expected'), [
+    ('', 8, 'UTC+08:00'), ('', -5, 'UTC-05:00'),
+    ('America/New_York', 8, 'America/New_York'),
+])
+def test_agent_receives_actual_retrieval_calendar(monkeypatch, name, offset, expected):
+    monkeypatch.setattr(loop_mod.cfg, 'RETRIEVAL_TIMEZONE', name)
+    monkeypatch.setattr(loop_mod.cfg, 'RETRIEVAL_TIMEZONE_OFFSET_HOURS', offset)
+    client = _ScriptedClient([_response(content='日期按检索时区核对')])
+    _use_client(monkeypatch, client)
+    run_agent_loop(AgentRequest(query='请核对邮件发件日期'))
+    system = client.calls[0]['messages'][0]['content']
+    assert f'日历时区为 {expected}' in system
+    assert '先换算到此检索时区' in system
+    assert '按邮件当日的夏令时规则' in system
+    assert '不猜测为 UTC' in system
+
+
+def _citation_context():
+    from agents.runtime import RunContext
+    context=RunContext()
+    source={'email_id':'mail','chunk_id':'visible-chunk','content':'Read evidence','score':1.0,
+            'metadata':{'index_generation':'v1'}}
+    context.evidence[('mail','visible-chunk')]=source
+    context.visible_evidence[('mail','visible-chunk')]=source
+    return context
+
+
+def test_bare_visible_chunk_citation_becomes_verified_full_reference():
+    context=_citation_context()
+    result=loop_mod._response('Evidence [visible-chunk]',context,[], 'trace','success')
+    assert result.answer=='Evidence [mail#visible-chunk]'
+    assert len(result.metadata['cited_evidence'])==1
+    assert result.metadata['invalid_citation_count']==0
+
+
+def test_bare_candidate_ambiguous_id_and_markdown_links_are_not_promoted():
+    context=_citation_context()
+    context.evidence[('mail','candidate')]={**context.evidence[('mail','visible-chunk')],'chunk_id':'candidate'}
+    context.visible_evidence[('other','visible-chunk')]={**context.visible_evidence[('mail','visible-chunk')],'email_id':'other'}
+    answer='[candidate] [unknown] [visible-chunk] [visible-chunk](https://example.invalid) ![visible-chunk](image)'
+    result=loop_mod._response(answer,context,[], 'trace','success')
+    assert result.answer==answer and result.metadata['cited_evidence']==[]
+
+
+def test_repaired_bare_reference_still_checks_version_conflicts():
+    context=_citation_context()
+    context.visible_evidence[('mail','visible-chunk')]['visible_ranges']=[{'source_version':'v1'},{'source_version':'v2'}]
+    result=loop_mod._response('[visible-chunk]',context,[],'trace','success')
+    assert result.metadata['status']=='needs_review'
+    assert result.metadata['citation_version_conflict_count']==1
+    assert result.metadata['cited_evidence']==[]
+
+
+def test_unique_bare_id_normalization_preserves_markdown_links_and_definitions():
+    context=_citation_context()
+    links='[visible-chunk](https://example.invalid) ![visible-chunk](image) [visible-chunk][ref]\n[visible-chunk] [ref]\n[visible-chunk]: https://example.invalid'
+    result=loop_mod._response(links+'\nA citation: [visible-chunk]',context,[],'trace','success')
+    assert result.answer==links+'\nA citation: [mail#visible-chunk]'
+    assert len(result.metadata['cited_evidence'])==1
 
 
 def test_loop_executes_tool_then_answers(monkeypatch):

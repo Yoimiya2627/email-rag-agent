@@ -1,0 +1,37 @@
+........................................................................................................................................ [  9%]
+................................................................... [ 13%]
+........................................................................ [ 18%]
+....................................................................................................ss........................................................................................ [ 31%]
+......................................................... [ 35%]
+........................................................................ [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 49%]
+.................................................... [ 53%]
+............................. [ 55%]
+........................s............................................... [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 69%]
+........................................................................ [ 74%]
+........................................................................ [ 79%]
+.....................sss................................................ [ 84%]
+........................................... [ 87%]
+.......................................................................................................................... [ 95%]
+.................................................. [ 98%]
+................                                                         [100%]
+=============================== warnings summary ===============================
+../usr/local/lib/python3.11/site-packages/starlette/testclient.py:53
+  /usr/local/lib/python3.11/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_mcp_production.py::test_build_server_enables_auth_when_token_configured
+  /work/mcp_server.py:88: DeprecationWarning: `AuthSettings.validate_token_resource` is not set, so bearer tokens are not checked against `resource_server_url`; it will default to True in 3.0 when `resource_server_url` is set. Set it to True to have the server refuse tokens issued for another resource, or to False if your TokenVerifier validates the token's audience itself.
+    "auth": AuthSettings(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_deployment_contract.py:110: PowerShell task integration is Windows-specific
+SKIPPED [1] tests/test_deployment_contract.py:133: Process tree cleanup is Windows-specific
+SKIPPED [1] tests/test_mail_accounts.py:136: Windows DPAPI requires Windows
+SKIPPED [2] tests/test_parse_process.py:106: Windows Job Object contract
+SKIPPED [1] tests/test_parse_process.py:132: Windows Job Object memory limit
+1476 passed, 6 skipped, 2 warnings, 190 subtests passed in 315.08s (0:05:15)

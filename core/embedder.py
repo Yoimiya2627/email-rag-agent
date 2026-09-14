@@ -411,6 +411,27 @@ def get_all_metadata() -> List[dict]:
     return rows
 
 
+@index_snapshot()
+def get_email_chunk(email_id: str, chunk_index: int) -> dict | None:
+    """Read one exact chunk without loading the rest of a potentially large mail."""
+    if not isinstance(email_id, str) or not email_id.strip():
+        raise ValueError("email_id must be a non-empty string")
+    if type(chunk_index) is not int or chunk_index < 0:
+        raise ValueError("chunk_index must be a non-negative integer")
+    result = _get_collection().get(
+        where={"$and": [{"email_id": email_id}, {"chunk_index": chunk_index}]},
+        include=["documents", "metadatas"], limit=2)
+    if not result["ids"]:
+        return None
+    if not len(result["ids"]) == len(result["documents"]) == len(result["metadatas"]) == 1:
+        raise ValueError("Indexed email chunk identity is ambiguous")
+    meta = result["metadatas"][0]
+    if meta.get("email_id") != email_id or meta.get("chunk_index") != chunk_index:
+        raise ValueError("Indexed email chunk identity mismatch")
+    return {"chunk_id": result["ids"][0], "email_id": email_id,
+            "content": result["documents"][0], "metadata": meta}
+
+
 def get_email_chunks(email_id: str) -> List[dict]:
     """Lookup by indexed email_id; never scan documents belonging to other mail."""
     if not isinstance(email_id, str) or not email_id.strip():

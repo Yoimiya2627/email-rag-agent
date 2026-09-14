@@ -21,7 +21,7 @@ from agents.runtime import RunCancelled, ContextBudgetExceeded
 from models.schemas import SearchResult
 from core.retriever import hybrid_search
 from core.filters import FilterSpec, date_window
-from core.embedder import index_snapshot
+from core.embedder import index_snapshot, get_email_chunk
 from core.reranker import rerank
 from core.memory import build_model_messages
 from agents.runtime import remaining_timeout
@@ -97,7 +97,15 @@ _FILTER_SYSTEM = """从用户问题中提取邮件检索的过滤条件，以JSO
   "date_hint": "日期提示：今天/昨天/本周/上周/本月/上月/今年/最近，或YYYY-MM-DD、YYYY-MM、YYYY-MM-DD至YYYY-MM-DD；无日期则空字符串",
   "labels": ["标签列表（可选，没有则为空数组）"]
 }
-只返回JSON，不要解释。"""
+只返回JSON，不要解释。
+标签是邮箱中已有的分类标记，只有用户明确要求按标签、标记或类别筛选时才填写 labels。
+“导入邮件”“导入资料”等资料来源描述，以及项目名称、主题、内容关键词，都不是标签；保留在 query 中，labels 返回 []。
+例如“查询导入邮件中的预算”不带标签过滤；“查询标签为财务的预算邮件”才使用 labels=["财务"]。"""
+
+_LABEL_REQUEST = re.compile(
+    r"标签|标记|标为|标有|分类|类别|星标|标星|\b(?:labels?|labelled|labeled|tags?|tagged|categories|category|categorized|categorised)\b",
+    re.IGNORECASE,
+)
 
 
 def extract_filters(query: str) -> dict:
@@ -129,7 +137,14 @@ def extract_filters(query: str) -> dict:
         s, e = raw.find("{"), raw.rfind("}") + 1
         if s >= 0 and e > s:
             raw = raw[s:e]
-        return validate_filters(json.loads(raw))
+        filters = validate_filters(json.loads(raw))
+        # Model-inferred topics/source descriptions must not narrow the corpus
+        # to nonexistent labels. Keep their original wording in semantic search.
+        # Explicit structured tool filters bypass this natural-language parser.
+        if filters.get("labels") and not _LABEL_REQUEST.search(query):
+            filters["labels"] = []
+            filters["query"] = query
+        return filters
     except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
@@ -182,6 +197,39 @@ def _apply_date_filter(results, date_hint: str):
 
 # ── Full pipeline ───────────────────────────────────────────────────────────
 
+def _body_candidates(results, scope):
+    """A table can leave its subject in a separate chunk; retrieve actual body evidence."""
+    expanded, seen = [], set()
+    for result in results:
+        # Structured tables retain exact separators for source reconstruction.
+        # A separator carries no answer evidence and must not win reranking.
+        if not result.content.strip():
+            continue
+        meta = result.metadata
+        end, length, index = (meta.get(key) for key in ('source_end', 'source_length', 'chunk_index'))
+        if (meta.get('source_start') == 0 and type(end) is int and type(length) is int
+                and end == len(result.content) and end < length and type(index) is int
+                and meta.get('source_sha256') and meta.get('index_generation')
+                and result.content.strip() == f"Subject: {meta.get('subject', '')}".strip()):
+            following = get_email_chunk(result.email_id, index + 1)
+            if following is not None:
+                next_meta = following['metadata']
+                start, stop = next_meta.get('source_start'), next_meta.get('source_end')
+                if (any(next_meta.get(key) != meta[key] for key in
+                        ('source_sha256', 'source_length', 'index_generation'))
+                        or type(start) is not int or type(stop) is not int
+                        or not 0 <= start <= end < stop <= length
+                        or stop-start != len(following['content'])):
+                    raise ValueError('Subject and body chunk sources do not match')
+                if following['content'].strip() and scope.matches(next_meta):
+                    result = SearchResult(**following, score=result.score)
+        identity = (result.email_id, result.chunk_id)
+        if identity not in seen:
+            expanded.append(result)
+            seen.add(identity)
+    return expanded
+
+
 @index_snapshot()
 def retrieve(query: str, *, filters: dict = None, top_n: int = None,
              fetch_k: int = None, history=None) -> List[SearchResult]:
@@ -217,6 +265,7 @@ def retrieve(query: str, *, filters: dict = None, top_n: int = None,
     options = {"filters": scope} if scope.active else {}
     results = hybrid_search(search_query, top_k=fetch_k, **options)
     results = [result for result in results if scope.matches(result.metadata)]
+    results = _body_candidates(results, scope)
     # Standalone rewrites remain search expansions. History rewrites resolve the
     # subject of a follow-up and must also reach the relevance scorer.
     scoring_query = rewritten if history else query
