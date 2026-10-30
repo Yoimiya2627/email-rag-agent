@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-09-13T17:08:52.000246+00:00",
+  "suites": {
+    "windows": {
+      "passed": 1479,
+      "skipped": 3,
+      "seconds": 316.76
+    },
+    "linux_storage": {
+      "passed": 1476,
+      "skipped": 6,
+      "seconds": 296.88
+    },
+    "linux_api_with_optional_dependencies": {
+      "passed": 1476,
+      "skipped": 6,
+      "seconds": 315.08
+    }
+  },
+  "native_acceptance": {
+    "passed": 16,
+    "failed": 0
+  },
+  "container_acceptance": {
+    "passed": 9,
+    "failed": 0
+  },
+  "windows_packages": {
+    "openai": "2.32.0",
+    "mcp": "1.13.1",
+    "chromadb": "1.5.8",
+    "pytest": "8.3.2",
+    "streamlit": "1.56.0"
+  },
+  "this_turn_project_files_modified": 13,
+  "confirmed_fixed_issues": {
+    "P2": 5,
+    "P3": 1
+  },
+  "model_key_found_in_acceptance_text_artifacts": false
+}

@@ -1,0 +1,1200 @@
+{
+  "gold_path": "data\\gold_chunks.json",
+  "results": [
+    {
+      "version": "V2",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": false,
+        "ENABLE_QUERY_REWRITE": false,
+        "RERANKER_BACKEND": "llm"
+      },
+      "summary": {
+        "n": 30,
+        "mean_context_recall": 0.6167,
+        "chunk_hit_rate": 0.6333,
+        "perfect_recall_rate": 0.6
+      },
+      "records": [
+        {
+          "id": "gold_001",
+          "question": "Q1 OKR回顾会议定于什么时间、在哪个地点举行？",
+          "gold_chunk_ids": [
+            "email_2058_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1363_chunk_0",
+            "email_3939_chunk_0",
+            "email_1404_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_002",
+          "question": "根据2025年12月资金使用情况报告，市场部为什么能节省20%的预算？",
+          "gold_chunk_ids": [
+            "email_0386_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_2131_chunk_0",
+            "email_0386_chunk_0",
+            "email_4649_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0386_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_003",
+          "question": "周杰在代码审查中指出了order-service模块的哪三个主要问题？",
+          "gold_chunk_ids": [
+            "email_0043_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_2155_chunk_0",
+            "email_0044_chunk_0",
+            "email_4740_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_004",
+          "question": "李娜的年度绩效评估评级为A，奖金系数为1.3，这个奖金将在哪个月的工资中体现？",
+          "gold_chunk_ids": [
+            "email_3761_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3761_chunk_0",
+            "email_3496_chunk_0",
+            "email_4052_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_3761_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_005",
+          "question": "请概述v3.2.1版本发布计划的关键信息。",
+          "gold_chunk_ids": [
+            "email_1559_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3234_chunk_0",
+            "email_0443_chunk_0",
+            "email_0535_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_006",
+          "question": "首页改版A/B测试中，实验组相比对照组点击率和转化率分别提升了多少？",
+          "gold_chunk_ids": [
+            "email_4132_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3821_chunk_0",
+            "email_3348_chunk_0",
+            "email_4183_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_007",
+          "question": "市场部的春季促销活动页面上线为何需要调整日期？",
+          "gold_chunk_ids": [
+            "email_4423_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4423_chunk_0",
+            "email_0430_chunk_0",
+            "email_1080_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4423_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_008",
+          "question": "请根据邮件内容，总结公司近期关于合同续签的重要事项。",
+          "gold_chunk_ids": [
+            "email_1155_chunk_0",
+            "email_2480_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3932_chunk_0",
+            "email_0151_chunk_0",
+            "email_2480_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_2480_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 2,
+          "context_recall": 0.5,
+          "has_any_hit": true,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_009",
+          "question": "2月8日至14日的增长数据周报中，新增用户数、分享率和邀请转化率分别是多少？",
+          "gold_chunk_ids": [
+            "email_4614_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4614_chunk_0",
+            "email_2213_chunk_0",
+            "email_1303_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4614_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_010",
+          "question": "客户投诉处理之后，采取了哪些后续措施来维护客户关系？",
+          "gold_chunk_ids": [
+            "email_4131_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0833_chunk_0",
+            "email_4754_chunk_0",
+            "email_3818_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_011",
+          "question": "首页A/B测试方案B的点击率提升多少？统计显著性如何？",
+          "gold_chunk_ids": [
+            "email_0431_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3821_chunk_0",
+            "email_0431_chunk_0",
+            "email_0278_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0431_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_012",
+          "question": "CI/CD流水线构建失败的根本原因是什么？提出了什么后续建议？",
+          "gold_chunk_ids": [
+            "email_4265_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1686_chunk_0",
+            "email_3688_chunk_0",
+            "email_4262_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_013",
+          "question": "增长数据周报中，本周DAU环比增长多少？新增用户主要来自哪个渠道？建议是什么？",
+          "gold_chunk_ids": [
+            "email_3236_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_2843_chunk_0",
+            "email_2660_chunk_0",
+            "email_3455_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_014",
+          "question": "发现的安全漏洞是什么？受影响的系统及修复步骤有哪些？",
+          "gold_chunk_ids": [
+            "email_1370_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1370_chunk_0",
+            "email_0285_chunk_0",
+            "email_1036_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1370_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_015",
+          "question": "系统性能优化方案中，建议引入什么技术替代单机？预期成本及缓存命中率提升目标是多少？",
+          "gold_chunk_ids": [
+            "email_4033_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4033_chunk_0",
+            "email_1407_chunk_0",
+            "email_1541_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4033_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_016",
+          "question": "明达电子在2026年Q1供应商评估中综合评分是多少？各分项评分如何？",
+          "gold_chunk_ids": [
+            "email_0900_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0900_chunk_0",
+            "email_2396_chunk_0",
+            "email_0052_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0900_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_017",
+          "question": "搜索排序优化方案中建议的A/B测试日期、周期和流量分配是怎样的？",
+          "gold_chunk_ids": [
+            "email_1437_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1437_chunk_0",
+            "email_1444_chunk_0",
+            "email_2195_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1437_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_018",
+          "question": "用户服务API接口设计初稿的主要变更有哪些？移动端需要考虑什么？",
+          "gold_chunk_ids": [
+            "email_4294_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4294_chunk_0",
+            "email_0598_chunk_0",
+            "email_4986_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4294_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_019",
+          "question": "用户注册流程优化需求变更后，上线日期推迟到何时？谁负责更新测试用例？",
+          "gold_chunk_ids": [
+            "email_1525_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1525_chunk_0",
+            "email_3172_chunk_0",
+            "email_4268_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1525_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_020",
+          "question": "王小明在代码审查修改中做了哪些改动？新增的缓存过期时间是多少？",
+          "gold_chunk_ids": [
+            "email_0044_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0857_chunk_0",
+            "email_3023_chunk_0",
+            "email_4571_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_021",
+          "question": "V3.2计划发布哪三个核心功能？建议删除哪个功能以节省资源？",
+          "gold_chunk_ids": [
+            "email_1062_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1062_chunk_0",
+            "email_0228_chunk_0",
+            "email_1454_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1062_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_022",
+          "question": "刘洋在回复中同意追加预算的条件是什么？",
+          "gold_chunk_ids": [
+            "email_0739_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0739_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0739_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_023",
+          "question": "赵雷在微服务架构重构进度同步邮件中提到了哪些关键信息？",
+          "gold_chunk_ids": [
+            "email_0770_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0770_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0770_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_024",
+          "question": "2026年1月技术培训的主题、时间、地点和讲师分别是什么？",
+          "gold_chunk_ids": [
+            "email_4281_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1674_chunk_0",
+            "email_0314_chunk_0",
+            "email_4018_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_025",
+          "question": "/orders接口当前的响应时间是多少？超出SLA多少？提出的优化方案有哪些？",
+          "gold_chunk_ids": [
+            "email_1063_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1063_chunk_0",
+            "email_2902_chunk_0",
+            "email_3905_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1063_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_026",
+          "question": "发票号INV-2026-0421的付款期限是什么时候？",
+          "gold_chunk_ids": [
+            "email_0338_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3556_chunk_0",
+            "email_0339_chunk_0",
+            "email_2376_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_027",
+          "question": "微服务架构重构第一阶段完成后，订单服务的响应时间有什么变化？",
+          "gold_chunk_ids": [
+            "email_1374_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3269_chunk_0",
+            "email_1374_chunk_0",
+            "email_3539_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1374_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_028",
+          "question": "3月26日的团建活动有哪些具体安排？",
+          "gold_chunk_ids": [
+            "email_0935_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4760_chunk_0",
+            "email_1282_chunk_0",
+            "email_3021_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_029",
+          "question": "2月份新客户开拓的签约金额和完成月度目标的比例是多少？",
+          "gold_chunk_ids": [
+            "email_0802_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0802_chunk_0",
+            "email_3355_chunk_0",
+            "email_4524_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0802_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_030",
+          "question": "谁需要参加4月中旬的Kubernetes实战培训？需要在什么时间前如何报名？",
+          "gold_chunk_ids": [
+            "email_1913_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1913_chunk_0",
+            "email_4822_chunk_0",
+            "email_1002_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1913_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        }
+      ]
+    },
+    {
+      "version": "V7",
+      "flags": {
+        "ENABLE_BM25": true,
+        "ENABLE_RRF": true,
+        "ENABLE_RERANKER": true,
+        "ENABLE_QUERY_REWRITE": false,
+        "RERANKER_BACKEND": "cross_encoder"
+      },
+      "summary": {
+        "n": 30,
+        "mean_context_recall": 0.8,
+        "chunk_hit_rate": 0.8,
+        "perfect_recall_rate": 0.8
+      },
+      "records": [
+        {
+          "id": "gold_001",
+          "question": "Q1 OKR回顾会议定于什么时间、在哪个地点举行？",
+          "gold_chunk_ids": [
+            "email_2058_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0803_chunk_0",
+            "email_3741_chunk_0",
+            "email_0658_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_002",
+          "question": "根据2025年12月资金使用情况报告，市场部为什么能节省20%的预算？",
+          "gold_chunk_ids": [
+            "email_0386_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0386_chunk_0",
+            "email_4649_chunk_0",
+            "email_2131_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0386_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_003",
+          "question": "周杰在代码审查中指出了order-service模块的哪三个主要问题？",
+          "gold_chunk_ids": [
+            "email_0043_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0043_chunk_0",
+            "email_2154_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0043_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_004",
+          "question": "李娜的年度绩效评估评级为A，奖金系数为1.3，这个奖金将在哪个月的工资中体现？",
+          "gold_chunk_ids": [
+            "email_3761_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3761_chunk_0",
+            "email_4052_chunk_0",
+            "email_3425_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_3761_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_005",
+          "question": "请概述v3.2.1版本发布计划的关键信息。",
+          "gold_chunk_ids": [
+            "email_1559_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0443_chunk_0",
+            "email_1908_chunk_0",
+            "email_1559_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1559_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_006",
+          "question": "首页改版A/B测试中，实验组相比对照组点击率和转化率分别提升了多少？",
+          "gold_chunk_ids": [
+            "email_4132_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4132_chunk_0",
+            "email_0079_chunk_0",
+            "email_1604_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4132_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_007",
+          "question": "市场部的春季促销活动页面上线为何需要调整日期？",
+          "gold_chunk_ids": [
+            "email_4423_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1080_chunk_0",
+            "email_4423_chunk_0",
+            "email_1827_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4423_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_008",
+          "question": "请根据邮件内容，总结公司近期关于合同续签的重要事项。",
+          "gold_chunk_ids": [
+            "email_1155_chunk_0",
+            "email_2480_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3195_chunk_0",
+            "email_1623_chunk_0",
+            "email_1624_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 2,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_009",
+          "question": "2月8日至14日的增长数据周报中，新增用户数、分享率和邀请转化率分别是多少？",
+          "gold_chunk_ids": [
+            "email_4614_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4614_chunk_0",
+            "email_3771_chunk_0",
+            "email_2213_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4614_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_010",
+          "question": "客户投诉处理之后，采取了哪些后续措施来维护客户关系？",
+          "gold_chunk_ids": [
+            "email_4131_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4754_chunk_0",
+            "email_2809_chunk_0",
+            "email_1262_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_011",
+          "question": "首页A/B测试方案B的点击率提升多少？统计显著性如何？",
+          "gold_chunk_ids": [
+            "email_0431_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1657_chunk_0",
+            "email_0278_chunk_0",
+            "email_3821_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_012",
+          "question": "CI/CD流水线构建失败的根本原因是什么？提出了什么后续建议？",
+          "gold_chunk_ids": [
+            "email_4265_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4265_chunk_0",
+            "email_3460_chunk_0",
+            "email_2128_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4265_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_013",
+          "question": "增长数据周报中，本周DAU环比增长多少？新增用户主要来自哪个渠道？建议是什么？",
+          "gold_chunk_ids": [
+            "email_3236_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3236_chunk_0",
+            "email_4808_chunk_0",
+            "email_3771_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_3236_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_014",
+          "question": "发现的安全漏洞是什么？受影响的系统及修复步骤有哪些？",
+          "gold_chunk_ids": [
+            "email_1370_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1370_chunk_0",
+            "email_0285_chunk_0",
+            "email_2449_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1370_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_015",
+          "question": "系统性能优化方案中，建议引入什么技术替代单机？预期成本及缓存命中率提升目标是多少？",
+          "gold_chunk_ids": [
+            "email_4033_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4033_chunk_0",
+            "email_1541_chunk_0",
+            "email_4135_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4033_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_016",
+          "question": "明达电子在2026年Q1供应商评估中综合评分是多少？各分项评分如何？",
+          "gold_chunk_ids": [
+            "email_0900_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0900_chunk_0",
+            "email_1275_chunk_0",
+            "email_3853_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0900_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_017",
+          "question": "搜索排序优化方案中建议的A/B测试日期、周期和流量分配是怎样的？",
+          "gold_chunk_ids": [
+            "email_1437_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1437_chunk_0",
+            "email_1444_chunk_0",
+            "email_2195_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1437_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_018",
+          "question": "用户服务API接口设计初稿的主要变更有哪些？移动端需要考虑什么？",
+          "gold_chunk_ids": [
+            "email_4294_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_4294_chunk_0",
+            "email_4986_chunk_0",
+            "email_0598_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_4294_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_019",
+          "question": "用户注册流程优化需求变更后，上线日期推迟到何时？谁负责更新测试用例？",
+          "gold_chunk_ids": [
+            "email_1525_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1525_chunk_0",
+            "email_4937_chunk_0",
+            "email_4630_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1525_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_020",
+          "question": "王小明在代码审查修改中做了哪些改动？新增的缓存过期时间是多少？",
+          "gold_chunk_ids": [
+            "email_0044_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_3023_chunk_0",
+            "email_0044_chunk_0",
+            "email_4571_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0044_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_021",
+          "question": "V3.2计划发布哪三个核心功能？建议删除哪个功能以节省资源？",
+          "gold_chunk_ids": [
+            "email_1062_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1062_chunk_0",
+            "email_0228_chunk_0",
+            "email_1454_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1062_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_022",
+          "question": "刘洋在回复中同意追加预算的条件是什么？",
+          "gold_chunk_ids": [
+            "email_0739_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0739_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0739_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_023",
+          "question": "赵雷在微服务架构重构进度同步邮件中提到了哪些关键信息？",
+          "gold_chunk_ids": [
+            "email_0770_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0770_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0770_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_024",
+          "question": "2026年1月技术培训的主题、时间、地点和讲师分别是什么？",
+          "gold_chunk_ids": [
+            "email_4281_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0823_chunk_0",
+            "email_3166_chunk_0",
+            "email_4989_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_025",
+          "question": "/orders接口当前的响应时间是多少？超出SLA多少？提出的优化方案有哪些？",
+          "gold_chunk_ids": [
+            "email_1063_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1063_chunk_0",
+            "email_0334_chunk_0",
+            "email_1015_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1063_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_026",
+          "question": "发票号INV-2026-0421的付款期限是什么时候？",
+          "gold_chunk_ids": [
+            "email_0338_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0338_chunk_0",
+            "email_3556_chunk_0",
+            "email_0339_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0338_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_027",
+          "question": "微服务架构重构第一阶段完成后，订单服务的响应时间有什么变化？",
+          "gold_chunk_ids": [
+            "email_1374_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1374_chunk_0",
+            "email_1216_chunk_0",
+            "email_1418_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1374_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_028",
+          "question": "3月26日的团建活动有哪些具体安排？",
+          "gold_chunk_ids": [
+            "email_0935_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1282_chunk_0",
+            "email_2565_chunk_0",
+            "email_2463_chunk_0"
+          ],
+          "hit_chunk_ids": [],
+          "hit_count": 0,
+          "gold_count": 1,
+          "context_recall": 0.0,
+          "has_any_hit": false,
+          "has_perfect_recall": false
+        },
+        {
+          "id": "gold_029",
+          "question": "2月份新客户开拓的签约金额和完成月度目标的比例是多少？",
+          "gold_chunk_ids": [
+            "email_0802_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_0802_chunk_0",
+            "email_3355_chunk_0",
+            "email_4343_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_0802_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        },
+        {
+          "id": "gold_030",
+          "question": "谁需要参加4月中旬的Kubernetes实战培训？需要在什么时间前如何报名？",
+          "gold_chunk_ids": [
+            "email_1913_chunk_0"
+          ],
+          "retrieved_chunk_ids": [
+            "email_1913_chunk_0",
+            "email_1002_chunk_0",
+            "email_4822_chunk_0"
+          ],
+          "hit_chunk_ids": [
+            "email_1913_chunk_0"
+          ],
+          "hit_count": 1,
+          "gold_count": 1,
+          "context_recall": 1.0,
+          "has_any_hit": true,
+          "has_perfect_recall": true
+        }
+      ]
+    }
+  ]
+}

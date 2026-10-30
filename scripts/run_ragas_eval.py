@@ -1,13 +1,14 @@
 """
-RAGAS-style ablation evaluation across 6 retrieval versions.
+RAGAS-style ablation evaluation across retrieval versions.
 
 Versions:
   V1: Vector only (no BM25, no RRF, no reranker, no query rewrite)
   V2: Vector + BM25 + RRF
-  V3: V2 + Reranker
-  V4: V3 + Query Rewrite  (full pipeline)
+  V3: V2 + LLM Reranker
+  V4: V3 + Query Rewrite  (full legacy pipeline)
   V5: V4 without RRF      (BM25 simple merge)
   V6: V4 without Reranker (to ablate reranker contribution)
+  V7: V2 + Cross-Encoder Reranker
 
 Metrics (implemented locally, no ragas package required):
   - Answer Relevancy: LLM scores how relevant the answer is to the question (0-1)
@@ -23,6 +24,8 @@ import os
 import sys
 import time
 import logging
+import math
+from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -30,20 +33,40 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from openai import OpenAI
 import config.settings as cfg
+from core.model_outcomes import outcome_metadata
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 TESTSET_PATH = Path(__file__).parent.parent / "data" / "ragas_testset.json"
 RESULTS_DIR = Path(__file__).parent.parent / "data" / "eval_results"
+METRICS = ('answer_relevancy', 'faithfulness', 'context_precision')
+
+
+def validate_scores(value: Any) -> Dict[str, float]:
+    """Only finite numeric scores in the documented range may enter metrics."""
+    if not isinstance(value, dict):
+        raise ValueError('scores must be an object')
+    scores = {}
+    for name in METRICS:
+        score = value.get(name)
+        if type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 1:
+            raise ValueError(f'invalid score: {name}')
+        scores[name] = float(score)
+    return scores
+
+
+def _scored(scores, method, status):
+    return {**validate_scores(scores), 'scoring_method': method, 'scoring_status': status}
 
 VERSION_FLAGS = {
-    "V1": dict(ENABLE_BM25=False, ENABLE_RRF=False, ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False),
-    "V2": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False),
-    "V3": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=False),
-    "V4": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True),
-    "V5": dict(ENABLE_BM25=True,  ENABLE_RRF=False, ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True),
-    "V6": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=True),
+    "V1": dict(ENABLE_BM25=False, ENABLE_RRF=False, ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="llm"),
+    "V2": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="llm"),
+    "V3": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="llm"),
+    "V4": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True,  RERANKER_BACKEND="llm"),
+    "V5": dict(ENABLE_BM25=True,  ENABLE_RRF=False, ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=True,  RERANKER_BACKEND="llm"),
+    "V6": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=False, ENABLE_QUERY_REWRITE=True,  RERANKER_BACKEND="llm"),
+    "V7": dict(ENABLE_BM25=True,  ENABLE_RRF=True,  ENABLE_RERANKER=True,  ENABLE_QUERY_REWRITE=False, RERANKER_BACKEND="cross_encoder"),
 }
 
 
@@ -54,22 +77,20 @@ def apply_flags(flags: dict):
 
 
 def run_single(client: OpenAI, question: str, ground_truth: str) -> Dict[str, Any]:
-    """Run one question through current RAG pipeline, return answer + contexts."""
-    from core.retriever import hybrid_search
-    from core.reranker import rerank
+    """Run one question through the shared RAG pipeline, return answer + contexts.
+
+    Uses core.pipeline.retrieve so the evaluation measures the *same* pipeline
+    the product serves — including the sender/date/label post-filters this
+    script previously skipped.  `client` is unused but kept for signature
+    stability (evaluate_version and tests call it positionally).
+    """
+    from core.pipeline import retrieve
     from core.generator import generate_answer
-    from agents.retriever_agent import RetrieverAgent
 
-    agent = RetrieverAgent()
-    rewritten = agent._rewrite_query(question)
-    filters = agent._extract_filters(rewritten)
-    search_query = filters.get("query") or rewritten
-
-    results = hybrid_search(search_query, top_k=cfg.TOP_K * 4)
-    reranked = rerank(question, results, top_n=cfg.RERANK_TOP_N)
+    reranked = retrieve(question)
     answer = generate_answer(question, reranked)
-    contexts = [r.content for r in reranked]
-    return {"answer": answer, "contexts": contexts}
+    return {"answer": answer, "answer_metadata": outcome_metadata(answer),
+            "contexts": [r.content for r in reranked]}
 
 
 _EVAL_USER_TMPL = """你是RAG系统评测专家。请给下面的检索问答打分。
@@ -128,7 +149,7 @@ def _extract_json_obj(text: str) -> str:
     return text
 
 
-def score_response(client: OpenAI, question: str, answer: str, contexts: List[str]) -> Dict[str, float]:
+def score_response(client: OpenAI, question: str, answer: str, contexts: List[str]) -> Dict[str, Any]:
     """先尝试 LLM 打分，失败则降级为向量相似度打分。
 
     DEEPSEEK_MODEL=deepseek-v4-flash 是推理模型，会先输出 reasoning_content 再输出
@@ -163,19 +184,19 @@ def score_response(client: OpenAI, question: str, answer: str, contexts: List[st
                     raise ValueError(f"Empty response from LLM (finish_reason={finish!r})")
 
             raw = _extract_json_obj(raw)
-            return json.loads(raw)
+            return _scored(json.loads(raw), 'llm', 'success')
         except Exception as exc:
-            logger.warning(f"LLM score attempt {attempt+1} failed: {exc}")
+            logger.warning("LLM score attempt %s failed; error_type=%s", attempt+1, type(exc).__name__)
             if attempt < 2:
                 time.sleep(1)
 
     # 降级：LLM 打分全部失败，改用向量相似度
     logger.warning("LLM scoring failed 3 times, falling back to embedding-based scoring")
     try:
-        return _score_by_embedding(question, answer, contexts)
+        return _scored(_score_by_embedding(question, answer, contexts), 'embedding_proxy', 'degraded')
     except Exception as exc:
-        logger.warning(f"Embedding scoring also failed: {exc}")
-        return {"answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0}
+        logger.warning("Embedding scoring also failed; error_type=%s", type(exc).__name__)
+        return _scored(dict.fromkeys(METRICS, 0.0), 'unavailable', 'error')
 
 
 def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) -> Dict[str, Any]:
@@ -193,44 +214,67 @@ def evaluate_version(version: str, testset: list, limit: int, client: OpenAI) ->
         gt = item["ground_truth"]
         logger.info(f"  [{i+1}/{len(samples)}] {q[:60]}")
 
+        answer_metadata = {'status':'error', 'completion_status':'error',
+                           'finish_reason':None, 'error_code':'evaluation_failed'}
         try:
             result = run_single(client, q, gt)
-            scores = score_response(client, q, result["answer"], result["contexts"])
+            answer_metadata = result.get('answer_metadata') or outcome_metadata(result['answer'])
+            if answer_metadata['completion_status'] == 'complete':
+                scores = score_response(client, q, result["answer"], result["contexts"])
+            else:
+                # Keep failed/incomplete generations in the denominator as zero;
+                # scoring success must never hide an unfinished answer.
+                scores = _scored(dict.fromkeys(METRICS, 0.0), 'not_scored', 'skipped')
             records.append({
                 "question": q,
                 "ground_truth": gt,
                 "answer": result["answer"],
+                "answer_metadata": answer_metadata,
                 "contexts": result["contexts"],
-                **scores,
+                **validate_scores(scores),
+                'scoring_method': scores.get('scoring_method', 'unknown'),
+                'scoring_status': scores.get('scoring_status', 'unknown'),
             })
         except Exception as exc:
-            logger.warning(f"  Failed: {exc}")
-            records.append({"question": q, "ground_truth": gt, "error": str(exc),
-                            "answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0})
+            logger.warning("  Failed; error_type=%s", type(exc).__name__)
+            records.append({"question": q, "ground_truth": gt, "error": type(exc).__name__,
+                            "answer_metadata": answer_metadata,
+                            **_scored(dict.fromkeys(METRICS, 0.0), 'unavailable', 'error')})
         time.sleep(0.3)
 
-    metrics = ["answer_relevancy", "faithfulness", "context_precision"]
-    avg = {m: round(sum(r.get(m, 0) for r in records) / max(len(records), 1), 4) for m in metrics}
-    return {"version": version, "flags": flags, "avg": avg, "records": records}
+    avg = {m: round(sum(r[m] for r in records) / max(len(records), 1), 4) for m in METRICS}
+    methods = Counter(r['scoring_method'] for r in records)
+    by_method = {}
+    for method in methods:
+        group = [r for r in records if r['scoring_method'] == method]
+        by_method[method] = {m: round(sum(r[m] for r in group) / len(group), 4) for m in METRICS}
+    scoring = {'method_counts': dict(methods), 'averages_by_method': by_method,
+               'mixed_methods': len(methods) > 1, 'failed_count': sum(r['scoring_status'] == 'error' for r in records),
+               'unscored_count': sum(r['scoring_status'] == 'skipped' for r in records),
+               'answer_completion_counts': dict(Counter(r['answer_metadata']['completion_status'] for r in records)),
+               'average_includes_failed_as_zero': True}
+    return {"version": version, "flags": flags, "avg": avg, "records": records, 'scoring': scoring}
 
 
 def print_comparison_table(summaries: List[Dict]):
-    print("\n" + "=" * 70)
-    print(f"{'Version':<8} {'BM25':<6} {'RRF':<6} {'Rerank':<8} {'Rewrite':<8} "
+    print("\n" + "=" * 92)
+    print(f"{'Version':<8} {'BM25':<6} {'RRF':<6} {'Rerank':<8} {'Backend':<14} {'Rewrite':<8} "
           f"{'Relevancy':>10} {'Faithful':>10} {'Precision':>10}")
-    print("-" * 70)
+    print("-" * 92)
     for s in summaries:
         f = s["flags"]
         a = s["avg"]
         print(f"{s['version']:<8} {str(f.get('ENABLE_BM25','')):<6} {str(f.get('ENABLE_RRF','')):<6} "
-              f"{str(f.get('ENABLE_RERANKER','')):<8} {str(f.get('ENABLE_QUERY_REWRITE','')):<8} "
+              f"{str(f.get('ENABLE_RERANKER','')):<8} {str(f.get('RERANKER_BACKEND','')):<14} "
+              f"{str(f.get('ENABLE_QUERY_REWRITE','')):<8} "
               f"{a['answer_relevancy']:>10.4f} {a['faithfulness']:>10.4f} {a['context_precision']:>10.4f}")
-    print("=" * 70)
+    print("=" * 92)
+    print('Scores may use different methods; inspect scoring.method_counts and averages_by_method.')
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--versions", default="V1,V2,V3,V4,V5,V6", help="Comma-separated versions to run")
+    parser.add_argument("--versions", default="V1,V2,V3,V4,V5,V6,V7", help="Comma-separated versions to run")
     parser.add_argument("--limit", type=int, default=30, help="Max test questions per version")
     parser.add_argument("--output", default=str(RESULTS_DIR / "comparison.json"))
     args = parser.parse_args()
@@ -258,7 +302,8 @@ def main():
         logger.info(f"Saved {version} results → {version_path}")
 
     # Save combined comparison
-    comparison = {"summaries": [{"version": s["version"], "flags": s["flags"], "avg": s["avg"]} for s in summaries]}
+    comparison = {"summaries": [{"version": s["version"], "flags": s["flags"], "avg": s["avg"],
+                                 "scoring": s['scoring']} for s in summaries]}
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(comparison, f, ensure_ascii=False, indent=2)
 

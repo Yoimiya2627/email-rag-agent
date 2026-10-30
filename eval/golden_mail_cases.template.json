@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "dataset_status": "template_requires_local_real_samples",
+  "source_policy": "Use locally authorized captures; keep original captures private and unchanged. Do not copy credentials or real mail into public repositories.",
+  "required_categories": ["plain_text", "html_table", "multipart_alternative_conflict", "rowspan_colspan", "explicit_header_ids", "nested_layout", "wrong_charset", "encoded_subject", "long_thread", "unread_attachment", "dst_boundary", "labels_changed", "deleted_message"],
+  "cases": [
+    {
+      "case_id": "replace_with_local_case_id",
+      "capture_sha256": "",
+      "account_alias": "personal",
+      "category": "html_table",
+      "expected_facts": [{"fact": "", "source_part": "", "source_row": "", "source_column": ""}],
+      "must_preserve_numbers": [],
+      "must_preserve_negations": [],
+      "must_not_infer": [],
+      "expected_decode_status": "no_signal_or_suspect",
+      "expected_unread_attachments": [],
+      "expected_uncertainty": [],
+      "reviewed_by_user": false
+    }
+  ]
+}

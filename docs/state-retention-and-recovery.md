@@ -1,0 +1,36 @@
+# Local state retention and recovery
+
+This is a single owner, single instance application. Stop API, UI, MCP and background workers before maintenance, then supply `--service-stopped`. The flag records your attestation; it cannot detect every external writer. Never run maintenance against an open business database during a test.
+
+ApprovalStore list pages default to 50 records, allow at most 200 and omit private payload/results unless explicitly requested. The current API/UI requests bodies for review; API callers can select `include_payload=false` for summaries. Cursors bind owner/status/session and advance by creation time and ID. `ApprovalStore.retain(owner_id=..., before=<Unix time>)` previews eligible terminal records; `apply=True` redacts payload, result and review evidence. It retains approval/owner/session/request IDs, payload hash and outcome as permanent deduplication tombstones. Executing/unknown records are excluded until manual reconciliation. Reusing the same logical key never reopens a redacted action. Identifiers and hashes themselves remain potentially private.
+
+Trace, MCP client and MCP server JSONL files rotate at `LOG_MAX_BYTES` (default 5 MB) with `LOG_BACKUP_COUNT` (default 3) retained copies. Writers are serialized inside the supported process. Readers scan only a byte-bounded suffix of the active file (default 1 MB), not all history. Filtered audit results may contain fewer records than requested; rotated segments require explicit offline inspection. This is not cross-process rotation or guaranteed audit delivery during a disk failure.
+
+Back up explicit SQLite and related corpus/raw/index paths to a new directory. Each optional argument selects exactly that artifact; omit unavailable components deliberately and document the omission:
+
+```text
+python scripts/state_maintenance.py backup --approvals <approvals.sqlite3> --jobs <jobs.sqlite3> --sessions <sessions.sqlite3> --corpus <emails.json> --raw-dir <raw-directory> --index-dir <chroma-directory> --destination <new-backup-dir> --service-stopped
+python scripts/state_maintenance.py restore --backup-directory <backup-dir> --destination <new-restore-dir> --service-stopped
+```
+
+SQLite's backup API includes committed WAL state. A manifest records integrity-checked member hashes. Restore verifies all hashes before creating a new destination; it never overwrites configured live paths. Old pending/executing/unknown approvals become unknown and require manual reconciliation. All restored job checkpoints are disabled, and queued/running jobs become cancelled. Completed approval tombstones remain completed. Inspect the restore report and reconcile remote effects before deliberately switching configuration. A backup is point-in-time: operations absent from an old backup cannot be inferred, so do not replay post-backup requests blindly. Hashes detect corruption, not hostile replacement of both files and manifest. Keep backups private and apply an explicit off-device encryption/access policy suitable for your machine.
+
+Artifact members are stored under `artifacts/corpus/data.json`, `artifacts/raw/` and `artifacts/index/` in the new backup/restore directory. File count and byte budgets default to 100,000 members and 10 GiB (`--max-files`, `--max-bytes`); the total byte check also includes SQLite snapshots. Links/junctions/reparse points, escaping or colliding member paths and changed/corrupt source files are rejected. The manifest records selected file paths, byte sizes and hashes. Stop all writers before inventory/copy; the tool does not freeze independent services itself. Copying a stopped Chroma directory preserves its files, but a usable restored index still requires compatible Chroma/model/config revisions and a fresh-process query/count check in the target environment. Do not infer production restore success from a synthetic SQLite-only test.
+
+Job requests, results and checkpoints contain private prompts/mail/context. Preview old terminal job redaction with `python scripts/state_maintenance.py retain --kind jobs --path <jobs.sqlite3> --owner <owner> --before <Unix-time> --service-stopped`; add `--apply` to redact. Request hashes and operation keys remain tombstones. Running/queued/interrupted jobs are excluded. The same command with `--kind sessions` deletes inactive sessions and cascades transcript, task facts and evidence. Restart the service after offline maintenance so cached session context is discarded. These commands default to dry-run.
+
+Logical redaction/deletion does not promise forensic erasure of SQLite pages, WAL, filesystem snapshots or existing backups. Legacy approvals JSON, source mail corpus, Chroma/index generations, evaluation run directories, crash dumps and backups need their own explicit retention decision; they are not silently deleted by this script. Gmail OAuth credentials and environment secrets are deliberately excluded from backup collection. Preserve independently protected credential recovery or reauthorize locally. The synthetic regression drill covers backup integrity, no restored approval replay, disabled job resume and transcript cascades; it does not establish your real backup RPO/RTO or recovery of live accounts.
+
+
+Standalone SQLite backup members are opened as immutable snapshots during restore. Unexpected WAL/SHM/journal sidecars are rejected before creating the destination. Backup byte preflight uses logical page count and page size, including committed WAL content; copying also checks the page budget. File traversal is lazy and limited to 10,000 directories and depth 64 in addition to file/byte limits. A partial failed output has no complete valid manifest and must not be treated as a successful backup.
+
+For old complete backup or isolated evaluation directories, `scripts/artifact_retention.py` creates an explicit read-only plan. Write the plan outside the scanned root:
+
+```text
+python scripts/artifact_retention.py --root <backup-parent> --kind backup --before <past-Unix-time> --plan-output <new-plan.json> --service-stopped
+python scripts/artifact_retention.py --root <same-backup-parent> --apply-plan <reviewed-plan.json> --service-stopped
+```
+
+The apply command rechecks the plan hash, full inventory and file hashes, and removes only verified expired complete direct-child directories. Unknown files, incomplete backups and recently modified artifacts are retained. Evaluation cleanup uses `--kind eval` and requires the known isolated evaluation report/owner layout. A deletion interrupted after quarantine may leave a `.retention-*` directory; inspect it explicitly instead of treating it as a valid backup. No timer or automatic deletion is enabled.
+
+`--kind raw` and `--kind index` are inventory-only. Active/paused/supplied references are retained; an incomplete reference graph is reported as unknown and kept. The tool deliberately cannot delete raw mail or old index generations. Current-corpus range deletion and publishing a replacement generation remove messages from current retrieval, not every historical physical copy. Select personal retention periods, backup expiry and any required offline historical erasure explicitly; this release does not claim full physical privacy erasure or automatic index garbage collection.

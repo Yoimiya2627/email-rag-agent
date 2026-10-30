@@ -1,0 +1,5 @@
+# Optional offline real-SQLite/Chroma + graph contracts, without embedding weights.
+-r requirements-test.txt
+-c requirements-storage-constraints.txt
+chromadb==1.5.5
+langgraph==1.2.11

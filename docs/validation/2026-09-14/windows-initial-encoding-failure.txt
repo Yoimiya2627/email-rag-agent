@@ -1,0 +1,113 @@
+........................................................................................................................................ [  9%]
+.........s....s.................................................... [ 13%]
+........................................................................ [ 18%]
+................................................................................................................................... [ 27%]
+........................................................... [ 31%]
+......................................................... [ 34%]
+........................................................................ [ 39%]
+....................................................................F... [ 44%]
+........................................................................ [ 49%]
+.................................................... [ 52%]
+............................. [ 54%]
+........................................................................ [ 59%]
+........................................................................ [ 64%]
+........................................................................ [ 69%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+.......s................................................................ [ 83%]
+........................................... [ 86%]
+.......................................................................................................................... [ 94%]
+.................................................. [ 98%]
+...........................                                              [100%]
+================================== FAILURES ===================================
+____________ test_check_does_not_import_heavy_modules_or_settings _____________
+
+    def test_check_does_not_import_heavy_modules_or_settings():
+        source = '''
+    import sys, runpy
+    class Block:
+        def find_spec(self, fullname, *args):
+            if fullname.split('.')[0] in {'torch', 'sentence_transformers', 'chromadb', 'config', 'huggingface_hub'}:
+                raise AssertionError('forbidden import: ' + fullname)
+    sys.meta_path.insert(0, Block())
+    sys.argv = [sys.argv[1], '--check']
+    runpy.run_path(sys.argv[0], run_name='__main__')
+    '''
+        result = subprocess.run([sys.executable, "-c", source, str(SCRIPT)], capture_output=True, text=True)
+        assert result.returncode in (0, 2), result.stderr
+>       assert "missing_dependencies" in json.loads(result.stdout)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_index_benchmark.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+s = None, cls = None, object_hook = None, parse_float = None, parse_int = None
+parse_constant = None, object_pairs_hook = None, kw = {}
+
+    def loads(s, *, cls=None, object_hook=None, parse_float=None,
+            parse_int=None, parse_constant=None, object_pairs_hook=None, **kw):
+        """Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance
+        containing a JSON document) to a Python object.
+    
+        ``object_hook`` is an optional function that will be called with the
+        result of any object literal decode (a ``dict``). The return value of
+        ``object_hook`` will be used instead of the ``dict``. This feature
+        can be used to implement custom decoders (e.g. JSON-RPC class hinting).
+    
+        ``object_pairs_hook`` is an optional function that will be called with the
+        result of any object literal decoded with an ordered list of pairs.  The
+        return value of ``object_pairs_hook`` will be used instead of the ``dict``.
+        This feature can be used to implement custom decoders.  If ``object_hook``
+        is also defined, the ``object_pairs_hook`` takes priority.
+    
+        ``parse_float``, if specified, will be called with the string
+        of every JSON float to be decoded. By default this is equivalent to
+        float(num_str). This can be used to use another datatype or parser
+        for JSON floats (e.g. decimal.Decimal).
+    
+        ``parse_int``, if specified, will be called with the string
+        of every JSON int to be decoded. By default this is equivalent to
+        int(num_str). This can be used to use another datatype or parser
+        for JSON integers (e.g. float).
+    
+        ``parse_constant``, if specified, will be called with one of the
+        following strings: -Infinity, Infinity, NaN.
+        This can be used to raise an exception if invalid JSON numbers
+        are encountered.
+    
+        To use a custom ``JSONDecoder`` subclass, specify it with the ``cls``
+        kwarg; otherwise ``JSONDecoder`` is used.
+        """
+        if isinstance(s, str):
+            if s.startswith('\ufeff'):
+                raise JSONDecodeError("Unexpected UTF-8 BOM (decode using utf-8-sig)",
+                                      s, 0)
+        else:
+            if not isinstance(s, (bytes, bytearray)):
+>               raise TypeError(f'the JSON object must be str, bytes or bytearray, '
+                                f'not {s.__class__.__name__}')
+E               TypeError: the JSON object must be str, bytes or bytearray, not NoneType
+
+E:\python-uv\cpython-3.11-windows-x86_64-none\Lib\json\__init__.py:339: TypeError
+============================== warnings summary ===============================
+tests/test_index_benchmark.py::test_check_does_not_import_heavy_modules_or_settings
+  E:\智能邮件agent\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-200 (_readerthread)
+  
+  Traceback (most recent call last):
+    File "E:\python-uv\cpython-3.11-windows-x86_64-none\Lib\threading.py", line 1045, in _bootstrap_inner
+      self.run()
+    File "E:\python-uv\cpython-3.11-windows-x86_64-none\Lib\threading.py", line 982, in run
+      self._target(*self._args, **self._kwargs)
+    File "E:\python-uv\cpython-3.11-windows-x86_64-none\Lib\subprocess.py", line 1599, in _readerthread
+      buffer.append(fh.read())
+                    ^^^^^^^^^
+  UnicodeDecodeError: 'gbk' codec can't decode byte 0xae in position 28: illegal multibyte sequence
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_index_benchmark.py::test_check_does_not_import_heavy_modules_or_settings
+1 failed, 1489 passed, 3 skipped, 1 warning, 190 subtests passed in 198.41s (0:03:18)

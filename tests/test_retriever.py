@@ -16,7 +16,8 @@ from models.schemas import SearchResult
 
 
 @pytest.fixture(autouse=True)
-def _wipe_bm25_cache():
+def _wipe_bm25_cache(monkeypatch):
+    monkeypatch.setattr(retriever_mod, "get_corpus_revision", lambda: "test-version")
     invalidate_bm25_cache()
     yield
     invalidate_bm25_cache()

@@ -1,0 +1,552 @@
+{
+  "recorded_at": "2026-09-13T18:31:50.481291+00:00",
+  "source_sha256": "bac134dde6211fae71fe39a1e9500f9f5fc1873763cface35e30baeac9edeb6e",
+  "checks": {
+    "ui_imported_fixture": true,
+    "index_12_emails_12_chunks": true,
+    "ui_budget_answer_and_citation": true,
+    "ui_first_click_readback": true,
+    "agent_read_draft_approval_tools": true,
+    "agent_completed_approval_request": true,
+    "ui_pending_approval_reviewed": true,
+    "one_approved_simulated_action": true,
+    "not_sent": true,
+    "draft_preserves_source_facts": true,
+    "browser_no_uncaught_page_errors": true
+  },
+  "passed": 11,
+  "failed": 0,
+  "scope": "Synthetic fixture; actual browser, API and model; simulated approval only. Checks are not separate independent test scenarios.",
+  "jobs": [
+    {
+      "id": "68246e9b-6480-449f-a78c-8502ef0afafc",
+      "kind": "index",
+      "status": "succeeded",
+      "request": {
+        "data_path": "data/portfolio_demo/emails.json"
+      },
+      "result": {
+        "chunk_count": 12,
+        "email_count": 12,
+        "index_metrics": {
+          "counts": {
+            "embedded_chunks": 12,
+            "embedding_batches": 1,
+            "input_chunks": 12,
+            "input_emails": 12,
+            "new_emails": 12,
+            "processed_chunks": 12,
+            "reused_chunks": 0
+          },
+          "outcome": "published",
+          "stages_seconds": {
+            "compare": 7e-06,
+            "embedding": 4.10339,
+            "model_load": 13.406103,
+            "preprocessing": 0.102732,
+            "publish": 0.004815,
+            "source_spool": 0.005838,
+            "source_verify": 0.000602,
+            "verify": 0.009083,
+            "write": 0.050882
+          },
+          "total_seconds": 17.784664,
+          "unaccounted_seconds": 0.101211
+        },
+        "metadata": {
+          "status": "success"
+        }
+      }
+    },
+    {
+      "id": "f99497ae-49fc-485f-881b-51645865b533",
+      "kind": "agent",
+      "status": "succeeded",
+      "request": {
+        "_session_epoch": 0,
+        "context": null,
+        "mailbox_account_id": null,
+        "operation_key": "49899b2f-6dfc-4477-9859-7af3b591ccd9",
+        "query": "这是合成邮件演示。请读取 demo-star-meeting，调用 draft_reply 起草确认参会的简短回复，写明会议日期、时间和地点；随后调用 send_email 为该回复建立待审批请求，收件人为 pm@example.invalid，主题为“回复：星舟项目评审会议安排”。我会在审批界面确认。不要直接发送邮件。",
+        "session_id": "6f70cd10-5446-496e-863e-eb7bec923a91",
+        "user_email": null
+      },
+      "result": {
+        "answer": "已完成，邮件尚未发送，正等待您在审批界面确认。\n\n**1. 读取会议邮件** [demo-star-meeting#demo-star-meeting_chunk_0]\n- 主题：星舟项目评审会议安排\n- 发件人：pm@example.invalid\n- 会议：2026 年 9 月 18 日上午 10 点，梧桐会议室\n- 该邮件注明为合成测试数据，且没有安排线上会议链接\n\n**2. 起草的确认参会回复**\n> 您好，pm@example.invalid：\n>\n> 已收到会议安排，确认参会。\n>\n> 会议信息如下：\n> - 日期：2026年9月18日\n> - 时间：上午10点\n> - 地点：梧桐会议室\n>\n> 我会准备进度材料并准时参加。\n>\n> 此致\n> [发件人]\n\n**3. 待审批请求**\n- 状态：`pending_approval`（未发送）\n- 审批 ID：`96590a9f-cfe2-47ce-a964-908ff0340cc1`\n- 收件人：pm@example.invalid\n- 主题：回复：星舟项目评审会议安排\n\n请知悉：`send_email` 只创建了待人工审批的请求，不会直接发送；需由您在审批界面确认后，才由人工确认链路执行。",
+        "intent": null,
+        "metadata": {
+          "actual_tool_calls": 3,
+          "citation_check": "identity_only_not_entailment",
+          "citation_version_conflict_count": 0,
+          "cited_evidence": [
+            {
+              "chunk_id": "demo-star-meeting_chunk_0",
+              "chunk_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "email_id": "demo-star-meeting",
+              "offset_basis": "chunk_text",
+              "source_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "source_version": "d0e0293eb9124fe794a56dd381f95295",
+              "visible_end": 105,
+              "visible_hash": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "visible_start": 0
+            }
+          ],
+          "completion_status": "complete",
+          "context_metrics": {
+            "context_chars": 15791,
+            "dropped_history_turns": 0,
+            "estimated_input_tokens": 19689,
+            "input_estimate_error_tokens": -13987,
+            "material_counts": {
+              "current_user_request": 1,
+              "historical_assistant_claim": 1,
+              "user_statement": 2
+            },
+            "material_manifest": [
+              {
+                "account_scope": "single_account",
+                "coverage": "complete",
+                "kind": "current_user_request",
+                "material_id": "current_request",
+                "offset_basis": "material_text",
+                "position": "current_user",
+                "scope_validated": true,
+                "source_id": "f99497ae-49fc-485f-881b-51645865b533",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "version": "request_v1",
+                "visible_end": 46,
+                "visible_hash": "e7a5c217fe35f46332de8bf0a86b38e6f191560d14e80dc5bf074fa8b18ec393",
+                "visible_start": 0
+              },
+              {
+                "account_scope": "single_account",
+                "coverage": "selected_subset",
+                "kind": "user_statement",
+                "material_id": "history:c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:query",
+                "offset_basis": "query_text",
+                "position": "historical_excerpts",
+                "scope_validated": true,
+                "source_id": "c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:query",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "version": "1",
+                "visible_end": 24,
+                "visible_hash": "3f7612a289d70635bbc9d781ca144bd039cd8ee7a42b8e677ed254446cec8a55",
+                "visible_start": 0
+              },
+              {
+                "account_scope": "single_account",
+                "coverage": "selected_subset",
+                "kind": "historical_assistant_claim",
+                "material_id": "history:c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:answer",
+                "offset_basis": "answer_text",
+                "position": "historical_excerpts",
+                "scope_validated": true,
+                "source_id": "c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:answer",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "version": "1",
+                "visible_end": 128,
+                "visible_hash": "0499c7b1614c35447819c0837d7a14aa8d18ccc5ef351d01384db3ebec5c785d",
+                "visible_start": 0
+              },
+              {
+                "account_scope": "single_account",
+                "coverage": "selected_subset",
+                "kind": "user_statement",
+                "material_id": "event:590d20eb-a103-42e4-afa9-2cd75280979b",
+                "offset_basis": "material_text",
+                "position": "user_events",
+                "scope_validated": true,
+                "source_id": "590d20eb-a103-42e4-afa9-2cd75280979b",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "version": "1",
+                "visible_end": 24,
+                "visible_hash": "3f7612a289d70635bbc9d781ca144bd039cd8ee7a42b8e677ed254446cec8a55",
+                "visible_start": 0
+              }
+            ],
+            "omission_counts": {
+              "current_request_duplicate": 1
+            },
+            "omissions": [
+              {
+                "material_id": "f99497ae-49fc-485f-881b-51645865b533",
+                "reason": "current_request_duplicate"
+              }
+            ],
+            "output_token_reserve": 4128,
+            "provider_input_tokens": 5702,
+            "provider_usage_available": true,
+            "selection_policy": "purpose_v1",
+            "stage": "write_reply",
+            "token_capacity": 32000,
+            "token_estimation_method": "utf8_bytes_upper_bound",
+            "tool_results_stored": 3,
+            "usage_is_estimated": true
+          },
+          "error_code": null,
+          "finish_reason": "stop",
+          "invalid_citation_count": 0,
+          "max_steps_reached": false,
+          "model_usage": {
+            "actual_cost": 0.0,
+            "actual_total_tokens": 19297,
+            "budget_accounted_cost": 0.0,
+            "budget_accounted_tokens": 19297,
+            "call_count": 5,
+            "calls": [
+              {
+                "actual_cost": null,
+                "duration_ms": 985.0,
+                "estimated_input_tokens": 10685,
+                "estimated_max_cost": null,
+                "input_tokens": 2920,
+                "output_tokens": 57,
+                "reserved_output_tokens": 4000,
+                "stage": "agent_plan",
+                "status": "complete",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "total_tokens": 2977,
+                "usage_source": "provider"
+              },
+              {
+                "actual_cost": null,
+                "duration_ms": 672.0,
+                "estimated_input_tokens": 14333,
+                "estimated_max_cost": null,
+                "input_tokens": 4033,
+                "output_tokens": 98,
+                "reserved_output_tokens": 4000,
+                "stage": "agent_plan",
+                "status": "complete",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "total_tokens": 4131,
+                "usage_source": "provider"
+              },
+              {
+                "actual_cost": null,
+                "duration_ms": 563.0,
+                "estimated_input_tokens": 2836,
+                "estimated_max_cost": null,
+                "input_tokens": 671,
+                "output_tokens": 63,
+                "reserved_output_tokens": 1000,
+                "stage": "write_reply",
+                "status": "complete",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "total_tokens": 734,
+                "usage_source": "provider"
+              },
+              {
+                "actual_cost": null,
+                "duration_ms": 1266.0,
+                "estimated_input_tokens": 18059,
+                "estimated_max_cost": null,
+                "input_tokens": 5245,
+                "output_tokens": 206,
+                "reserved_output_tokens": 4000,
+                "stage": "agent_plan",
+                "status": "complete",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "total_tokens": 5451,
+                "usage_source": "provider"
+              },
+              {
+                "actual_cost": null,
+                "duration_ms": 1516.0,
+                "estimated_input_tokens": 19689,
+                "estimated_max_cost": null,
+                "input_tokens": 5702,
+                "output_tokens": 302,
+                "reserved_output_tokens": 4000,
+                "stage": "agent_plan",
+                "status": "complete",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "total_tokens": 6004,
+                "usage_source": "provider"
+              }
+            ],
+            "calls_truncated": false,
+            "reserved_cost": 0.0,
+            "reserved_tokens": 0,
+            "unknown_cost_calls": 5,
+            "unknown_usage_calls": 0,
+            "unpriced_calls": 5
+          },
+          "model_visible_evidence": [
+            {
+              "chunk_id": "demo-star-meeting_chunk_0",
+              "chunk_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "email_id": "demo-star-meeting",
+              "offset_basis": "chunk_text",
+              "source_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "source_version": "d0e0293eb9124fe794a56dd381f95295",
+              "visible_end": 105,
+              "visible_hash": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "visible_start": 0
+            }
+          ],
+          "pending_approval_ids": [
+            "96590a9f-cfe2-47ce-a964-908ff0340cc1"
+          ],
+          "run_id": "f99497ae-49fc-485f-881b-51645865b533",
+          "session_context": {
+            "contains_execution_authority": false,
+            "context_chars": 774,
+            "deletion_epoch": 0,
+            "estimated_input_tokens": 996,
+            "history_retrieval": {
+              "analyzer_version": "cjk-bigram-v1",
+              "candidate_limit": 400,
+              "degraded_reason": null,
+              "elapsed_ms": 16.0,
+              "fallback_truncated": false,
+              "index_incomplete": false,
+              "scan_char_limit": 2000000,
+              "scan_chars": 152,
+              "time_limit_ms": 500
+            },
+            "history_search_ms": 27.426,
+            "material_manifest": [
+              {
+                "account_scope": "single_account",
+                "coverage": "selected_subset",
+                "kind": "user_statement",
+                "material_id": "history:c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:query",
+                "offset_basis": "query_text",
+                "position": "historical_excerpts",
+                "scope_validated": true,
+                "source_id": "c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:query",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "version": "1",
+                "visible_end": 24,
+                "visible_hash": "3f7612a289d70635bbc9d781ca144bd039cd8ee7a42b8e677ed254446cec8a55",
+                "visible_start": 0
+              },
+              {
+                "account_scope": "single_account",
+                "coverage": "selected_subset",
+                "kind": "historical_assistant_claim",
+                "material_id": "history:c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:answer",
+                "offset_basis": "answer_text",
+                "position": "historical_excerpts",
+                "scope_validated": true,
+                "source_id": "c6bc59a7-0c55-4155-b3b2-460e9c45e0ef:answer",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "version": "1",
+                "visible_end": 128,
+                "visible_hash": "0499c7b1614c35447819c0837d7a14aa8d18ccc5ef351d01384db3ebec5c785d",
+                "visible_start": 0
+              },
+              {
+                "account_scope": "single_account",
+                "coverage": "selected_subset",
+                "kind": "user_statement",
+                "material_id": "event:590d20eb-a103-42e4-afa9-2cd75280979b",
+                "offset_basis": "material_text",
+                "position": "user_events",
+                "scope_validated": true,
+                "source_id": "590d20eb-a103-42e4-afa9-2cd75280979b",
+                "token_estimation_method": "utf8_bytes_upper_bound",
+                "version": "1",
+                "visible_end": 24,
+                "visible_hash": "3f7612a289d70635bbc9d781ca144bd039cd8ee7a42b8e677ed254446cec8a55",
+                "visible_start": 0
+              }
+            ],
+            "omissions": [
+              {
+                "material_id": "f99497ae-49fc-485f-881b-51645865b533",
+                "reason": "current_request_duplicate"
+              }
+            ],
+            "omitted_count": 1,
+            "purpose_weights": {
+              "derived_summaries": 0.25,
+              "historical_excerpts": 0.55,
+              "task_progress": 0.1,
+              "user_events": 0.1
+            },
+            "required_omissions": [],
+            "selection_policy": "purpose_v1",
+            "session_revision": 3,
+            "source_turn_ids": [
+              "c6bc59a7-0c55-4155-b3b2-460e9c45e0ef"
+            ],
+            "stage": "generate",
+            "task_id": "default",
+            "token_estimation_method": "utf8_bytes_upper_bound",
+            "usage_is_estimated": true
+          },
+          "session_id": "6f70cd10-5446-496e-863e-eb7bec923a91",
+          "sources_kind": "retrieved_candidates",
+          "status": "approval_required",
+          "steps": [
+            {
+              "argument_summary": {
+                "chars": 33,
+                "field_count": 1,
+                "sha256": "ee64ac324a416dd4bb1299caf77e94f449dfe1cc8aa12ed6d0a2593e7ed2bf3d"
+              },
+              "error_code": null,
+              "evidence_refs": [
+                {
+                  "chunk_id": "demo-star-meeting_chunk_0",
+                  "chunk_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+                  "email_id": "demo-star-meeting",
+                  "offset_basis": "chunk_text",
+                  "source_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+                  "source_version": "d0e0293eb9124fe794a56dd381f95295",
+                  "visible_end": 105,
+                  "visible_hash": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+                  "visible_start": 0
+                }
+              ],
+              "output_truncated": false,
+              "result_ref": {
+                "argument_hash": "ee64ac324a416dd4bb1299caf77e94f449dfe1cc8aa12ed6d0a2593e7ed2bf3d",
+                "bytes": 5189,
+                "call_id": "step-1",
+                "content_hash": "697de09b1147b11a8c9d321ad6c2531f91aead9d70e15754cf5ccb06164e5ff5",
+                "epoch": 0,
+                "material_type": "historical_tool_result",
+                "result_id": "f708012e6e6b43ea92d803df821712f2",
+                "tool": "get_email"
+              },
+              "side_effect_state": "none",
+              "status": "success",
+              "tool": "get_email",
+              "tool_call_id": "call_00_hOmyvuFh0YOn813qwWPN9006"
+            },
+            {
+              "argument_summary": {
+                "chars": 98,
+                "field_count": 2,
+                "sha256": "017c16f75cfe7ae6268c22e64a3eac405c3e0150f0d693d32fe7c1442ae7ed6f"
+              },
+              "error_code": null,
+              "evidence_refs": [
+                {
+                  "chunk_id": "demo-star-meeting_chunk_0",
+                  "chunk_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+                  "email_id": "demo-star-meeting",
+                  "offset_basis": "chunk_text",
+                  "source_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+                  "source_version": "d0e0293eb9124fe794a56dd381f95295",
+                  "visible_end": 105,
+                  "visible_hash": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+                  "visible_start": 0
+                }
+              ],
+              "output_truncated": false,
+              "result_ref": {
+                "argument_hash": "017c16f75cfe7ae6268c22e64a3eac405c3e0150f0d693d32fe7c1442ae7ed6f",
+                "bytes": 2639,
+                "call_id": "step-2",
+                "content_hash": "474b51fac43d9dcafa8ed08f7f2724c028a0e98f3b60f09d2c831f9ef7ba7457",
+                "epoch": 0,
+                "material_type": "historical_tool_result",
+                "result_id": "0f055e4ec699478fa72f92f5febae696",
+                "tool": "draft_reply"
+              },
+              "side_effect_state": "none",
+              "status": "success",
+              "tool": "draft_reply",
+              "tool_call_id": "call_00_6MBR6tafF3aL4jNmqBUW3501"
+            },
+            {
+              "approval_id": "96590a9f-cfe2-47ce-a964-908ff0340cc1",
+              "argument_summary": {
+                "chars": 278,
+                "field_count": 4,
+                "sha256": "389db694c54c4b322ff8249a559e9b6e493643a02d4c94708b3105ede9b9adae"
+              },
+              "error_code": null,
+              "evidence_refs": [],
+              "output_truncated": false,
+              "result_ref": {
+                "argument_hash": "389db694c54c4b322ff8249a559e9b6e493643a02d4c94708b3105ede9b9adae",
+                "bytes": 341,
+                "call_id": "step-3",
+                "content_hash": "b8ac5412f3af00e2bb9d2e5a14a8a0c1d37f200d4468dd49e2d25ca479892512",
+                "epoch": 0,
+                "material_type": "historical_tool_result",
+                "result_id": "7f1d3164b45641f188fddea44f0ef218",
+                "tool": "send_email"
+              },
+              "side_effect_state": "pending_approval",
+              "status": "approval_required",
+              "tool": "send_email",
+              "tool_call_id": "call_00_2hRZJncQ6UxzoVhRXos68566"
+            }
+          ],
+          "trace_id": "f079f41c-dd9b-46a1-8d0b-1f0124c07719",
+          "turn_id": "8cabfe5c-167f-46e8-bb59-f1e1db70086b"
+        },
+        "sources": [
+          {
+            "chunk_id": "demo-star-meeting_chunk_0",
+            "content": "Subject: 星舟项目评审会议安排\n\n本邮件为合成测试数据。星舟项目评审会议定于 2026 年 9 月 18 日上午 10 点，在梧桐会议室举行。请准备进度材料；本邮件没有安排线上会议链接。请回复确认参会。",
+            "email_id": "demo-star-meeting",
+            "metadata": {
+              "cc": [],
+              "chunk_id": "demo-star-meeting_chunk_0",
+              "chunk_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "coverage": {
+                "attachment_count": 0,
+                "attachment_inventory_present": true,
+                "attachment_inventory_status": "available",
+                "decode_status": "unknown",
+                "mailbox_sync_complete": "unknown",
+                "scope": "indexed_text_only",
+                "unread_attachments": 0
+              },
+              "date": "2026-09-13",
+              "email_id": "demo-star-meeting",
+              "in_reply_to": "",
+              "message_id": "",
+              "offset_basis": "chunk_text",
+              "references": [],
+              "sender": "pm@example.invalid",
+              "sender_name": "",
+              "source_sha256": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "source_version": "d0e0293eb9124fe794a56dd381f95295",
+              "subject": "星舟项目评审会议安排",
+              "thread_id": "demo-star-review",
+              "visible_end": 105,
+              "visible_hash": "e471e69e39b448dd1e8123839a21e0abc6d74f0942bd0b72f5d969d9f04d55a5",
+              "visible_start": 0
+            },
+            "score": 0.0
+          }
+        ]
+      }
+    }
+  ],
+  "approvals": [
+    {
+      "approval_id": "96590a9f-cfe2-47ce-a964-908ff0340cc1",
+      "status": "approved",
+      "execution_state": "succeeded",
+      "payload": {
+        "body": "您好，pm@example.invalid：\n\n已收到会议安排，确认参会。\n\n会议信息如下：\n- 日期：2026年9月18日\n- 时间：上午10点\n- 地点：梧桐会议室\n\n我会准备进度材料并准时参加。\n\n此致\n[发件人]",
+        "execution_binding": {
+          "provider": "simulated",
+          "version": 1
+        },
+        "rationale": "回复 demo-star-meeting（星舟项目评审会议安排），确认参会并复述会议日期、时间、地点。用户要求在审批界面确认，不直接发送。",
+        "subject": "回复：星舟项目评审会议安排",
+        "to": [
+          "pm@example.invalid"
+        ]
+      },
+      "result": {
+        "approval_id": "96590a9f-cfe2-47ce-a964-908ff0340cc1",
+        "mode": "simulated_send",
+        "provider": "simulated",
+        "request_id": "operation:d8db7b0ab1b872a7914408dcec2e4bacc78efb8da059c9054b44606a0fc2d8ca:send:1",
+        "sent": false,
+        "simulated": true
+      }
+    }
+  ]
+}

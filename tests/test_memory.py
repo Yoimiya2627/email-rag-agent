@@ -44,12 +44,15 @@ def test_clear_resets_state():
     assert mem.to_messages() == []
 
 
-def test_get_session_isolates_session_ids_and_returns_same_instance():
-    from api.main import _get_session
-
-    a = _get_session("session-a")
-    b = _get_session("session-b")
-    a_again = _get_session("session-a")
+def test_session_store_isolates_session_ids_and_returns_same_memory():
+    from api.sessions import SessionStore
+    store = SessionStore()
+    with store.turn('local', 'session-a') as a:
+        a.add('user', 'private')
+    with store.turn('local', 'session-b') as b:
+        assert b.to_messages() == []
+    with store.turn('local', 'session-a') as a_again:
+        assert a_again.to_messages() == [{'role': 'user', 'content': 'private'}]
 
     assert a is a_again, "Same session_id must return the same memory instance"
     assert a is not b, "Different session_ids must yield different memory instances"

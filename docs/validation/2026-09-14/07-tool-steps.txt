@@ -1,0 +1,94 @@
+邮件助手
+add
+
+新对话
+
+助手对话
+
+查看邮件
+
+邮箱设置
+
+我的邮箱
+
+还没有连接账号
+
+助手对话
+
+会话
+
+expand_more
+
+对话资料：导入资料 · 真实邮件仅支持本地阅读和搜索
+
+person
+
+星舟项目正式批准的预算是多少元？请引用邮件来源。
+
+auto_awesome
+
+星舟项目正式批准的预算是 12800 元。
+
+依据：邮件 [demo-star-budget#demo-star-budget_chunk_0] 明确说明“星舟项目正式批准的预算为 12800 元”，并替代 9 月 1 日的 9600 元预算初稿。
+
+keyboard_arrow_right
+
+证据核对 · 3 段模型可见范围 / 3 条检索候选
+
+person
+
+这是合成邮件演示。请读取 demo-star-meeting，调用 draft_reply 起草确认参会的简短回复，写明会议日期、时间和地点；随后调用 send_email 为该回复建立待审批请求，收件人为 pm@example.invalid，主题为“回复：星舟项目评审会议安排”。我会在审批界面确认。不要直接发送邮件。
+
+auto_awesome
+
+已完成，邮件尚未发送，正等待您在审批界面确认。
+
+1. 读取会议邮件 [demo-star-meeting#demo-star-meeting_chunk_0]
+
+主题：星舟项目评审会议安排
+发件人：pm@example.invalid
+会议：2026 年 9 月 18 日上午 10 点，梧桐会议室
+该邮件注明为合成测试数据，且没有安排线上会议链接
+
+2. 起草的确认参会回复
+
+您好，pm@example.invalid：
+
+已收到会议安排，确认参会。
+
+会议信息如下：
+
+日期：2026年9月18日
+时间：上午10点
+地点：梧桐会议室
+
+我会准备进度材料并准时参加。
+
+此致 [发件人]
+
+3. 待审批请求
+
+状态：pending_approval（未发送）
+审批 ID：96590a9f-cfe2-47ce-a964-908ff0340cc1
+收件人：pm@example.invalid
+主题：回复：星舟项目评审会议安排
+
+请知悉：send_email 只创建了待人工审批的请求，不会直接发送；需由您在审批界面确认后，才由人工确认链路执行。
+
+keyboard_arrow_right
+
+证据核对 · 1 段模型可见范围 / 1 条检索候选
+
+草稿请求待人工审批。
+
+keyboard_arrow_down
+
+🛠️ Agent 工具调用（3 步）
+
+1. get_email · success
+
+2. draft_reply · success
+
+3. send_email · approval_required
+
+待人工确认的审批编号：96590a9f-cfe2-47ce-a964-908ff0340cc1

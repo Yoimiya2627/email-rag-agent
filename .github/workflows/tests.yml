@@ -1,0 +1,31 @@
+name: Offline regression
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            python: '3.10'
+            profile: core
+          - os: ubuntu-latest
+            python: '3.11'
+            profile: core
+          - os: ubuntu-latest
+            python: '3.11'
+            profile: storage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements-test.txt -c requirements-test-constraints.txt
+      - if: matrix.profile == 'storage'
+        run: python -m pip install -r requirements-test-storage.txt
+      - run: python -m pip check
+      - run: python scripts/offline_tests.py tests/ -q

@@ -33,12 +33,23 @@ def test_apply_flags_writes_back_to_cfg():
     assert cfg.ENABLE_RRF is True
     assert cfg.ENABLE_RERANKER is True
     assert cfg.ENABLE_QUERY_REWRITE is True
+    assert cfg.RERANKER_BACKEND == "llm"
 
     rev.apply_flags(rev.VERSION_FLAGS["V1"])
     assert cfg.ENABLE_BM25 is False
     assert cfg.ENABLE_RRF is False
     assert cfg.ENABLE_RERANKER is False
     assert cfg.ENABLE_QUERY_REWRITE is False
+    assert cfg.RERANKER_BACKEND == "llm"
+
+
+def test_v7_flags_use_cross_encoder_reranker():
+    rev.apply_flags(rev.VERSION_FLAGS["V7"])
+    assert cfg.ENABLE_BM25 is True
+    assert cfg.ENABLE_RRF is True
+    assert cfg.ENABLE_RERANKER is True
+    assert cfg.ENABLE_QUERY_REWRITE is False
+    assert cfg.RERANKER_BACKEND == "cross_encoder"
 
 
 def test_extract_json_obj_pulls_object_from_noisy_text():
@@ -62,7 +73,8 @@ def test_score_response_returns_llm_scores_without_fallback(monkeypatch):
     )
 
     out = rev.score_response(client, "q?", "answer", ["ctx1", "ctx2"])
-    assert out == payload
+    assert rev.validate_scores(out) == payload
+    assert out['scoring_method'] == 'llm'
     assert embed_called["hit"] is False, "Embedding fallback must not run on LLM success"
     assert client._calls["n"] == 1
 
@@ -75,7 +87,8 @@ def test_score_response_falls_back_to_embedding_after_three_failures(monkeypatch
     monkeypatch.setattr(rev, "_score_by_embedding", lambda q, a, ctx: dict(fallback))
 
     out = rev.score_response(client, "q", "a", ["c1"])
-    assert out == fallback
+    assert rev.validate_scores(out) == fallback
+    assert out['scoring_method'] == 'embedding_proxy'
     assert client._calls["n"] == 3, "LLM scoring should retry exactly 3 times before degrading"
 
 
@@ -89,7 +102,8 @@ def test_score_response_returns_zeros_when_both_paths_fail(monkeypatch):
     monkeypatch.setattr(rev, "_score_by_embedding", boom)
 
     out = rev.score_response(client, "q", "a", ["c1"])
-    assert out == {"answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0}
+    assert rev.validate_scores(out) == {"answer_relevancy": 0.0, "faithfulness": 0.0, "context_precision": 0.0}
+    assert out['scoring_status'] == 'error'
 
 
 def test_score_response_uses_reasoning_content_when_message_content_empty(monkeypatch):
@@ -103,7 +117,7 @@ def test_score_response_uses_reasoning_content_when_message_content_empty(monkey
     )
 
     out = rev.score_response(client, "q", "a", ["ctx"])
-    assert out == payload
+    assert rev.validate_scores(out) == payload
     assert embed_called["hit"] is False
 
 
@@ -137,7 +151,7 @@ def test_evaluate_version_resets_circuit_breaker_and_aggregates(monkeypatch):
     out = rev.evaluate_version("V2", testset, limit=2, client=object())
 
     assert reset_calls["n"] == 1, "reset_circuit_breaker must be called exactly once per version"
-    assert set(out.keys()) == {"version", "flags", "avg", "records"}
+    assert set(out.keys()) == {"version", "flags", "avg", "records", "scoring"}
     assert out["version"] == "V2"
     assert out["flags"] == rev.VERSION_FLAGS["V2"]
     assert set(out["avg"].keys()) == {"answer_relevancy", "faithfulness", "context_precision"}

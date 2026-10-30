@@ -1,8 +1,12 @@
-# 评测方法与结论
+# 历史评测方法与结论（V1–V7）
 
-> 这份文档记录 Email RAG Agent 的离线评测设计、6 版消融数据，以及把"哪一版最好"翻译成"按业务目标如何取舍"的过程。
+> 当前版本的小规模真实模型评测见 [2026-09-14 评测报告](validation/2026-09-14/evaluation.md)。下文保留历史实验方法、成绩和当时的分析，未随本轮代码重新运行，也不代表当前评分脚本的完整行为。
+
+> 这份文档记录 Email RAG Agent 的离线评测设计、V1-V7 消融数据，以及把"哪一版最好"翻译成"按业务目标如何取舍"的过程。
+
+2026-09-10 核查：下述 V1–V7 是历史文件和历史结论，未在上下文优化后的版本重新跑真实模型。新增专项只验证确定性选材、来源和生命周期，语义摘要/候选质量待验收，不能把旧分数当本轮收益。见 [上下文优化说明](context-development-2026-09-10.md)。
 >
-> 简短版结论：在本数据集下，三个维度的赢家是分散的（V2 / V4 / V5），不存在"全维度都最优"的版本。把指标和延迟一起看，**默认推荐 V2（向量 + BM25 + RRF）**——relevancy 最高，延迟接近纯向量基线且显著低于引入 reranker/rewrite 的版本；只有强合规场景才有理由付出 ~3 倍延迟换 V4 的 0.011 faithfulness 优势。
+> 简短版结论：在本数据集下，三个维度仍然体现出取舍关系。V7（BM25 + RRF + Cross-Encoder reranker）拿到最高 `answer_relevancy=0.9750` 和 `faithfulness=0.9267`，旧 LLM reranker V3 仍拿到最高 `context_precision=0.7147`。新增的 synthetic gold chunk `context_recall` 显示，V7 在同一批 30 题上从 V2 的 `0.6167` 提升到 `0.8000`。把指标、延迟和稳定性一起看，**默认推荐 V2（向量 + BM25 + RRF，`ENABLE_RERANKER=false`）**；当业务更重视高质量回答且能接受本地 rerank 成本时，再显式开启 V7。
 
 ---
 
@@ -29,9 +33,11 @@
 - LLM 打分（主路径）：用 DeepSeek 给出三维度 0-1 分数，3 次重试，max_tokens=3000 给推理过程留足预算，content 为空时从 `reasoning_content` 兜底解析 JSON。
 - 向量打分（降级路径）：用 bge-m3 嵌入算 query/answer/contexts 的余弦相似度，对应到三个维度。**降级是兜底，不是默认**——只有 LLM 三次都失败才走这条路。
 
-### 缺什么
+### 补充确定性 recall
 
-没有实现 `context_recall`（检索是否覆盖了所有应该召回的内容），因为合成 testset 没有人工标注的 ground-truth chunk id。这是已知的局限；如果接入真实邮箱 + 人工标注的金标，应该补上。
+Phase 10 已补 `scripts/evaluate_context_recall.py`：它不再让 LLM 判断上下文是否有用，而是把每题的 `gold_chunk_ids` 和实际检索返回的 `chunk_id` 做集合匹配，得到确定性的 `mean_context_recall`、`chunk_hit_rate` 和 `perfect_recall_rate`。
+
+当前 `data/gold_chunks.json` 是基于 synthetic testset 前 30 题的 gold baseline：每个来源邮件在当前 chunker 下对应单个 chunk（第 8 题是两个来源邮件，因此有两个 gold chunks）。它能用于比较 V2/V7 在同一语料上的召回覆盖，但还不能替代真实邮箱上的人工 gold 标注。
 
 ---
 
@@ -54,78 +60,87 @@ Q1 OKR 回顾会议定于什么时间、在哪个地点举行？     → 单邮�
 
 ---
 
-## 3. 6 版配置 × 三指标 × 延迟
+## 3. 7 版配置 × 三指标 × 延迟
 
-每版评测的具体源数据：`data/eval_results/V{1..6}.json`（含 30 条逐题记录）；汇总：`data/eval_results/comparison.json`。
+每版评测的具体源数据：`data/eval_results/V{1..7}.json`（含 30 条逐题记录）；汇总：`data/eval_results/comparison.json`。端到端延迟表目前来自 `data/eval_results/latency.json` 的 V1-V6 历史重跑；V7 已完成质量评测，Phase 8 已补 `scripts/measure_reranker_latency.py` 做 rerank-only benchmark 和 `core.reranker_policy` 做上线策略，但 V7 的正式端到端延迟仍需在真实模型环境补跑。确定性 recall 源数据为 `data/gold_chunks.json`，结果为 `data/eval_results/context_recall.json`。
 
-| 版本 | BM25 | RRF | Reranker | Rewrite | answer_relevancy | faithfulness | context_precision | 端到端延迟 mean / p95（s） |
-|---|---|---|---|---|---|---|---|---|
-| V1 | ❌ | ❌ | ❌ | ❌ | 0.8983 | 0.8683 | 0.5077 | 7.6 / 33.3 |
-| **V2** | ✅ | ✅ | ❌ | ❌ | **0.9517** 🏆 | 0.9117 | 0.5543 | 8.7 / 14.4 |
-| V3 | ✅ | ✅ | ✅ | ❌ | 0.9227 | 0.9050 | 0.5787 | 20.3 / 30.5 |
-| **V4** | ✅ | ✅ | ✅ | ✅ | 0.9117 | **0.9233** 🏆 | 0.5500 | 24.2 / 38.0 |
-| **V5** | ✅ | ❌ | ✅ | ✅ | 0.8700 | 0.8517 | **0.6383** 🏆 | 24.4 / 34.8 |
-| V6 | ✅ | ✅ | ❌ | ✅ | 0.9400 | 0.9117 | 0.5533 | 11.0 / 14.8 |
+| 版本 | BM25 | RRF | Reranker | Backend | Rewrite | answer_relevancy | faithfulness | context_precision | 端到端延迟 mean / p95（s） |
+|---|---|---|---|---|---|---|---|---|---|
+| V1 | ❌ | ❌ | ❌ | llm | ❌ | 0.8667 | 0.9233 | 0.5937 | 7.6 / 33.3 |
+| **V2** | ✅ | ✅ | ❌ | llm | ❌ | 0.9567 | 0.9000 | 0.5713 | **8.7 / 14.4** |
+| **V3** | ✅ | ✅ | ✅ | llm | ❌ | 0.9333 | 0.9017 | **0.7147** | 20.3 / 30.5 |
+| V4 | ✅ | ✅ | ✅ | llm | ✅ | 0.9533 | 0.8783 | 0.6427 | 24.2 / 38.0 |
+| V5 | ✅ | ❌ | ✅ | llm | ✅ | 0.9467 | 0.9083 | 0.6147 | 24.4 / 34.8 |
+| V6 | ✅ | ✅ | ❌ | llm | ✅ | 0.9600 | 0.8967 | 0.6050 | 11.0 / 14.8 |
+| **V7** | ✅ | ✅ | ✅ | cross_encoder | ❌ | **0.9750** | **0.9267** | 0.6103 | 端到端待补；rerank-only 已有脚本 |
 
-> **延迟口径说明**：度量的是 **RAG 主链路** —— `query rewrite → filter 抽取 → hybrid_search → rerank → generate`，不包含 Coordinator 意图分类、Self-RAG 反思循环、SSE 前端渲染、HTTP 请求链路。数字是 **10 题/版** 跑出的 **trimmed mean**（去掉最高最低后均值，抗 API 抖动）和 **p95**，源数据 `data/eval_results/latency.json`，复现脚本 `scripts/measure_latency.py --limit 10`。**由于每版仅 10 题，p95 在该样本量下接近最大值**，主要用于观察尾部延迟风险，正式 benchmark 应跑 30+ 题让 p95 真正反映 95 分位。V1 p95 33s 是冷启动（首题模型加载）造成的离群点，trimmed mean 7.6s 是稳态。绝对值会随 DeepSeek API 抖动浮动 ±20%，但版本间相对差距稳定。
+> **延迟口径说明**：度量的是 **RAG 主链路** —— `query rewrite → filter 抽取 → hybrid_search → rerank → generate`，不包含 Coordinator 意图分类、Self-RAG 反思循环、SSE 前端渲染、HTTP 请求链路。数字是 **10 题/版** 跑出的 **trimmed mean**（去掉最高最低后均值，抗 API 抖动）和 **p95**，源数据 `data/eval_results/latency.json`，复现脚本 `scripts/measure_latency.py --limit 10`。**由于每版仅 10 题，p95 在该样本量下接近最大值**，主要用于观察尾部延迟风险，正式 benchmark 应跑 30+ 题让 p95 真正反映 95 分位。V1 p95 33s 是冷启动（首题模型加载）造成的离群点，trimmed mean 7.6s 是稳态。绝对值会随 DeepSeek API 抖动浮动 ±20%，但版本间相对差距稳定。Phase 8 新增的 `scripts/measure_reranker_latency.py` 只测 rerank step，用于隔离 V2/V3/V7 的重排成本；`--mock-cross-encoder` 只能作为 CI smoke，不可当成真实延迟数字发布。
 
-### 单维度归因（看着都对）
+### V2 / V7 deterministic context_recall
 
-把每一项做成单维度故事，每个都自洽：
+| Version | n | mean_context_recall | chunk_hit_rate | perfect_recall_rate |
+|---|---:|---:|---:|---:|
+| V2 | 30 | 0.6167 | 0.6333 | 0.6000 |
+| V7 | 30 | **0.8000** | **0.8000** | **0.8000** |
 
-- **加 BM25 + RRF（V1 → V2）**：relevancy 0.898 → 0.952、faithfulness 0.868 → 0.912、precision 0.508 → 0.554，**三维全涨**，延迟 7.6s → 8.7s 几乎不变（BM25 是 in-memory，毫秒级）。
-- **加 Reranker（V2 → V3）**：precision 0.554 → 0.579，**精度涨了**；代价是延迟 8.7s → 20.3s（reranker LLM 调用），单组件就吃掉 ~12s。
-- **加 Query Rewrite（V3 → V4）**：faithfulness 0.905 → 0.923，**有据性涨了**；又加 4s（rewrite 也是 LLM 调用），总延迟 24.2s。
-- **关掉 RRF 改简单合并（V4 → V5）**：precision 0.550 → 0.638，**precision 反而涨了**；延迟基本不变（RRF 只是融合算法，不调 LLM）。BM25 在 testset 这种"术语精准"的题上比 RRF 平均化后更准（可参考第 4 节）。
+这张表回答的是 RAGAS 三指标没有直接覆盖的问题：**检索到底有没有把应该召回的证据 chunk 找回来**。在当前 synthetic gold baseline 上，V7 相比 V2 的 `mean_context_recall` 绝对提升 `+0.1833`；这与 V7 在 `answer_relevancy / faithfulness` 上更高的结果方向一致。但它仍然是合成语料上的 30 题 baseline，真实邮箱场景要重新标注 gold chunks 后再下生产结论。
 
-每条单看都讲得通。问题在于把它们叠到一起。
+### 逐组件看：单个 delta 的方向并不稳定
+
+很容易给每个组件配一个"单维度故事"——加 BM25+RRF 让某指标涨、加 reranker 让 precision 涨之类。但把这套消融**跑两次对比**就会发现：**单个组件对单个指标的影响方向，并不都稳定**。比如"加 query rewrite 对 faithfulness 是正还是负"，两次跑给出的方向就不一致。
+
+能稳的只有两类信息：① **延迟差异**（旧 LLM reranker / rewrite 各引入一次 LLM 调用，这是确定的——见上表延迟列，LLM reranker 单组件就吃掉 ~12s；Cross-Encoder 已把 V7 的重排改成本地模型调用，Phase 8 已补 rerank-only benchmark harness，但正式端到端 latency 还要在真实模型环境补跑）；② **跨多次都成立的模式**（见 §4）。单个 RAGAS delta 的正负不要过度解读——n=30 + LLM 打分的方差足以翻转它。
 
 ---
 
-## 4. 三个反直觉发现
+## 4. 核心发现：没有"全场最优"，但要小心噪声
 
-把 4 个组件全打开（V4，"全开版"）的预期是"三维全赢"，实际跑出来 **三个维度的赢家分散在 V2 / V4 / V5**——没有任何一版同时拿下三冠。
+### 稳健的发现：没有单一全场最优
 
-### 发现 1：reranker 不一定提 relevancy
+把 4 个组件全打开（V4）本以为能"三维全赢"，实际不是；接入 Cross-Encoder 后，V7 拿到 `answer_relevancy` 和 `faithfulness` 双高，但 `context_precision` 仍低于旧 LLM reranker V3。更稳的结论是：**没有一个版本同时统治回答质量、上下文干净度、延迟和稳定性**。
 
-V2 → V3 加了 reranker，relevancy 反而 0.952 → 0.923。原因猜测：本项目的 reranker 是 LLM-based 实现（用 DeepSeek 给候选 chunk 打分，方差和延迟都偏高，更适合替换为 cross-encoder 比如 `bge-reranker-v2-m3`），它把 V2 已经排前的"边相关 + 直接命中" chunk 挤出 top_n，反而让生成器丢掉关键信息。
+| | relevancy 最优 | faithfulness 最优 | context_precision 最优 |
+|---|:---:|:---:|:---:|
+| 旧 V1-V6 重跑 | V6 | V1 | V3 |
+| 新增 V7 后 | V7 | V7 | V3 |
 
-### 发现 2：rewrite 提 faithfulness，但代价是 relevancy
+所以这里能下的稳健结论不是"哪个版本永远第一"，而是**组件之间存在 trade-off**：Cross-Encoder 更利于回答相关性和有据性；旧 LLM reranker 在这组样本上更利于 top-K 干净度；默认链路还要把延迟和失败面算进去。
 
-V3 → V4 加了 rewrite，faithfulness 0.905 → 0.923 **是涨了**，但 relevancy 0.923 → 0.912 **是跌的**。改写过的 query 更"文档化"，召回的 chunk 与生成器的引用更贴合（faithfulness 涨）；但改写引入语义漂移，离用户原始意图更远了（relevancy 跌）。
+### 为什么具体排名会变：评测本身有噪声
 
-### 发现 3：RRF 不总是赢
+数字是单次、每版 30 题、LLM 当裁判跑出来的。n=30 是小样本，LLM 打分本身也有波动——两者叠加，足以让版本间 ±0.05~0.1 的差异翻转。**所以本文所有 RAGAS 数字都应当作"有噪声的估计"，4 位小数不代表 4 位精度。** 要更稳的结论需要加大题量（→100）并多次取均值。
 
-V4 → V5 把 RRF 关掉改成简单分数合并，precision 0.550 → 0.638 是 6 版里最高。RRF 用 rank 平均化，对"两路都中等"的友好；简单合并在"BM25 强势"的题上让 BM25 直接赢，反而过滤掉了向量带来的边缘 chunk。本数据集里术语精准题占多数，BM25 单独发挥更准。**换数据集（语义模糊题占多数）这个结论会反转**。
+### 方向性观察（趋势可参考，精确数值不必较真）
+
+- **reranker：拿精度、但有不同 backend 取舍**。V2→V3 加旧 LLM reranker，`context_precision` 上升到 0.7147，但代价是额外 LLM 延迟和评分方差；V7 改为 Cross-Encoder 后，`answer_relevancy` 和 `faithfulness` 最高，`context_precision` 比 V2 提升但低于 V3。正确结论不是"某个 reranker 全赢"，而是按业务目标在 top-K 干净度、回答质量、延迟和稳定性之间取舍。
+- **query rewrite：在规整的合成数据上 ROI 不明显**。加 rewrite 对三个指标互有增减、不构成稳定净增益。合成 testset 口语化程度低，改写能补的信息有限；真实邮箱（口语化、跨邮件）上 rewrite 价值可能不同。
 
 ---
 
 ## 5. 业务选型
 
-把上面的"赢家分散"翻译成业务取舍：
+把"赢家分散"翻译成业务取舍——下面的推荐结合**指标梯队 + 延迟**给出，不依赖某一版精确排第几（精确排名有噪声）：
 
 | 业务关心什么 | 推荐版本 | 理由 |
 |---|---|---|
-| 答案切题（客服 FAQ、邮件查询、对话式查询） | **V2**（BM25 + RRF） | relevancy 0.952 最高；延迟 mean 8.7s / p95 14.4s，**接近 V1 纯向量基线，且约为 V4 的 1/3** |
-| 答案有据（合规审计、法律咨询、医疗助理） | V4（全开） | faithfulness 0.923 最高；要接受 mean 24s / p95 38s 延迟，**只有"宁慢勿错"的场景才值得付** |
-| top-K 精确（人工复核场景，每条都要看） | V5（V4 - RRF） | precision 0.638 最高；延迟跟 V4 同档（mean 24.4s / p95 34.8s），适合"先粗筛再人审" |
+| 答案切题（客服 FAQ、邮件查询、对话式查询） | **V2 默认 / V7 高质量模式** | V7 relevancy 最高；但默认链路仍优先 V2，因为 `ENABLE_RERANKER=false` 延迟最低、稳定性最好。质量优先且能接受本地 rerank 成本时再开 V7 |
+| top-K 精确（人工复核场景，每条都要看） | V3 作为高 precision 对照 / V7 作为工程化重排 | V3 的 `context_precision=0.7147` 最高，但依赖额外 LLM scorer；V7 更确定、更适合产品化重排，但本次 precision 未超过 V3 |
+| 答案有据（合规、审计） | V7 或 V2，看延迟预算 | V7 faithfulness 最高；如果业务不接受 rerank 成本，V2 仍是低延迟默认路径 |
 
 ### 默认上线选 V2
 
-业务选型最有说服力的一刻：**V2 的延迟约为 V4 的 1/3（mean 8.7s vs 24.2s，p95 14.4s vs 38s），relevancy 还更高。**
+V2 的理由不靠"它精确排第一"，而靠两个**够稳的**事实：① 不带 reranker/rewrite，链路最短、失败面最小；② 历史 latency benchmark 中 mean 8.7s，是当前有正式延迟数据的最低延迟路径之一。V7 已证明 Cross-Encoder 在质量上值得接入；Phase 8 进一步把选择逻辑沉淀成 `choose_reranker_policy()`：默认对话/低延迟预算选 V2，质量优先选 V7，高 precision 且允许额外 LLM scorer 时才把 V3 当对照。组件不是越多越好。
 
-V4 唯一赢 V2 的地方是 faithfulness（0.923 vs 0.912，差 0.011），代价是 mean +15.5s 额外延迟（reranker + rewrite 各一次 LLM 调用）。这个差是否值得，完全取决于业务能不能接受用户对话场景中 mean 24s / p95 38s 等待——大多数对话式应用不能，所以默认上 V2。
-
-V6（V4 去掉 reranker）也值得记一下：relevancy 0.940 接近 V2，faithfulness 0.912 等于 V2，延迟 mean 11s / p95 14.8s，是"加了 query rewrite 但不肯付 reranker 延迟"的中间档——延迟跟 V2 几乎平齐，三维指标也都接近，说明 reranker 那 ~12s 是 V3/V4 延迟的主要来源。
+V6（V4 去掉 reranker）也值得记一下：延迟 mean 11s，跟 V2 几乎平齐，三维指标也都接近——说明 reranker 那 ~12s 是 V3/V4 延迟的主要来源。
 
 ---
 
 ## 6. 已知局限
 
-1. **30 题样本，方差较大**：正式 benchmark 应跑 100 题 × 3 次取均值；当前数据足以做相对排序，绝对值不要外推。
-2. **合成数据偏向"单邮件可答"**：testset 由 LLM 基于单封邮件生成 QA 对，跨邮件多跳推理题占比低。这是 rewrite 在合成数据上 ROI 偏低的可能原因之一；真实邮箱（多线程对话、跨邮件主题串联）上 rewrite 价值可能反转。
-3. **缺 context_recall**：合成 testset 没有人工标注的"应召回 chunk id"，无法测召回率。
-4. **LLM-based reranker 的工程取舍**：当前实现用 DeepSeek 给候选 chunk 打分，方差和延迟都偏高。换 cross-encoder（`bge-reranker-v2-m3`）能拿到毫秒级 + 确定性打分，预计 V3/V4 的指标和延迟会同时受益——这是当前评测里 ROI 最明显的下一步优化。
+1. **30 题样本，方差较大**：正式 benchmark 应跑 100 题 × 3 次取均值。当前数据足以揭示"赢家分散"这个**模式**，但版本间精确排名会随重跑变动（§4 给了两次跑的对比），不要把单次排名当定论。
+2. **合成数据偏向"单邮件可答"**：testset 由 LLM 基于单封邮件生成 QA 对，跨邮件多跳推理题占比低。这是 rewrite 在合成数据上 ROI 偏低的可能原因之一；Phase 9 已补 Gmail read-only 增量同步，下一步要在个人/脱敏真实邮箱上验证这个结论是否反转。
+3. **context_recall 已有 synthetic baseline，但仍缺真实邮箱 gold 标注**：Phase 10 新增 `scripts/evaluate_context_recall.py`、`data/gold_chunks.json` 和 `data/eval_results/context_recall.json`，已经能基于 `gold_chunk_ids` 计算 deterministic `context_recall` / hit rate / perfect recall。当前结果只证明在 synthetic testset 上 V7 的召回覆盖更好；个人/脱敏真实邮箱仍需单独标注正式 gold chunk 文件。
+4. **Cross-Encoder benchmark 已有 harness，但正式数字未补齐**：旧 LLM reranker 的延迟和方差问题已经通过 V7 的 `RERANKER_BACKEND=cross_encoder` 路径缓解；Phase 8 增加了 `scripts/measure_reranker_latency.py` 隔离测 V2/V3/V7 的 rerank step，并把上线策略写进 `core.reranker_policy`。下一步要在真实模型环境跑 30+ 题 × 多轮 latency，并结合 Phase 10 的真实邮箱 gold chunk recall 再决定是否默认开启 reranker。
 5. **延迟样本仍偏小**：当前数字是 10 题/版的 trimmed mean + p95，足以做相对排序；正式上线前应跑 30+ 题 × 多次取均值，并在不同时段重复以观测 API 抖动方差。源数据 `data/eval_results/latency.json`，复现 `python scripts/measure_latency.py --limit 10`。
 
 ---
@@ -133,15 +148,104 @@ V6（V4 去掉 reranker）也值得记一下：relevancy 0.940 接近 V2，faith
 ## 7. 复现实验
 
 ```bash
-# 跑全部 6 版（默认 30 题 × 6 版 ≈ 30-60 分钟，含 reranker 版本）
+# 跑全部 7 版（默认 30 题 × 7 版，含 LLM reranker 和 Cross-Encoder 版本）
 python scripts/run_ragas_eval.py
 
 # 只跑指定版本
-python scripts/run_ragas_eval.py --versions V1,V2 --limit 30
+python scripts/run_ragas_eval.py --versions V1,V2,V7 --limit 30
+
+# 端到端延迟：默认 V1-V7；发布数字前建议 limit>=30 且多轮
+python scripts/measure_latency.py --limit 10
+
+# Phase 8：只测 rerank step，隔离 V2/V3/V7 重排成本
+python scripts/measure_reranker_latency.py --versions V2,V7 --limit 30 --runs 3
+
+# Phase 10：先生成 gold chunk 标注模板，再填写 gold_chunk_ids
+python scripts/evaluate_context_recall.py --init-template --gold data/gold_chunks.json --limit 30
+
+# 基于 gold_chunk_ids 计算确定性 context_recall
+python scripts/evaluate_context_recall.py --gold data/gold_chunks.json --versions V2,V7
 
 # 输出
-data/eval_results/V{1..6}.json     # 每版逐题记录（含 answer / contexts）
+data/eval_results/V{1..7}.json     # 每版逐题记录（含 answer / contexts）
 data/eval_results/comparison.json  # 三维度均值汇总
+data/eval_results/reranker_latency.json  # Phase 8 rerank-only latency
+data/gold_chunks.json              # Phase 10 synthetic gold chunk labels
+data/eval_results/context_recall.json    # Phase 10 gold chunk recall
 ```
 
 评测脚本会自动应用每版的 `ENABLE_*` flag、重置 reranker 熔断器（避免上一版的失败计数泄漏到下一版，详见 [`docs/technical_retrospective.md`](technical_retrospective.md) §4）、把 LLM 打分失败的样本降级到向量相似度。
+
+---
+
+## 8. V7：Cross-Encoder Reranker 更新
+
+### 为什么新增 V7
+
+V1-V6 里的 `ENABLE_RERANKER=true` 使用的是 LLM scorer：把多个候选 chunk 拼成 prompt，让 DeepSeek 输出 `{"scores": [...]}`。这个方案能做语义重排，但工程上有三个问题：
+
+1. **延迟高**：每次 rerank 都多一次 LLM 调用，V3/V4/V5 的端到端耗时明显高于 V2/V6。
+2. **方差高**：LLM scorer 受输出格式、reasoning token、API 抖动影响，虽然已有 JSON 兜底和熔断，但仍不是检索链路里最稳定的部件。
+3. **成本不适合默认路径**：默认对话路径更需要稳定低延迟；重排如果要常开，更适合本地 Cross-Encoder。
+
+V7 保留 V2 的 `BM25 + RRF` 基线，只把 reranker backend 切到 `cross_encoder`，用于隔离观察 Cross-Encoder 的贡献。
+
+### V1-V7 最新 30 题结果
+
+| Version | BM25 | RRF | Reranker | Backend | Rewrite | answer_relevancy | faithfulness | context_precision |
+|---|---:|---:|---:|---|---:|---:|---:|---:|
+| V1 | false | false | false | llm | false | 0.8667 | 0.9233 | 0.5937 |
+| V2 | true | true | false | llm | false | 0.9567 | 0.9000 | 0.5713 |
+| V3 | true | true | true | llm | false | 0.9333 | 0.9017 | **0.7147** |
+| V4 | true | true | true | llm | true | 0.9533 | 0.8783 | 0.6427 |
+| V5 | true | false | true | llm | true | 0.9467 | 0.9083 | 0.6147 |
+| V6 | true | true | false | llm | true | 0.9600 | 0.8967 | 0.6050 |
+| V7 | true | true | true | cross_encoder | false | **0.9750** | **0.9267** | 0.6103 |
+
+### 解读
+
+- V7 在本次 30 题重跑里拿到最高 `answer_relevancy` 和 `faithfulness`，说明 Cross-Encoder 把更适合生成回答的 chunk 推到了前面。
+- `context_precision` 从 V2 的 0.5713 提升到 0.6103，但没有超过旧 LLM reranker V3 的 0.7147。面试里不要说“Cross-Encoder 全面碾压”，更准确的说法是：**Cross-Encoder 让重排从 LLM 调用变成本地确定性模型调用，提升了回答相关性和有据性，同时把成本/稳定性拉回可控范围；如果业务目标是人工复核 top-K 干净度，旧 V3 仍是一个高精度对照组。**
+- 本次 V7 运行时发现 `HF_ENDPOINT=https://hf-mirror.com` 对 `BAAI/bge-reranker-v2-m3` 拉取不稳定；正式复现命令使用 `HF_ENDPOINT=https://huggingface.co`，并已把 `.env.example` 更新为官方端点优先。
+
+### Phase 8：Reranker benchmark 与 serving policy
+
+V7 证明质量收益后，Phase 8 补的是工程化闭环：不是直接把 Cross-Encoder 默认打开，而是先把"什么时候开"和"开了要付多少 rerank 成本"做成可验证对象。
+
+- `scripts/measure_reranker_latency.py`：只测 `core.reranker.rerank()`，把 generation 和 DeepSeek 回答耗时排除出去；支持 V2（无 rerank）、V3（LLM scorer）和 V7（Cross-Encoder）对比。
+- `core.reranker_policy.choose_reranker_policy()`：把当前评测结论固化为 serving 决策。默认 conversation / 低延迟预算走 V2；quality / faithfulness / relevancy 走 V7；precision 场景默认走 V7，只有 `allow_llm_reranker=true` 时才把 V3 当高 precision 对照。
+- `--mock-cross-encoder`：用于 CI smoke，确保脚本入口、candidate 构造、summary 计算和输出 JSON 都能跑通；这类 mock 结果不能写进正式 benchmark 表。
+
+### Phase 9 / 10：真实邮箱与 context_recall
+
+Phase 9 补了 Gmail read-only ingestion：`agents/gmail_readonly.py` 只使用 `gmail.readonly` scope，把 Gmail message 的 MIME payload 解析为项目现有 `Email` schema；`scripts/sync_gmail_readonly.py` 用本地 `seen_message_ids` 做增量同步，输出到 gitignored 的 `data/real_emails/`，可选 `--index` 复用现有清洗、切分和 embedding 链路。
+
+Phase 10 补了 deterministic retrieval recall：`scripts/evaluate_context_recall.py --init-template` 从 testset 生成 gold chunk 标注模板；填入 `gold_chunk_ids` 后，脚本可对 V2/V7 等版本计算：
+
+- `mean_context_recall`：每题召回到的 gold chunk 比例均值。
+- `chunk_hit_rate`：至少命中一个 gold chunk 的问题占比。
+- `perfect_recall_rate`：全部 gold chunks 都被召回的问题占比。
+
+本次已在 synthetic testset 前 30 题上补齐 `data/gold_chunks.json` 并重跑 V2/V7：
+
+| Version | n | mean_context_recall | chunk_hit_rate | perfect_recall_rate |
+|---|---:|---:|---:|---:|
+| V2 | 30 | 0.6167 | 0.6333 | 0.6000 |
+| V7 | 30 | **0.8000** | **0.8000** | **0.8000** |
+
+这部分不会取代 RAGAS-style 三指标，而是补上"检索是否真的覆盖了应召回证据"这个确定性维度。下一步要把同样流程迁移到 Gmail read-only 同步后的个人/脱敏真实邮箱，重新做人工 gold chunk 标注。
+
+复现：
+
+```powershell
+$env:HF_ENDPOINT='https://huggingface.co'
+.\.venv\Scripts\python.exe scripts\run_ragas_eval.py --versions V7 --limit 30 --output data\eval_results\comparison_v7.json
+.\.venv\Scripts\python.exe scripts\measure_reranker_latency.py --versions V2,V7 --limit 30 --runs 3
+```
+
+正式汇总文件：
+
+- `data/eval_results/V7.json`
+- `data/eval_results/comparison.json`
+- `data/gold_chunks.json`
+- `data/eval_results/context_recall.json`

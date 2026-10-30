@@ -1,0 +1,41 @@
+{
+  "events": [
+    {
+      "name": "01-home",
+      "seconds": 3.093
+    },
+    {
+      "name": "02-import",
+      "seconds": 6.265
+    },
+    {
+      "name": "03-indexed",
+      "seconds": 26.265
+    },
+    {
+      "name": "04-answer",
+      "seconds": 33.5
+    },
+    {
+      "name": "05-evidence",
+      "seconds": 35.781
+    },
+    {
+      "name": "06-draft-pending",
+      "seconds": 45.953
+    },
+    {
+      "name": "07-tool-steps",
+      "seconds": 47.609
+    },
+    {
+      "name": "08-approval-review",
+      "seconds": 52.062
+    },
+    {
+      "name": "09-approved-simulated",
+      "seconds": 56.218
+    }
+  ],
+  "page_errors": []
+}

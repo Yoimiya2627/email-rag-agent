@@ -1,0 +1,25 @@
+{
+  "python": "3.11.15",
+  "packages": {
+    "openai": "2.32.0",
+    "chromadb": "1.5.8",
+    "sentence-transformers": "5.4.1",
+    "fastapi": "0.136.1",
+    "streamlit": "1.56.0",
+    "pydantic": "2.13.3"
+  },
+  "configuration": {
+    "DEEPSEEK_MODEL": "deepseek-v4-flash",
+    "AGENT_PLANNER_MODEL": "deepseek-chat",
+    "EMBEDDING_MODEL": "BAAI/bge-m3",
+    "EMBEDDING_MODEL_REVISION": "5617a9f61b028005a4858fdac845db406aefb181",
+    "ENABLE_BM25": "true",
+    "ENABLE_RRF": "true",
+    "ENABLE_RERANKER": "false",
+    "ENABLE_QUERY_REWRITE": "false",
+    "MODEL_RUN_TOKEN_LIMIT": "60000",
+    "MODEL_CONTEXT_TOKENS": "32000",
+    "AGENT_MAX_STEPS": "6",
+    "MAIL_PROVIDER": "simulated"
+  }
+}

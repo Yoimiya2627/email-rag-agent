@@ -1,0 +1,33 @@
+{
+  "source_manifest_matches_current_code": true,
+  "evaluation_manifest_matches": true,
+  "demo_manifest_matches": true,
+  "scores_recomputed_match": true,
+  "summary_recomputed_matches": true,
+  "video_hash_matches": true,
+  "broken_document_links": [],
+  "configured_secret_matches": [],
+  "syntax": {
+    "scripts/run_portfolio_eval.py": "parsed",
+    "tests/test_portfolio_eval.py": "parsed",
+    "tests/test_ctx_frontend.py": "parsed",
+    "frontend/app.py": "parsed"
+  },
+  "cleanup": {
+    "eval-01": {
+      "all_child_processes_stopped": true
+    },
+    "eval-02": {
+      "all_child_processes_stopped": true
+    },
+    "demo-01": {
+      "all_child_processes_stopped": true
+    },
+    "demo-02": {
+      "all_child_processes_stopped": true
+    },
+    "demo-03": {
+      "all_child_processes_stopped": true
+    }
+  }
+}
