@@ -205,6 +205,8 @@ def test_valid_json_with_incomplete_model_finish_is_not_published(fixture,monkey
 
 @pytest.mark.parametrize('mode',['graph','stream'])
 def test_real_graph_and_sse_model_boundaries_retain_constraint_and_commit(fixture,monkeypatch,mode):
+    if mode == 'graph':
+        pytest.importorskip('langgraph', reason='Graph integration runs in the storage test profile')
     from types import SimpleNamespace as NS
     from models.schemas import SearchResult
     import agents.graph_workflow as graph
