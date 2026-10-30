@@ -7,6 +7,7 @@ import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Callable, Any
 
@@ -22,6 +23,7 @@ class ExecutionScope:
     approval_store_path: str | Path | None = None
     run_dir: str | Path | None = None
     evaluation: bool = False
+    evaluation_reference_date: date | None = None
     tool_observer: Callable[[str, dict, dict, str], dict[str, Any]] | None = None
     _slots: dict[str, int] = field(default_factory=dict, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -37,6 +39,8 @@ class ExecutionScope:
             self.operation_key = self.operation_key.strip()
         if self.evaluation and (not self.approval_store_path or not self.run_dir or not self.owner_id.startswith('eval:')):
             raise ValueError('evaluation requires an isolated owner, approval store and run directory')
+        if self.evaluation_reference_date is not None and (not self.evaluation or type(self.evaluation_reference_date) is not date):
+            raise ValueError('a reference date requires a trusted evaluation scope and a date value')
 
     def approval_request_id(self, payload_digest: str) -> str | None:
         if self.operation_key is None:

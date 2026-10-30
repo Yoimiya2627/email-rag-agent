@@ -166,6 +166,10 @@ def _retrieval_timezone():
 
 
 def _now():
+    from agents.execution_scope import current_execution_scope
+    scope = current_execution_scope()
+    if scope is not None and scope.evaluation and scope.evaluation_reference_date is not None:
+        return datetime.combine(scope.evaluation_reference_date, datetime.min.time(), tzinfo=_retrieval_timezone())
     return datetime.now(_retrieval_timezone())
 
 

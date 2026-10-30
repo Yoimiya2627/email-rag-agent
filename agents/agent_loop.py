@@ -54,9 +54,10 @@ _CITATION = re.compile(r"\[([^\[\]\n#]{1,200})#([^\[\]\n#]{1,200})\]")
 
 
 def _system_prompt():
-    from core.pipeline import _retrieval_timezone
+    from core.pipeline import _retrieval_timezone, _now
     return _SYSTEM + (
         f"\n邮件检索使用的日历时区为 {_retrieval_timezone()}。"
+        f"当前检索参考日期为 {_now().date().isoformat()}；相对日期按此日期解释。"
         "工具中的 date 保留原始时间戳；带 UTC 或时区偏移的发件日期，必须先换算到此检索时区再判断是否符合用户日期。"
         "不能只因原始 UTC 日期与用户的本地日期不同就说不匹配；IANA 时区按邮件当日的夏令时规则换算。"
         "未声明时区的日期按检索本地日期理解，不猜测为 UTC；正文账单日期不能代替发件日期。"

@@ -48,6 +48,16 @@ class EvalGateContracts(unittest.TestCase):
         payload['summary']['n_tasks']=999
         self.assertFalse(self.gate(payload).passed)
 
+    def test_interrupted_batch_cannot_pass_on_a_successful_subset(self):
+        payload=report()
+        payload['provenance']['batch']={'status':'stopped_provider_error','requested_tasks':2,
+                                        'attempted_tasks':1,'provider_http_status':402}
+        result=self.gate(payload)
+        self.assertFalse(result.passed)
+        self.assertIn('evaluation batch did not complete all requested tasks',result.failures)
+        payload['provenance']['batch']={'status':'completed','requested_tasks':1,'attempted_tasks':1}
+        self.assertTrue(self.gate(payload).passed)
+
     def test_empty_summary_only_and_duplicate_ids_fail(self):
         for payload in ({'summary':{'n_tasks':100,'task_success_rate':1}}, report([]), report([record(),record()])):
             self.assertFalse(self.gate(payload).passed)

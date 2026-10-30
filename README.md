@@ -8,8 +8,9 @@
 ## 最新验证（2026-10-30）
 
 - **离线回归通过**：Ubuntu core、Ubuntu storage、Windows core 三组 CI 通过，见 [PR #1 检查记录](https://github.com/Yoimiya2627/email-rag-agent/actions/runs/40992045639)。
-- **Agent 质量门槛未通过**：固定 105 题正式评测中，任务成功 18/105（17.14%），预期工具覆盖 70/105（66.67%），均低于现有 80% 门槛；禁止工具违规为 0。
-- 本轮有 57 题评分失败、43 题出现上下文预算耗尽，分类存在重叠。因此上述任务成功率不能直接解释为模型事实准确率。详见 [评测说明](docs/validation/2026-10-30/agent-evaluation.md) 和 [逐题原始报告](data/eval_results/agent_eval.json)。
+- **当前质量验收待重跑，PR 保持开放**：已修复评测会话与工具结果压缩、评分输入、模型配置和退出原因统计。相关本地测试 116 项通过；云端完整回归以 PR 最新检查为准。
+- 实测重跑遇到 DeepSeek HTTP 402（余额不足）；该批次不能用来评价模型质量。现已增加账户错误时停止、逐题保存及未完成批次拒绝通过的处理。后续评测按确认的 `2026-04-28` 日期基准运行；日常应用日期不变。
+- [当前修复与验证状态](docs/validation/2026-10-30/evaluation-repairs.md)。[历史 105 题基线](docs/validation/2026-10-30/agent-evaluation.md)为成功 18/105、预期工具覆盖 70/105，包含 57 题评分失败及 43 题上下文预算耗尽；[基线 JSON](data/eval_results/agent_eval.json)保留原样，不能代表当前源码成绩。
 
 ## 功能与历史验证（2026-09-14）
 

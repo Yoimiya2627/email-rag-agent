@@ -57,6 +57,11 @@ def evaluate_gate(path: str | Path, thresholds: GateThresholds) -> GateResult:
         return GateResult(False, failures, {})
 
     n_tasks = int(summary.get("n_tasks", 0))
+    batch = payload.get('provenance',{}).get('batch')
+    if batch is not None and (not isinstance(batch,dict) or batch.get('status') != 'completed'
+            or type(batch.get('requested_tasks')) is not int or type(batch.get('attempted_tasks')) is not int
+            or batch.get('requested_tasks') != n_tasks or batch.get('attempted_tasks') != n_tasks):
+        failures.append('evaluation batch did not complete all requested tasks')
     task_success_rate = float(summary.get("task_success_rate", 0))
     tool_accuracy = float(summary.get("tool_accuracy", 0))
     forbidden_rate = float(summary.get("forbidden_tool_violation_rate", 0))
