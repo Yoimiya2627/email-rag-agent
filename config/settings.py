@@ -87,7 +87,7 @@ EVIDENCE_VERIFY_CHAR_LIMIT = int(os.getenv('EVIDENCE_VERIFY_CHAR_LIMIT','60000')
 # Agent loop
 # Planning / tool-selection calls use a non-reasoning model — faster and with
 # function calling verified (see docs/agent_loop_decisions.md, Step 0).
-AGENT_PLANNER_MODEL = os.getenv("AGENT_PLANNER_MODEL", "deepseek-chat")
+AGENT_PLANNER_MODEL = os.getenv("AGENT_PLANNER_MODEL", DEEPSEEK_MODEL)
 AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))
 AGENT_MAX_TOOL_CALLS = int(os.getenv("AGENT_MAX_TOOL_CALLS", "12"))
 AGENT_RUN_TIMEOUT = float(os.getenv("AGENT_RUN_TIMEOUT", "120"))

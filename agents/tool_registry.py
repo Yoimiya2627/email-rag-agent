@@ -96,7 +96,7 @@ TOOL_REGISTRY: Dict[str, ToolSpec] = {
     "draft_reply": ToolSpec(
         name="draft_reply",
         function_name="draft_reply",
-        description="起草一封回信。已知具体邮件时传 email_id（精确，多步任务推荐）；否则传 query 让系统检索目标邮件。",
+        description="生成可修改的回信文本，不发送，也不写入外部邮箱。已知具体邮件时传 email_id；否则传 query 检索目标邮件。",
         parameters={
             "type": "object",
             "properties": {

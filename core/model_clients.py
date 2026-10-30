@@ -367,7 +367,7 @@ def _apply_deepseek_thinking(client, kwargs):
     if extra is not None and not isinstance(extra, Mapping):
         return  # Preserve SDK-specific sentinels and its argument validation.
     model = extra.get('model', kwargs.get('model')) if extra is not None else kwargs.get('model')
-    if model not in {'deepseek-v4-flash', 'deepseek-v4-pro'}:
+    if model not in {'deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'}:
         return
     try:
         # Injected clients may point elsewhere even when application config is

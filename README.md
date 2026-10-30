@@ -137,7 +137,7 @@ make run
 |---|---|---|
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 普通 RAG 生成、重排和打分模型 |
 | `DEEPSEEK_THINKING_MODE` | `disabled` | `enabled` / `disabled`；仅向官方 DeepSeek 的 V4 Flash/Pro 请求注入，调用方显式 `extra_body.thinking` 优先 |
-| `AGENT_PLANNER_MODEL` | `deepseek-chat` | Agent planner，function calling 更轻更快 |
+| `AGENT_PLANNER_MODEL` | 跟随 `DEEPSEEK_MODEL` | 可单独指定支持工具调用的规划模型 |
 | `RERANKER_BACKEND` | `cross_encoder` | `cross_encoder` 使用本地 Cross-Encoder；`llm` 兼容旧重排 |
 | `CROSS_ENCODER_MODEL` | `BAAI/bge-reranker-v2-m3` | Cross-Encoder reranker 模型 |
 | `CROSS_ENCODER_DEVICE` | `cpu` | Cross-Encoder 推理设备；有 CUDA 可改为 `cuda` |

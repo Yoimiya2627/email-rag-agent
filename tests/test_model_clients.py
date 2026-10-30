@@ -49,7 +49,7 @@ def call(client, **kwargs):
 
 @pytest.mark.parametrize('stream',[False,True])
 @pytest.mark.parametrize('mode',['disabled','enabled'])
-@pytest.mark.parametrize('model',['deepseek-v4-flash','deepseek-v4-pro'])
+@pytest.mark.parametrize('model',['deepseek-flash','deepseek-v4-flash','deepseek-v4-pro'])
 def test_official_v4_thinking_mode_applies_to_stream_and_nonstream(monkeypatch,stream,mode,model):
     monkeypatch.setattr(cfg,'DEEPSEEK_THINKING_MODE',mode)
     client=Client(Stream([]) if stream else None)

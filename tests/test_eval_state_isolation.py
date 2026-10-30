@@ -64,3 +64,42 @@ def test_reused_evaluation_scope_cannot_alias_daily_store(monkeypatch, tmp_path)
     with use_execution_scope(scope), pytest.raises(ValueError,match='differ'):
         with evaluation.evaluation_scope():
             pytest.fail('must reject unsafe inherited scope')
+
+
+def test_eval_cases_receive_isolated_durable_context_and_distinct_sessions(monkeypatch, tmp_path):
+    observed = []
+    def loop(request, *, owner_id, session_id):
+        scope = current_execution_scope()
+        assert scope.session_id == session_id
+        assert scope.session_repository.validate_context_epoch(owner_id, session_id, scope.context_epoch)
+        ref = scope.tool_result_store.put(owner=owner_id, session=session_id, run='fixture-run',
+            epoch=scope.context_epoch, call_id='call-1', tool='email_stats', argument_hash='a'*64,
+            value={'status':'success','data':{'count':7}})
+        observed.append((owner_id, session_id, scope, ref))
+        return SimpleNamespace(answer='7', sources=[], metadata={
+            'steps':[{'tool':'email_stats','status':'success'}], 'status':'success', 'trace_id':'fixture'})
+    monkeypatch.setattr(cfg, 'CONTEXT_TOOL_RESULTS_ENABLED', True)
+    monkeypatch.setattr(evaluation, 'judge_success', lambda *a,**kw:{'success':1,'reason':'fixture'})
+    with evaluation.evaluation_scope(tmp_path/'eval'), patch('agents.agent_loop.run_agent_loop', side_effect=loop):
+        for identity in ('case-a','case-b'):
+            evaluation.evaluate_task({'id':identity,'task':'count','expected_tools':['email_stats']},object())
+    assert observed[0][0] == observed[1][0]
+    assert observed[0][1] != observed[1][1]
+    _, session, scope, ref = observed[0]
+    assert scope.session_repository.path.parent == (tmp_path/'eval').resolve()
+    assert scope.tool_result_store.path.parent == (tmp_path/'eval').resolve()
+    from core.tool_results import ToolResultUnavailable
+    with pytest.raises(ToolResultUnavailable):
+        scope.tool_result_store.load(ref['result_id'], owner=scope.owner_id, session=observed[1][1],
+                                    run='fixture-run', epoch=scope.context_epoch)
+    assert current_execution_scope() is None
+
+
+@pytest.mark.parametrize('filename,setting', [('sessions.sqlite3','SESSION_STORE_PATH'),
+                                            ('tool_results.sqlite3','TOOL_RESULT_STORE_PATH')])
+def test_eval_context_stores_cannot_alias_daily_state(monkeypatch,tmp_path,filename,setting):
+    monkeypatch.setattr(cfg, setting, str(tmp_path/filename))
+    with pytest.raises(ValueError,match='differ'):
+        with evaluation.evaluation_scope(tmp_path):
+            pytest.fail('must reject a daily store alias')
+    assert not (tmp_path/filename).exists()
