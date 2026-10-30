@@ -92,6 +92,7 @@ def _collect_result_evidence(result: dict) -> None:
 
 def _response(answer: str, context: RunContext, steps: list, trace_id: str, status: str,
               completion_metadata=None) -> AgentResponse:
+    execution_status = status
     if context.resuming:
         revalidate_restored_evidence(context)
     candidates = list(context.evidence.values())
@@ -127,7 +128,8 @@ def _response(answer: str, context: RunContext, steps: list, trace_id: str, stat
     return AgentResponse(answer=answer, sources=[SearchResult(**row) for row in candidates], metadata={
         **(completion_metadata or {}),
         "run_id": context.run_id, "trace_id": trace_id, "status": status, "steps": steps,
-        "actual_tool_calls": context.tool_calls, "max_steps_reached": status == "max_steps_reached",
+        "actual_tool_calls": context.tool_calls, "execution_status": execution_status,
+        "max_steps_reached": execution_status == "max_steps_reached",
         "pending_approval_ids": sorted({step["approval_id"] for step in steps
                                         if step.get("status") == "approval_required" and step.get("approval_id")}),
         "sources_kind": "retrieved_candidates", "citation_check": "identity_only_not_entailment",
@@ -136,6 +138,7 @@ def _response(answer: str, context: RunContext, steps: list, trace_id: str, stat
         "cited_evidence": [ref for pair in sorted(cited)
                            for ref in context.visible_evidence[pair].get("visible_ranges", [evidence_reference(context.visible_evidence[pair])])],
         "invalid_citation_count": len(invalid),
+        "invalid_citations": [{"email_id":pair[0], "chunk_id":pair[1]} for pair in invalid],
         "citation_version_conflict_count": len(conflicting),
         "context_metrics":dict(context.context_metrics),
         "model_usage":model_metrics_snapshot(context),

@@ -107,6 +107,15 @@ def test_repaired_bare_reference_still_checks_version_conflicts():
     assert result.metadata['cited_evidence']==[]
 
 
+@pytest.mark.parametrize('status',['max_steps_reached','timeout','context_budget_exceeded'])
+def test_citation_failure_does_not_erase_execution_exit_reason(status):
+    result = loop_mod._response('[invented#chunk]',_citation_context(),[],'trace',status)
+    assert result.metadata['status'] == 'needs_review'
+    assert result.metadata['execution_status'] == status
+    assert result.metadata['max_steps_reached'] is (status == 'max_steps_reached')
+    assert result.metadata['invalid_citations'] == [{'email_id':'invented','chunk_id':'chunk'}]
+
+
 def test_unique_bare_id_normalization_preserves_markdown_links_and_definitions():
     context=_citation_context()
     links='[visible-chunk](https://example.invalid) ![visible-chunk](image) [visible-chunk][ref]\n[visible-chunk] [ref]\n[visible-chunk]: https://example.invalid'

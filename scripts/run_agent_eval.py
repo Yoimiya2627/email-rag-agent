@@ -288,11 +288,13 @@ def _evaluate_task(item: Dict[str, Any], client: OpenAI) -> Dict[str, Any]:
         "retrieved_source_count": len(resp.sources),
         "model_visible_evidence": resp.metadata.get('model_visible_evidence',[]),
         "invalid_citation_count": resp.metadata.get('invalid_citation_count',0),
+        "invalid_citations": resp.metadata.get('invalid_citations',[]),
         "context_metrics": resp.metadata.get('context_metrics',{}),
         "model_usage": resp.metadata.get('model_usage',{}),
         "execution_contract_passed": deterministic_ok,
         "steps": steps,
         "run_status": resp.metadata.get('status', 'success'),
+        "execution_status": resp.metadata.get('execution_status',resp.metadata.get('status','success')),
         "reason": verdict["reason"],
         "answer": resp.answer,
         "evaluation_owner": scope.owner_id,
@@ -371,6 +373,12 @@ def main():
             except Exception as exc:
                 logger.warning('task failed error_type=%s', type(exc).__name__)
                 records.append(failure_record(item, exc))
+            # Preserve paid, completed cases if a later case or process fails.
+            # This journal is diagnostic; only the final report enters the gate.
+            with (run_dir / 'records.jsonl').open('a', encoding='utf-8') as journal:
+                journal.write(json.dumps(records[-1], ensure_ascii=False) + '\n')
+            logger.info('Task result %s: run=%s scoring=%s success=%s', item.get('id'),
+                        records[-1]['run_status'], records[-1]['scoring_status'], records[-1]['success'])
             time.sleep(0.3)
 
     trace_events = load_events(args.trace_input) if args.trace_input else []
