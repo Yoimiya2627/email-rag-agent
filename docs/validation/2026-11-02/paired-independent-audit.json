@@ -1,0 +1,74 @@
+{
+  "passed": true,
+  "errors": [],
+  "audited_at": "2026-11-02T16:32:18.912397+00:00",
+  "method": "Independent stdlib score recomputation, filesystem hashes, git read-only queries and SQLite mode=ro counts; no app imports, dotenv or model calls.",
+  "source_head": "a421fbb59f3738ac801adfb57c9085a62222ce20",
+  "actual_checkout_head": "a421fbb59f3738ac801adfb57c9085a62222ce20",
+  "allowed_documentation_descendant_paths": [],
+  "reference_time": "2026-11-02T12:00:00+08:00",
+  "summaries": {
+    "V2": {
+      "n": 30,
+      "mean_context_recall": 0.6333,
+      "chunk_hit_rate": 0.6333,
+      "perfect_recall_rate": 0.6333,
+      "ok_count": 29,
+      "empty_count": 1,
+      "error_count": 0
+    },
+    "V7": {
+      "n": 30,
+      "mean_context_recall": 0.8333,
+      "chunk_hit_rate": 0.8333,
+      "perfect_recall_rate": 0.8333,
+      "ok_count": 29,
+      "empty_count": 1,
+      "error_count": 0
+    }
+  },
+  "historical_recomputed_summaries": {
+    "V2": {
+      "n": 30,
+      "mean_context_recall": 0.6333,
+      "chunk_hit_rate": 0.6333,
+      "perfect_recall_rate": 0.6333,
+      "ok_count": 29,
+      "empty_count": 1,
+      "error_count": 0
+    },
+    "V7": {
+      "n": 30,
+      "mean_context_recall": 0.8333,
+      "chunk_hit_rate": 0.8333,
+      "perfect_recall_rate": 0.8333,
+      "ok_count": 29,
+      "empty_count": 1,
+      "error_count": 0
+    }
+  },
+  "candidate_sequence_changed_ids": [
+    "gold_011",
+    "gold_027"
+  ],
+  "usage": {
+    "call_count": 30,
+    "actual_total_tokens": 15138,
+    "unknown_usage_calls": 0,
+    "unknown_cost_calls": 30,
+    "input_tokens": 14051,
+    "output_tokens": 1087
+  },
+  "calls_by_stage": {
+    "filter": 30
+  },
+  "flips": [],
+  "index_counts": {
+    "chunks": 5355,
+    "emails": 5040
+  },
+  "historical_scores_are_not_pass_thresholds": true,
+  "report_sha256": "b8a71186c300d136e289a3ace9c2c592f23a86b374aa2d9141d8996319c2d238",
+  "old_report_sha256": "41ab1f3d2a78931767a1abee1b41a36a0f5845ebf80c59d810b8ae7bea4bc54e",
+  "audit_script_sha256": "2d10b6069e84a0a7289f36d8120016802a6edd029b24ddd11311b83361d27a8d"
+}
