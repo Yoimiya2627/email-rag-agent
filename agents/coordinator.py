@@ -12,6 +12,7 @@ import config.settings as cfg
 from core.memory import build_model_messages
 from agents.runtime import remaining_timeout, RunCancelled, ContextBudgetExceeded
 
+from core.model_errors import PermanentModelProviderError
 from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
 from core.model_outcomes import text_from_choice
 from agents.general_agent import GeneralAgent, direct_general_response
@@ -70,7 +71,7 @@ def classify_intent(query: str, history=None) -> IntentType:
             raw = raw[s:e]
         data = json.loads(raw)
         return IntentType(data["intent"])
-    except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
+    except (PermanentModelProviderError, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
         logger.warning("Intent classification failed; error_type=%s; defaulting to general", type(exc).__name__)

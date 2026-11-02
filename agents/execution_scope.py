@@ -7,7 +7,7 @@ import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, tzinfo
 from pathlib import Path
 from typing import Callable, Any
 
@@ -24,6 +24,7 @@ class ExecutionScope:
     run_dir: str | Path | None = None
     evaluation: bool = False
     evaluation_reference_date: date | None = None
+    evaluation_reference_time: datetime | None = None
     tool_observer: Callable[[str, dict, dict, str], dict[str, Any]] | None = None
     _slots: dict[str, int] = field(default_factory=dict, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -41,6 +42,14 @@ class ExecutionScope:
             raise ValueError('evaluation requires an isolated owner, approval store and run directory')
         if self.evaluation_reference_date is not None and (not self.evaluation or type(self.evaluation_reference_date) is not date):
             raise ValueError('a reference date requires a trusted evaluation scope and a date value')
+        if self.evaluation_reference_time is not None:
+            value = self.evaluation_reference_time
+            if (not self.evaluation or not isinstance(value, datetime)
+                    or value.tzinfo is None or value.utcoffset() is None):
+                raise ValueError('a reference time requires a trusted evaluation scope and an aware datetime')
+        if self.evaluation_reference_date is not None and self.evaluation_reference_time is not None:
+            raise ValueError('reference date and reference time are mutually exclusive')
+
 
     def approval_request_id(self, payload_digest: str) -> str | None:
         if self.operation_key is None:
@@ -83,3 +92,21 @@ def use_execution_scope(scope: ExecutionScope):
         yield scope
     finally:
         _SCOPE.reset(token)
+
+
+def evaluation_reference_instant(scope: ExecutionScope | None, timezone: tzinfo) -> datetime | None:
+    """Resolve trusted evaluation time; legacy dates denote retrieval-local midnight."""
+    if scope is None or not scope.evaluation:
+        return None
+    if scope.evaluation_reference_date is not None and scope.evaluation_reference_time is not None:
+        raise ValueError('reference date and reference time are mutually exclusive')
+    if scope.evaluation_reference_time is not None:
+        value = scope.evaluation_reference_time
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError('reference time must be an aware datetime')
+        return value.astimezone(timezone)
+    if scope.evaluation_reference_date is not None:
+        if type(scope.evaluation_reference_date) is not date:
+            raise ValueError('reference date must be a date value')
+        return datetime.combine(scope.evaluation_reference_date, datetime.min.time(), tzinfo=timezone)
+    return None

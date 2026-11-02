@@ -73,6 +73,41 @@ def test_writer_keeps_source_coverage_in_actual_model_request(monkeypatch, sourc
     assert email['body'] in model_input
 
 
+@pytest.mark.parametrize('bad_date', [
+    'some day', '最近这段日子', '2026-13-45', '3月26日', '2月8日至14日',
+])
+def test_unparseable_extracted_date_fails_before_search(monkeypatch, bad_date):
+    """A user's hard date constraint must never become an unrestricted search."""
+    import core.pipeline as pipeline
+    payload = {'query': 'quote', 'sender': 'alice@example.test',
+               'date_hint': bad_date, 'labels': []}
+    response = NS(choices=[NS(finish_reason='stop',
+                              message=NS(content=json.dumps(payload), reasoning_content=''))])
+    monkeypatch.setattr(pipeline, '_get_client', lambda: fake_client(response))
+    monkeypatch.setattr(pipeline, 'rewrite_query', lambda query: query)
+    def unexpected_search(*args, **kwargs):
+        pytest.fail('Invalid date must stop retrieval before querying the index')
+    monkeypatch.setattr(pipeline, 'hybrid_search', unexpected_search)
+    details = {}
+    with pytest.raises(ValueError, match='无法可靠解析'):
+        pipeline.retrieve('只查 2026 年 3 月 26 日 alice@example.test 发来的报价邮件',
+                          diagnostics=details)
+    assert details['stage'] == 'extract_filters'
+    assert details['extraction']['parsed_filters']['date_hint'] == bad_date
+    assert details['extraction']['attempt_count'] == 1
+
+
+def test_unparseable_date_hint_with_invalid_labels_still_fails_closed(monkeypatch):
+    """A date error must not mask invalid structured constraints."""
+    import core.pipeline as pipeline
+    payload = {'query': 'q', 'sender': '', 'date_hint': 'some day', 'labels': 'not-a-list'}
+    response = NS(choices=[NS(finish_reason='stop',
+                              message=NS(content=json.dumps(payload), reasoning_content=''))])
+    monkeypatch.setattr(pipeline, '_get_client', lambda: fake_client(response))
+    with pytest.raises(ValueError, match='无法可靠解析'):
+        pipeline.extract_filters('synthetic request')
+
+
 def test_writer_preserves_full_coverage_when_inventory_page_is_shortened(monkeypatch):
     import agents.writer_agent as writer
     captured = {}

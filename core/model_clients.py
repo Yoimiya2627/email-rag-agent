@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from urllib.parse import urlsplit
 
 from openai import OpenAI
+from core.model_errors import provider_error_from_sdk
 
 import config.settings as cfg
 from core.context_budget import measure_context, model_profile
@@ -339,7 +340,13 @@ class _MeasuredStream:
         try:
             if self.call.run is not None:
                 self.call.run.remaining(1)
-            chunk = next(self.iterator)
+            try:
+                chunk = next(self.iterator)
+            except Exception as exc:
+                failure = provider_error_from_sdk(exc, stage=self.call.stage)
+                if failure is not None:
+                    raise failure from None
+                raise
             self.call.observe(chunk)
             return chunk
         except StopIteration:
@@ -353,7 +360,13 @@ class _MeasuredStream:
         try:
             close = getattr(self.stream, "close", None)
             if close is not None:
-                close()
+                try:
+                    close()
+                except Exception as exc:
+                    failure = provider_error_from_sdk(exc, stage=self.call.stage)
+                    if failure is not None:
+                        raise failure from None
+                    raise
         except BaseException:
             self.call.finish("error")
             raise
@@ -415,7 +428,13 @@ def create_completion(client, *, stage="other", evidence_refs=None, **kwargs):
     try:
         if run is not None:
             kwargs["timeout"] = run.remaining(float(kwargs.get("timeout", cfg.LLM_TIMEOUT)))
-        response = client.chat.completions.create(**kwargs)
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            failure = provider_error_from_sdk(exc, stage=stage)
+            if failure is not None:
+                raise failure from None
+            raise
         if evidence_refs:
             from agents.runtime import record_generation_evidence
             record_generation_evidence(evidence_refs)

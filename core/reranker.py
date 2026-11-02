@@ -9,6 +9,7 @@ from numbers import Real
 from typing import List
 
 from openai import OpenAI, APITimeoutError
+from core.model_errors import PermanentModelProviderError
 from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
 from core.memory import build_model_messages
 from agents.runtime import RunCancelled
@@ -274,7 +275,7 @@ def rerank(query: str, results: List[SearchResult], top_n: int = None, *, diagno
         _finish_attempt(ticket, True)
         mark('succeeded', backend=backend)
         return reranked
-    except (RunDeadlineExceeded, ContextBudgetExceeded, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded) as exc:
+    except (PermanentModelProviderError, RunDeadlineExceeded, ContextBudgetExceeded, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded) as exc:
         _finish_attempt(ticket, None)
         mark('failed', type(exc).__name__)
         raise

@@ -1,4 +1,5 @@
 import logging
+import sys
 import json
 from datetime import datetime
 from typing import Generator, Iterator, List, Optional
@@ -12,6 +13,7 @@ from core.memory import build_model_messages
 from core.evidence import evidence_text, rendered_evidence, source_coverage
 from core.model_outcomes import ModelText, ModelOutputError, text_from_choice
 
+from core.model_errors import PermanentModelProviderError
 from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
 
 logger = logging.getLogger(__name__)
@@ -107,7 +109,7 @@ def generate_answer(
         )
         remaining_timeout(cfg.LLM_TIMEOUT)
         return text_from_choice(resp.choices[0] if resp.choices else None)
-    except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
+    except (PermanentModelProviderError, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
         # Degradation level 2: return a summary built directly from context (no LLM)
@@ -174,7 +176,7 @@ def stream_generate(
         if finish_reason != "stop":
             raise ModelOutputError(answer, finish_reason=finish_reason,
                                    error_code="model_output_incomplete")
-    except (TimeoutError, APITimeoutError, ModelOutputError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
+    except (PermanentModelProviderError, TimeoutError, APITimeoutError, ModelOutputError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
         raise ModelOutputError("".join(parts), completion_status="error",
@@ -182,4 +184,11 @@ def stream_generate(
     finally:
         close = getattr(stream, "close", None)
         if close:
-            close()
+            # Cleanup must not replace the failure that interrupted generation.
+            active_error = sys.exc_info()[0] is not None
+            try:
+                close()
+            except Exception as exc:
+                if not active_error:
+                    raise
+                logger.warning("Model stream cleanup failed; error_type=%s", type(exc).__name__)

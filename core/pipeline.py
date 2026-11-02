@@ -11,12 +11,16 @@ pipeline the product actually serves.  Everything now goes through `retrieve()`.
 import json
 import logging
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import List
 
 from openai import OpenAI, APITimeoutError
 from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
 from agents.runtime import RunCancelled, ContextBudgetExceeded
+from core.model_errors import find_permanent_model_error
 
 from models.schemas import SearchResult
 from core.retriever import hybrid_search
@@ -30,6 +34,7 @@ import config.settings as cfg
 logger = logging.getLogger(__name__)
 
 _client = None
+_reference_time = ContextVar("retrieval_reference_time", default=None)
 
 
 def _get_client() -> OpenAI:
@@ -75,6 +80,9 @@ def rewrite_query(query: str, history=None) -> str:
     except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
+        permanent = find_permanent_model_error(exc)
+        if permanent is not None:
+            raise permanent
         logger.warning("Query rewrite failed; error_type=%s", type(exc).__name__)
     return query
 
@@ -98,6 +106,15 @@ _FILTER_SYSTEM = """从用户问题中提取邮件检索的过滤条件，以JSO
   "labels": ["标签列表（可选，没有则为空数组）"]
 }
 只返回JSON，不要解释。
+date_hint 只过滤邮件的发送日期。报告月份、账单期间、业绩统计周期，
+以及用户询问的会议发生时间、付款截止日等内容日期，必须保留在 query 中，不能当成邮件发送日期。
+例如“12月销售报告里的收入”不限制发信日期；“12月发来的销售报告邮件”才限制发信日期。
+“周报中本周的增长”里的本周属于报表内容；“本周收到的周报”才使用 date_hint="本周"。
+用户要求“最近的邮件”或“近期的事项”时，可使用已有的“最近”时间窗口，不自行扩大窗口。
+不要把指定的月份改成“本月”，不要把内容中出现的日期自动添加为过滤条件。
+明确的邮件日期优先使用用户原文中的年份；相对日期按给定检索参考时间解释。
+若明确的邮件日期缺少年份且原文没有确定年份的依据，或无法转换成支持的格式，
+保留原日期表达在 date_hint 中交由调用方校验；禁止通过清空 date_hint 消除该约束。
 标签是邮箱中已有的分类标记，只有用户明确要求按标签、标记或类别筛选时才填写 labels。
 “导入邮件”“导入资料”等资料来源描述，以及项目名称、主题、内容关键词，都不是标签；保留在 query 中，labels 返回 []。
 例如“查询导入邮件中的预算”不带标签过滤；“查询标签为财务的预算邮件”才使用 labels=["财务"]。"""
@@ -108,13 +125,19 @@ _LABEL_REQUEST = re.compile(
 )
 
 
-def extract_filters(query: str) -> dict:
+def extract_filters(query: str, *, diagnostics: dict | None = None) -> dict:
     """Extract structured retrieval filters (sender/date/labels) from a query.
 
     Invalid/unavailable extraction fails closed instead of erasing constraints.
     """
-    messages = build_model_messages(_FILTER_SYSTEM, query, stage="filter", model=cfg.DEEPSEEK_MODEL, model_revision=getattr(cfg, "MODEL_REVISION", None), max_output_tokens=1500)
+    if diagnostics is not None:
+        diagnostics.clear()
+        diagnostics.update(status="pending", attempt_count=0)
     try:
+        system = _FILTER_SYSTEM + f"\n检索参考时间（含时区）：{_now().isoformat()}。"
+        messages = build_model_messages(system, query, stage="filter", model=cfg.DEEPSEEK_MODEL, model_revision=getattr(cfg, "MODEL_REVISION", None), max_output_tokens=1500)
+        if diagnostics is not None:
+            diagnostics["attempt_count"] = 1
         resp = create_completion(_get_client(), stage="filter",
             model=cfg.DEEPSEEK_MODEL,
             messages=messages,
@@ -137,17 +160,32 @@ def extract_filters(query: str) -> dict:
         s, e = raw.find("{"), raw.rfind("}") + 1
         if s >= 0 and e > s:
             raw = raw[s:e]
-        filters = validate_filters(json.loads(raw))
+        parsed = json.loads(raw)
+        # Python's decoder accepts NaN/Infinity (including exponent overflow).
+        # Reject those extensions before preserving model output in JSON diagnostics.
+        json.dumps(parsed, allow_nan=False)
+        if diagnostics is not None:
+            diagnostics["parsed_filters"] = deepcopy(parsed)
+        filters = validate_filters(parsed)
         # Model-inferred topics/source descriptions must not narrow the corpus
         # to nonexistent labels. Keep their original wording in semantic search.
         # Explicit structured tool filters bypass this natural-language parser.
         if filters.get("labels") and not _LABEL_REQUEST.search(query):
             filters["labels"] = []
             filters["query"] = query
+        if diagnostics is not None:
+            diagnostics.update(status="ok", applied_filters=deepcopy(filters))
         return filters
-    except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
+    except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded) as exc:
+        if diagnostics is not None:
+            diagnostics.update(status="error", error_type=type(exc).__name__)
         raise
     except Exception as exc:
+        if diagnostics is not None:
+            diagnostics.update(status="error", error_type=type(exc).__name__)
+        permanent = find_permanent_model_error(exc)
+        if permanent is not None:
+            raise permanent
         logger.warning("Filter extraction failed (%s)", type(exc).__name__)
         raise ValueError("无法可靠解析检索条件，请明确发件人、日期或标签后重试。") from exc
 
@@ -165,12 +203,37 @@ def _retrieval_timezone():
     return timezone(timedelta(hours=float(getattr(cfg, "RETRIEVAL_TIMEZONE_OFFSET_HOURS", 8))))
 
 
+def _clock_reference(value=None):
+    from agents.execution_scope import current_execution_scope, evaluation_reference_instant
+    tz = _retrieval_timezone()
+    trusted = evaluation_reference_instant(current_execution_scope(), tz)
+    frozen = _reference_time.get()
+    values = [v for v in (trusted, frozen, value) if v is not None]
+    for candidate in values:
+        if not isinstance(candidate, datetime) or candidate.tzinfo is None or candidate.utcoffset() is None:
+            raise ValueError("reference_time must be a timezone-aware datetime")
+    if values and any(v.astimezone(timezone.utc) != values[0].astimezone(timezone.utc) for v in values[1:]):
+        raise ValueError("reference_time conflicts with the active reference instant")
+    return values[0].astimezone(tz) if values else None
+
+
 def _now():
-    from agents.execution_scope import current_execution_scope
-    scope = current_execution_scope()
-    if scope is not None and scope.evaluation and scope.evaluation_reference_date is not None:
-        return datetime.combine(scope.evaluation_reference_date, datetime.min.time(), tzinfo=_retrieval_timezone())
-    return datetime.now(_retrieval_timezone())
+    return _clock_reference() or datetime.now(_retrieval_timezone())
+
+
+@contextmanager
+def _fixed_reference_time(value=None):
+    """Freeze one validated instant and always restore the caller's clock."""
+    reference = _clock_reference(value)
+    reference = _now() if reference is None else reference
+    if not isinstance(reference, datetime) or reference.tzinfo is None or reference.utcoffset() is None:
+        raise ValueError("reference_time must be a timezone-aware datetime")
+    reference = reference.astimezone(_retrieval_timezone())
+    token = _reference_time.set(reference)
+    try:
+        yield reference
+    finally:
+        _reference_time.reset(token)
 
 
 def _date_window(date_hint: str):
@@ -236,7 +299,8 @@ def _body_candidates(results, scope):
 
 @index_snapshot()
 def retrieve(query: str, *, filters: dict = None, top_n: int = None,
-             fetch_k: int = None, history=None) -> List[SearchResult]:
+             fetch_k: int = None, history=None, diagnostics: dict | None = None,
+             reference_time: datetime | None = None) -> List[SearchResult]:
     """Full retrieval pipeline: rewrite → extract filters → hybrid search →
     post-filter → rerank.
 
@@ -246,31 +310,71 @@ def retrieve(query: str, *, filters: dict = None, top_n: int = None,
         top_n:   results kept after rerank (default cfg.RERANK_TOP_N).
         fetch_k: candidates pulled from hybrid search before post-filter and
                  rerank get room to work (default cfg.TOP_K * 4).
+        diagnostics: opt-in caller-owned stage details, including extracted
+                     filters and candidate IDs. Never logged automatically.
+        reference_time: fixed instant for relative dates, converted to the
+                        configured retrieval timezone; defaults to request start.
     """
     top_n = cfg.RERANK_TOP_N if top_n is None else top_n
     fetch_k = cfg.TOP_K * 4 if fetch_k is None else fetch_k
 
-    if isinstance(top_n, bool) or not isinstance(top_n, int) or top_n < 1:
-        raise ValueError("top_n 必须为正整数")
-    if isinstance(fetch_k, bool) or not isinstance(fetch_k, int) or fetch_k < 1:
-        raise ValueError("fetch_k 必须为正整数")
-    # Explicit structured filters also bypass rewriting: tools already resolved
-    # their query and must not pay for another LLM interpretation of constraints.
-    if filters is None:
-        rewritten = rewrite_query(query, history=history) if history else rewrite_query(query)
-        filters = extract_filters(rewritten)
-    else:
-        rewritten = query
-    filters = validate_filters(filters)
-    search_query = filters.get("query") or rewritten
+    details = diagnostics if diagnostics is not None else {}
+    details.clear()
+    details.update(status="running", stage="validate", top_n=top_n, fetch_k=fetch_k)
+    try:
+        if isinstance(top_n, bool) or not isinstance(top_n, int) or top_n < 1:
+            raise ValueError("top_n 必须为正整数")
+        if isinstance(fetch_k, bool) or not isinstance(fetch_k, int) or fetch_k < 1:
+            raise ValueError("fetch_k 必须为正整数")
+        with _fixed_reference_time(reference_time) as reference:
+            details["reference_time"] = reference.isoformat()
+            # Explicit structured filters bypass both model interpretation stages.
+            if filters is None:
+                details["stage"] = "rewrite"
+                rewritten = rewrite_query(query, history=history) if history else rewrite_query(query)
+                details["rewritten_query"] = rewritten
+                details["stage"] = "extract_filters"
+                if diagnostics is not None:
+                    details["extraction"] = {}
+                    filters = extract_filters(rewritten, diagnostics=details["extraction"])
+                else:
+                    filters = extract_filters(rewritten)
+            else:
+                rewritten = query
+            details["stage"] = "validate_filters"
+            filters = validate_filters(filters)
+            search_query = filters.get("query") or rewritten
+            details.update(filters=deepcopy(filters), search_query=search_query)
 
-    # Freeze relative dates once so both branches and the defensive check agree.
-    scope = FilterSpec.from_mapping(filters, now=_now())
-    options = {"filters": scope} if scope.active else {}
-    results = hybrid_search(search_query, top_k=fetch_k, **options)
-    results = [result for result in results if scope.matches(result.metadata)]
-    results = _body_candidates(results, scope)
-    # Standalone rewrites remain search expansions. History rewrites resolve the
-    # subject of a follow-up and must also reach the relevance scorer.
-    scoring_query = rewritten if history else query
-    return rerank(scoring_query, results, top_n=top_n)
+            scope = FilterSpec.from_mapping(filters, now=_now())
+            details["scope"] = {
+                "sender": scope.sender, "labels": sorted(scope.labels),
+                "start": scope.start.isoformat() if scope.start is not None else None,
+                "end": scope.end.isoformat() if scope.end is not None else None,
+            }
+            options = {"filters": scope} if scope.active else {}
+            details["stage"] = "hybrid_search"
+            results = hybrid_search(search_query, top_k=fetch_k, **options)
+            details["hybrid_candidate_ids"] = [row.chunk_id for row in results]
+            details["hybrid_candidate_count"] = len(results)
+            details["stage"] = "post_filter"
+            results = [result for result in results if scope.matches(result.metadata)]
+            details["post_filter_candidate_count"] = len(results)
+            details["stage"] = "body_candidates"
+            results = _body_candidates(results, scope)
+            details["rerank_candidate_ids"] = [row.chunk_id for row in results]
+            details["rerank_candidate_count"] = len(results)
+            # History rewrites resolve follow-up subjects for the scorer too.
+            scoring_query = rewritten if history else query
+            details.update(stage="rerank", scoring_query=scoring_query)
+            if diagnostics is not None:
+                details["reranker"] = {}
+                results = rerank(scoring_query, results, top_n=top_n, diagnostics=details["reranker"])
+            else:
+                results = rerank(scoring_query, results, top_n=top_n)
+            details.update(status="ok" if results else "empty", stage="complete",
+                           returned_count=len(results))
+            return results
+    except Exception as exc:
+        details.update(status="error", error_type=type(exc).__name__)
+        raise

@@ -23,6 +23,7 @@ from models.schemas import AgentRequest, AgentResponse, SearchResult
 from core.memory import conversation_pairs, fit_messages_to_budget
 from core.tool_results import trusted_result_scope, ToolResultUnavailable, sanitize_tool_result
 from core.tool_compaction import compact_tool_messages, validate_checkpoint_references, POLICY_VERSION, task_memory_guard, validate_task_memory_guard, revalidate_restored_evidence
+from core.model_errors import PermanentModelProviderError
 from core.model_outcomes import display_text, outcome_metadata, text_from_choice
 from core.evidence import evidence_reference
 from core.model_clients import (get_model_client,create_completion,model_metrics_snapshot,ModelBudgetExceeded,
@@ -57,7 +58,7 @@ def _system_prompt():
     from core.pipeline import _retrieval_timezone, _now
     return _SYSTEM + (
         f"\n邮件检索使用的日历时区为 {_retrieval_timezone()}。"
-        f"当前检索参考日期为 {_now().date().isoformat()}；相对日期按此日期解释。"
+        f"当前检索参考时间为 {_now().isoformat()}；相对日期按此时间解释。"
         "工具中的 date 保留原始时间戳；带 UTC 或时区偏移的发件日期，必须先换算到此检索时区再判断是否符合用户日期。"
         "不能只因原始 UTC 日期与用户的本地日期不同就说不匹配；IANA 时区按邮件当日的夏令时规则换算。"
         "未声明时区的日期按检索本地日期理解，不猜测为 UTC；正文账单日期不能代替发件日期。"
@@ -337,6 +338,7 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
                     name = call.function.name
                     started = time.perf_counter()
                     blocked = None
+                    provider_failure = None
                     args = None
                     try:
                         if any(step.get("tool_call_id") == str(call.id) for step in steps):
@@ -365,7 +367,11 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
                             context.progress('tool_execution',round=round_no+1,tool_calls=context.tool_calls+1)
                             context.tool_calls += 1
                             context.tool_call_id = str(call.id)
-                            result = normalize_tool_result(backend.call_tool(name, args))
+                            try:
+                                result = normalize_tool_result(backend.call_tool(name, args))
+                            except PermanentModelProviderError as exc:
+                                provider_failure = exc
+                                result = tool_error(exc.error_code, "Model provider configuration or access failed.")
                     summary = argument_summary(args)
                     step = {"tool": name if name in schema_by_name else "unknown_tool",
                             "tool_call_id": str(call.id), "argument_summary": summary,
@@ -418,6 +424,11 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
                         argument_hash=summary["sha256"], argument_chars=summary["chars"])
                     logger.info("agent tool completed run_id=%s tool=%s status=%s",
                                 context.run_id, step["tool"], result["status"])
+                    if provider_failure is not None:
+                        status = "error"
+                        return _response("模型服务配置或访问失败，任务未完成。", context, steps, trace.trace_id, status,
+                            {"completion_status": "error", "error_code": provider_failure.error_code,
+                             "provider_failure": provider_failure.as_dict()})
                     had_error = had_error or result["status"] == "error" or output_missing
                     pending = pending or result["status"] == "approval_required"
                     if result["status"] == "unknown":
@@ -448,6 +459,11 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
             result = _response(answer, context, steps, trace.trace_id, status, completion_metadata)
             status = result.metadata["status"]
             return result
+        except PermanentModelProviderError as exc:
+            status = "error"
+            return _response("模型服务配置或访问失败，任务未完成。", context, steps, trace.trace_id, status,
+                {"completion_status": "error", "error_code": exc.error_code,
+                 "provider_failure": exc.as_dict()})
         except RunCancelled:
             status, answer = 'cancelled', '任务已停止；已完成的步骤已保留，未确认的操作需先核对状态。'
             return _response(answer,context,steps,trace.trace_id,status)

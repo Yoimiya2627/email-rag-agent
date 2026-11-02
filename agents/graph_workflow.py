@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, List, Optional, TypedDict
 
 from openai import OpenAI, APITimeoutError
+from core.model_errors import PermanentModelProviderError
 from core.model_clients import get_model_client, create_completion, ModelBudgetExceeded
 from agents.runtime import RunCancelled, ContextBudgetExceeded
 import config.settings as cfg
@@ -88,7 +89,7 @@ def node_rewrite(state: RAGState) -> RAGState:
         if rewritten.completion_status != 'complete':
             raise ValueError('Rewrite response is not complete final content')
         state["rewritten_query"] = str(rewritten)
-    except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
+    except (PermanentModelProviderError, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
         logger.warning("Rewrite failed; error_type=%s", type(exc).__name__)
@@ -151,7 +152,7 @@ def node_grade_contexts(state: RAGState) -> RAGState:
             raise ValueError("grader returned invalid indices")
         state["relevant_results"] = [results[i] for i in indices if 0 <= i < len(results)]
         state["grading_error"] = None
-    except (TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
+    except (PermanentModelProviderError, TimeoutError, APITimeoutError, RunCancelled, ModelBudgetExceeded, ContextBudgetExceeded):
         raise
     except Exception as exc:
         logger.warning("Context grading failed (%s); rejecting unverified evidence", type(exc).__name__)

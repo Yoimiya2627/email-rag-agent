@@ -10,6 +10,7 @@ from core.embedder import get_indexed_email, get_corpus_revision, get_all_metada
 from core.evidence import table_context_note, evidence_reference, with_visible_reference, source_coverage
 from core.evidence_pages import (SEARCH_PAGES, read_email_page, read_thread_evidence,
                                  compute_scoped_stats, EvidenceVersionMismatch, EvidenceCursorError)
+from core.model_errors import PermanentModelProviderError
 from core.model_clients import ModelBudgetExceeded
 from agents.runtime import RunCancelled
 from core.model_outcomes import text_from_response
@@ -235,7 +236,7 @@ def call_tool(name: str, arguments: Any) -> dict:
         if context and context.tool_evidence and result["status"] == "success":
             result["candidate_sources"] = list(context.tool_evidence.values())
         return result
-    except (RunDeadlineExceeded, ContextBudgetExceeded, RunCancelled, ModelBudgetExceeded):
+    except (PermanentModelProviderError, RunDeadlineExceeded, ContextBudgetExceeded, RunCancelled, ModelBudgetExceeded):
         raise
     except EvidenceVersionMismatch:
         return tool_error("source_version_changed", "Evidence changed; retrieve and inspect the current source explicitly.")
