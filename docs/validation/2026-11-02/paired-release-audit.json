@@ -1,0 +1,360 @@
+{
+  "schema_version": 1,
+  "verdict": "pass",
+  "checks_passed": 1053,
+  "failures": [],
+  "report_sha256": "4033bd0e63f6d1a2bb8b016b4e2041646401cd59dd33943aa1b94214cbd418b1",
+  "baseline_sha256": "b8a71186c300d136e289a3ace9c2c592f23a86b374aa2d9141d8996319c2d238",
+  "auditor_sha256": "42d65d6a2d79b02f721b35ec31aa7c0f01660f5450a01c6f6033e2166d44b628",
+  "git_head": "67bc3914a01dff80f17a49ac3324a476e58e0e11",
+  "aggregates": {
+    "V2": {
+      "n": 30,
+      "mean_context_recall": 0.6667,
+      "chunk_hit_rate": 0.6667,
+      "perfect_recall_rate": 0.6667,
+      "ok_count": 29,
+      "empty_count": 1,
+      "error_count": 0
+    },
+    "V7": {
+      "n": 30,
+      "mean_context_recall": 0.8667,
+      "chunk_hit_rate": 0.8667,
+      "perfect_recall_rate": 0.8667,
+      "ok_count": 29,
+      "empty_count": 1,
+      "error_count": 0
+    }
+  },
+  "ledger": {
+    "call_count": 30,
+    "actual_total_tokens": 15121,
+    "unknown_usage_calls": 0,
+    "unknown_cost_calls": 30,
+    "cost_interpretation": "unknown when unpriced; zero is not evidence of free usage"
+  },
+  "rerank_outcomes": {
+    "succeeded:None": 29,
+    "skipped:empty_candidates": 1
+  },
+  "source_files_changed_from_history": [
+    "agents/agent_loop.py",
+    "agents/mcp_adapter.py",
+    "api/main.py",
+    "core/jobs.py",
+    "core/run_reference.py",
+    "frontend/app.py",
+    "mcp_server.py",
+    "scripts/eval_output.py",
+    "scripts/evaluate_context_recall.py",
+    "scripts/paired_acceptance.py",
+    "scripts/run_agent_eval.py"
+  ],
+  "comparability": {
+    "reference_time": true,
+    "gold_sha256": true,
+    "corpus_sha256": true,
+    "corpus_revision": true,
+    "manifest": true,
+    "packages": true,
+    "settings": true,
+    "resolved_model_revisions": true
+  },
+  "paired_cases": [
+    {
+      "id": "gold_001",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_002",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_003",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": true,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_004",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": true,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 0.0
+    },
+    {
+      "id": "gold_005",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_006",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_007",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_008",
+      "candidate_count": 0,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 0.0,
+      "old_V2": 0.0,
+      "old_V7": 0.0
+    },
+    {
+      "id": "gold_009",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_010",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": true,
+      "V2": 0.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_011",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 0.0,
+      "old_V2": 1.0,
+      "old_V7": 0.0
+    },
+    {
+      "id": "gold_012",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_013",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_014",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_015",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": true,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_016",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_017",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_018",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_019",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_020",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_021",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": true,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_022",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 0.0,
+      "old_V2": 0.0,
+      "old_V7": 0.0
+    },
+    {
+      "id": "gold_023",
+      "candidate_count": 11,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_024",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 1.0,
+      "old_V2": 0.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_025",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_026",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_027",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": true,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_028",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 0.0,
+      "V7": 0.0,
+      "old_V2": 0.0,
+      "old_V7": 0.0
+    },
+    {
+      "id": "gold_029",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    },
+    {
+      "id": "gold_030",
+      "candidate_count": 20,
+      "candidate_pool_changed_from_history": false,
+      "V2": 1.0,
+      "V7": 1.0,
+      "old_V2": 1.0,
+      "old_V7": 1.0
+    }
+  ],
+  "release": {
+    "raw_report_verdict": "limited",
+    "sensitive_field_occurrences": {
+      "gold_path": 1,
+      "question": 150,
+      "email_id": 31,
+      "subject": 31,
+      "sender": 8,
+      "root": 1,
+      "python_executable": 1
+    },
+    "common_secret_pattern_counts": {
+      "api_key_shaped": 0,
+      "private_key_header": 0,
+      "bearer_token": 0
+    },
+    "note": "Pattern scan is not proof of no secrets. Raw questions, filters, subjects, identifiers and local paths require publication authorization or redaction."
+  },
+  "limitations": [
+    "Offline evidence audit; no replay or remote attestation of model execution.",
+    "Cross-encoder execution established by inspected predict path, diagnostic status, model revision, and source hashes; report contains no raw reranker scores.",
+    "Historical manifest compared without opening any index.",
+    "Package/settings values compared as report metadata, not re-imported from runtime."
+  ]
+}

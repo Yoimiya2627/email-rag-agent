@@ -1,0 +1,47 @@
+{
+  "verdict": "pass",
+  "checks": {
+    "scores_recomputed": true,
+    "complete": true,
+    "runtime_source_hashes_match": true,
+    "online_exit_zero": true,
+    "code_commit": true,
+    "clean_at_start": true,
+    "offline_and_ci_before_online": true
+  },
+  "code_commit": "67bc3914a01dff80f17a49ac3324a476e58e0e11",
+  "source_files": 140,
+  "scores": {
+    "V2": {
+      "sum": 20.0,
+      "n": 30,
+      "mean": 0.6666666666666666,
+      "miss_ids": [
+        "gold_001",
+        "gold_005",
+        "gold_006",
+        "gold_008",
+        "gold_010",
+        "gold_014",
+        "gold_020",
+        "gold_022",
+        "gold_024",
+        "gold_028"
+      ]
+    },
+    "V7": {
+      "sum": 26.0,
+      "n": 30,
+      "mean": 0.8666666666666667,
+      "miss_ids": [
+        "gold_008",
+        "gold_011",
+        "gold_022",
+        "gold_028"
+      ]
+    }
+  },
+  "started_at": "2026-11-03T03:23:53.748774+00:00",
+  "finished_at": "2026-11-03T03:30:19.991633+00:00",
+  "raw_report_sha256": "4033bd0e63f6d1a2bb8b016b4e2041646401cd59dd33943aa1b94214cbd418b1"
+}

@@ -20,4 +20,6 @@ Python 3.10 的 UTC `Z` 解析修复后，提交 `9396f18` 的两组 Ubuntu CI �
 - [修复后定向回归](sse-targeted-after-fix.txt)：51 passed、8 subtests，含真实 SSE/上下文/日期入口和既有截止保护用例。
 - 独立审查确认消费不会重复或遗漏已入队事件，新增读取不阻塞，也不延长截止时间。
 
-最终全量离线与三组 CI 将在该修复提交上执行；两者全部通过后才启动最后一轮在线配对。已经完成的两个在线实验都保留，不按成绩挑选。
+该修复提交 `67bc3914a01dff80f17a49ac3324a476e58e0e11` 的全量离线 **1795 passed、3 skipped、190 subtests passed**，以及[三组 CI](https://github.com/Yoimiya2627/email-rag-agent/actions/runs/41571044034)均已通过。随后才启动最后一轮在线配对，得到 **66.67% → 86.67%**；前两轮完整保留。见[最终验收](release-acceptance.md)。
+
+最终证据提交还改进了测试夹具：以成功消费 token 为注入前提，替代读取尝试次数；主动模拟 prefix 到达前的 Empty，确认早期超时不会提前触发竞态屏障。两个测试的数量及业务断言保持不变，相关套件[30 passed、8 subtests passed](sse-harness-final.txt)。这项测试变更不改应用代码；在线记录的 140 个源码/依赖文件哈希保持一致。

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "checked_at_utc": "2026-11-03T03:32:21.753691+00:00",
+  "passed": true,
+  "protection_checks": {
+    "original_head_unchanged": true,
+    "original_status_unchanged": true,
+    "original_env_unchanged": true,
+    "original_index_unchanged": true,
+    "original_dirty_files_unchanged": true,
+    "historical_inputs_unchanged": true,
+    "historical_chroma_unchanged": true,
+    "isolated_inputs_unchanged": true
+  },
+  "release_input_hashes_match_baseline": {
+    "emails.json": true,
+    "gold_chunks.json": true
+  },
+  "online_source_file_count": 140,
+  "online_source_hashes_match_current": true,
+  "source_mismatch_paths": [],
+  "online_code_commit": "67bc3914a01dff80f17a49ac3324a476e58e0e11",
+  "current_head": "67bc3914a01dff80f17a49ac3324a476e58e0e11",
+  "head_matches_online_commit": true,
+  "chroma_client_opened": false,
+  "online_calls": 0
+}

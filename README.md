@@ -7,12 +7,11 @@
 
 ## 最新验证（2026-11-02）
 
-- **SSE 并发补修**：后续 Windows CI 暴露完成消息已入队但消费者提前结束的竞态，现已确定性复现并修正，定向 51 项通过；最终全量及 CI 继续验证。代码 `9396f18` 的中间在线配对为 **76.67% → 90.00%**，完整证据及各轮差异见[UTC 补修记录](docs/validation/2026-11-02/python310-reference-cli.md)，生产竞态见[SSE 修复说明](docs/validation/2026-11-02/sse-completion-race.md)。
-- **Python 3.10 兼容补修**：首次推送后，Ubuntu 两组 CI 通过，Windows 检出 UTC `Z` 时间参数解析差异；已统一三个评测 CLI 并补充回归，补修版本机全量 **1793 passed、3 skipped、190 subtests passed**。下述 80.00% 是此前代码 `245c4d3` 的已完成实验，补修后的 CI 与追加在线配对另行记录，见[补修与复验进度](docs/validation/2026-11-02/python310-reference-cli.md)。
-- **修复回归通过**：统一 Agent 任务及恢复时的检索参考时间，补齐 MCP 时钟传递，并保护评测输出免受并发覆盖。修复版全量离线测试 **1772 passed、3 skipped、190 subtests passed**；原历史裁剪问题用例重复 20 次全部通过。
-- **修复版在线配对复验完成**：代码 `245c4d3`，固定参考时间 `2026-11-02T12:00:00+08:00`，每题一次检索、共用至多 20 个候选取 top-3，30 题宏平均 context recall 为 **V2 63.33% → V7 Cross-Encoder 80.00%**。两版均 28 条正常结果、1 道空结果、1 道连接错误；全部保留在分母，后两类计零。仅运行一轮，没有择优重跑。见[复验、历史差异与公开证据](docs/validation/2026-11-02/final-paired-revalidation.md)。
-- **升级注意**：缺少参考时钟的旧 checkpoint 必须核对已完成操作后重启任务；冻结时间的 MCP Agent 需配套支持时间协议 v1 的服务器。见[兼容性与发布说明](docs/validation/2026-11-02/final-paired-revalidation.md#兼容性与发布说明)。
-- 这是固定语料、索引与时刻下的一次检索实验，**不代表完整 Agent 成功率**。历史 **83.33%** 记录[保留原样](docs/validation/2026-11-02/evaluation-integration.md)，不作为修复版最新成绩。完整 105 题 Agent 质量验收继续待跑。
+- **修复验收完成**：任务及恢复时钟、MCP 时间传递、评测输出并发保护已完成，并补齐 Python 3.10 UTC `Z` 解析和 SSE 完成消息竞态。应用代码 `67bc391` 本机全量 **1795 passed、3 skipped、190 subtests passed**，[Windows / Ubuntu core / Ubuntu storage 三组 CI](https://github.com/Yoimiya2627/email-rag-agent/actions/runs/41571044034)全部通过。
+- **最终在线配对**：在上述离线与 CI 通过后，对干净代码 `67bc391` 完整运行 30 题，宏平均 context recall 为 **V2 66.67% → V7 Cross-Encoder 86.67%**。每版均 29 条正常结果、1 道空结果、0 条执行错误；全部保留在 30 题分母内。固定参考时间 `2026-11-02T12:00:00+08:00`，5040 封邮件、5355 个片段，每题共用至多 20 个候选取 top-3。见[最终验收与逐题证据](docs/validation/2026-11-02/release-acceptance.md)。
+- **各轮记录均保留**：本轮因 CI 先后发现 UTC 兼容问题和 SSE 竞态，分别修复后追加验证，共运行三轮在线配对：**63.33% → 80.00%**、**76.67% → 90.00%**、**66.67% → 86.67%**。当前采用最后一轮结果。过滤输出和候选跨轮有变化，不能承诺每次精确复现同一分数，也不能将跨轮波动归因这些兼容/并发补丁。
+- **升级注意**：缺少参考时钟的旧 checkpoint 必须核对已完成操作后重启任务；冻结时间的 MCP Agent 需配套支持时间协议 v1 的服务器。见[兼容性与复现边界](docs/validation/2026-11-02/release-acceptance.md#兼容性与复现边界)。
+- 以上为固定题库、语料与索引下的检索实验，**不代表完整 Agent 成功率**。历史 **83.33%** 记录[保留原样](docs/validation/2026-11-02/evaluation-integration.md)；完整 105 题 Agent 质量验收继续待跑。
 
 ## 上一轮验证（2026-10-30）
 

@@ -21,6 +21,8 @@ def test_stream_drains_completion_queued_after_empty_before_worker_exit(tmp_path
     with store.turn('local', 'race') as memory:
         memory.append_turn('Remember the budget.', 'Recorded.')
 
+    classifier_waiting = threading.Event()
+    allow_prefix = threading.Event()
     producer_waiting = threading.Event()
     allow_completion = threading.Event()
     workers = []
@@ -32,11 +34,20 @@ def test_stream_drains_completion_queued_after_empty_before_worker_exit(tmp_path
         return worker
 
     class DelayedEmptyQueue(queue.Queue):
-        reads = 0
+        prefix_injected = False
+        armed = False
+        injected = False
 
         def get(self, block=True, timeout=None):
-            self.reads += 1
-            if self.reads == 3:
+            if block and not self.prefix_injected:
+                self.prefix_injected = True
+                assert classifier_waiting.wait(10), 'producer did not reach startup barrier'
+                assert self.empty(), 'prefix must not exist before startup is released'
+                observed['empty_before_prefix'] = True
+                allow_prefix.set()
+                raise queue.Empty
+            if block and self.armed and not self.injected:
+                self.injected = True
                 # Intent and token have been consumed. The queue read expires
                 # while generation is pending, but the event loop observes its
                 # Empty only after the producer commits and exits.
@@ -48,13 +59,21 @@ def test_stream_drains_completion_queued_after_empty_before_worker_exit(tmp_path
                 observed['pending_terminal_events'] = self.qsize()
                 observed['committed_turns_before_empty'] = len(store.history('local', 'race')['turns'])
                 raise queue.Empty
-            return super().get(block, timeout)
+            item = super().get(block, timeout)
+            if isinstance(item, dict) and 'token' in item:
+                self.armed = True
+            return item
 
     events = DelayedEmptyQueue(maxsize=128)
     # Replace only api.main's bindings, never the shared threading/queue modules.
     monkeypatch.setattr(api, 'threading', SimpleNamespace(Event=threading.Event, Thread=worker_factory))
     monkeypatch.setattr(api, 'queue', SimpleNamespace(Queue=lambda **kwargs: events, Empty=queue.Empty, Full=queue.Full))
-    monkeypatch.setattr('agents.coordinator.classify_intent', lambda *a, **kw: IntentType.RETRIEVE)
+    def classify(*args, **kwargs):
+        classifier_waiting.set()
+        assert allow_prefix.wait(10), 'consumer did not release startup barrier'
+        return IntentType.RETRIEVE
+
+    monkeypatch.setattr('agents.coordinator.classify_intent', classify)
     hit = SearchResult(email_id='e', chunk_id='c', content='source', score=1, metadata={})
     monkeypatch.setattr('core.pipeline.retrieve', lambda *a, **kw: [hit])
 
@@ -67,12 +86,14 @@ def test_stream_drains_completion_queued_after_empty_before_worker_exit(tmp_path
     try:
         response = TestClient(api.app).post('/chat/stream', json={'session_id': 'race', 'query': 'Continue.'})
     finally:
+        allow_prefix.set()
         allow_completion.set()
         for worker in workers:
             worker.join(10)
             assert not worker.is_alive(), 'test leaked its producer'
 
-    assert observed == {'pending_terminal_events': 2, 'committed_turns_before_empty': 2}
+    assert observed == {'empty_before_prefix': True, 'pending_terminal_events': 2,
+                        'committed_turns_before_empty': 2}
     assert response.status_code == 200
     assert 'data: [DONE]' in response.text, response.text
     rows = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith('data: {')]
