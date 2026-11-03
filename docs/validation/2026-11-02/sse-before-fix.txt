@@ -1,0 +1,84 @@
+F.                                                                       [100%]
+================================== FAILURES ===================================
+_____ test_stream_drains_completion_queued_after_empty_before_worker_exit _____
+
+tmp_path = WindowsPath('C:/Users/14868/AppData/Local/Temp/email-agent-checks-g91ahrwm/pytest/test_stream_drains_completion_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B4F7BE62D0>
+
+    def test_stream_drains_completion_queued_after_empty_before_worker_exit(tmp_path, monkeypatch):
+        store = SessionStore(path=tmp_path / 'sessions.sqlite3')
+        monkeypatch.setattr(api, 'sessions', store)
+        monkeypatch.setattr(cfg, 'ENABLE_CONTEXT_SUMMARY', False)
+        monkeypatch.setattr(cfg, 'ENABLE_CONTEXT_CANDIDATES', False)
+        monkeypatch.setattr(cfg, 'AGENT_RUN_TIMEOUT', 120)
+        with store.turn('local', 'race') as memory:
+            memory.append_turn('Remember the budget.', 'Recorded.')
+
+        producer_waiting = threading.Event()
+        allow_completion = threading.Event()
+        workers = []
+        observed = {}
+
+        def worker_factory(**kwargs):
+            worker = threading.Thread(**kwargs)
+            workers.append(worker)
+            return worker
+
+        class DelayedEmptyQueue(queue.Queue):
+            reads = 0
+
+            def get(self, block=True, timeout=None):
+                self.reads += 1
+                if self.reads == 3:
+                    # Intent and token have been consumed. The queue read expires
+                    # while generation is pending, but the event loop observes its
+                    # Empty only after the producer commits and exits.
+                    assert producer_waiting.wait(10), 'producer did not reach completion barrier'
+                    assert self.empty(), 'queue must be empty at the simulated timeout'
+                    allow_completion.set()
+                    workers[0].join(10)
+                    assert not workers[0].is_alive(), 'producer did not finish'
+                    observed['pending_terminal_events'] = self.qsize()
+                    observed['committed_turns_before_empty'] = len(store.history('local', 'race')['turns'])
+                    raise queue.Empty
+                return super().get(block, timeout)
+
+        events = DelayedEmptyQueue(maxsize=128)
+        # Replace only api.main's bindings, never the shared threading/queue modules.
+        monkeypatch.setattr(api, 'threading', SimpleNamespace(Event=threading.Event, Thread=worker_factory))
+        monkeypatch.setattr(api, 'queue', SimpleNamespace(Queue=lambda **kwargs: events, Empty=queue.Empty, Full=queue.Full))
+        monkeypatch.setattr('agents.coordinator.classify_intent', lambda *a, **kw: IntentType.RETRIEVE)
+        hit = SearchResult(email_id='e', chunk_id='c', content='source', score=1, metadata={})
+        monkeypatch.setattr('core.pipeline.retrieve', lambda *a, **kw: [hit])
+
+        def stream(*args, **kwargs):
+            yield 'complete answer'
+            producer_waiting.set()
+            assert allow_completion.wait(10), 'consumer did not release completion barrier'
+
+        monkeypatch.setattr('core.generator.stream_generate', stream)
+        try:
+            response = TestClient(api.app).post('/chat/stream', json={'session_id': 'race', 'query': 'Continue.'})
+        finally:
+            allow_completion.set()
+            for worker in workers:
+                worker.join(10)
+                assert not worker.is_alive(), 'test leaked its producer'
+
+        assert observed == {'pending_terminal_events': 2, 'committed_turns_before_empty': 2}
+        assert response.status_code == 200
+>       assert 'data: [DONE]' in response.text, response.text
+E       AssertionError: data: {"intent": "retrieve", "session_id": "race"}
+E
+E         data: {"token": "complete answer"}
+E
+E         data: {"error":"Stream stopped or timed out"}
+E
+E
+E       assert 'data: [DONE]' in 'data: {"intent": "retrieve", "session_id": "race"}\n\ndata: {"token": "complete answer"}\n\ndata: {"error":"Stream stopped or timed out"}\n\n'
+E        +  where 'data: {"intent": "retrieve", "session_id": "race"}\n\ndata: {"token": "complete answer"}\n\ndata: {"error":"Stream stopped or timed out"}\n\n' = <Response [200 OK]>.text
+
+tests\test_stream_completion_race.py:77: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_stream_completion_race.py::test_stream_drains_completion_queued_after_empty_before_worker_exit
+1 failed, 1 passed in 4.69s

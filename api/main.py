@@ -506,9 +506,14 @@ async def chat_stream(request: AgentRequest, identity: Identity = Depends(requir
                 try:
                     item = await asyncio.to_thread(events.get, True, .2)
                 except queue.Empty:
-                    if not worker.is_alive():
+                    if worker.is_alive():
+                        continue
+                    # The producer may have queued its final events and exited
+                    # after get() timed out but before this coroutine resumed.
+                    try:
+                        item = events.get_nowait()
+                    except queue.Empty:
                         break
-                    continue
                 if item == '[DONE]':
                     yield 'data: [DONE]\n\n'
                     return

@@ -7,6 +7,7 @@
 
 ## 最新验证（2026-11-02）
 
+- **SSE 并发补修**：后续 Windows CI 暴露完成消息已入队但消费者提前结束的竞态，现已确定性复现并修正，定向 51 项通过；最终全量及 CI 继续验证。代码 `9396f18` 的中间在线配对为 **76.67% → 90.00%**，完整证据及各轮差异见[UTC 补修记录](docs/validation/2026-11-02/python310-reference-cli.md)，生产竞态见[SSE 修复说明](docs/validation/2026-11-02/sse-completion-race.md)。
 - **Python 3.10 兼容补修**：首次推送后，Ubuntu 两组 CI 通过，Windows 检出 UTC `Z` 时间参数解析差异；已统一三个评测 CLI 并补充回归，补修版本机全量 **1793 passed、3 skipped、190 subtests passed**。下述 80.00% 是此前代码 `245c4d3` 的已完成实验，补修后的 CI 与追加在线配对另行记录，见[补修与复验进度](docs/validation/2026-11-02/python310-reference-cli.md)。
 - **修复回归通过**：统一 Agent 任务及恢复时的检索参考时间，补齐 MCP 时钟传递，并保护评测输出免受并发覆盖。修复版全量离线测试 **1772 passed、3 skipped、190 subtests passed**；原历史裁剪问题用例重复 20 次全部通过。
 - **修复版在线配对复验完成**：代码 `245c4d3`，固定参考时间 `2026-11-02T12:00:00+08:00`，每题一次检索、共用至多 20 个候选取 top-3，30 题宏平均 context recall 为 **V2 63.33% → V7 Cross-Encoder 80.00%**。两版均 28 条正常结果、1 道空结果、1 道连接错误；全部保留在分母，后两类计零。仅运行一轮，没有择优重跑。见[复验、历史差异与公开证据](docs/validation/2026-11-02/final-paired-revalidation.md)。
