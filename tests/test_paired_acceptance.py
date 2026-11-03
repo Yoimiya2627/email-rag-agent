@@ -123,7 +123,8 @@ def test_main_provider_abort_preserves_paid_cases_without_aggregate_or_next_call
 def test_checkpoint_does_not_publish_partial_mean(tmp_path):
     path = tmp_path / 'result.json'
     report = dict(complete=False, paired_cases=[])
-    paired._checkpoint(path, report)
+    with paired.EvaluationOutput(path) as writer:
+        paired._checkpoint(writer, report)
     assert all(item['summary'] is None for item in json.loads(path.read_text())['results'])
 
 

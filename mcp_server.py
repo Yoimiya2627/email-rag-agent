@@ -8,6 +8,7 @@ and call the same capabilities that `/chat/agent` currently uses locally.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import functools
 import hmac
 import inspect
@@ -26,6 +27,7 @@ import config.settings as cfg
 from agents.tool_policy import ToolPolicy
 from agents.tool_registry import TOOL_REGISTRY, ToolSpec, tool_dispatch
 from agents.tools import email_stats, get_email
+from agents.mcp_adapter import REFERENCE_CLOCK_META
 from agents.runtime import RunContext, use_run_context, normalize_tool_result, tool_error
 
 _AUDIT_LOCK = threading.Lock()
@@ -96,9 +98,14 @@ def _auth_kwargs() -> dict[str, Any]:
 def _tool_decorator(server: Any, spec: ToolSpec) -> Callable:
     """Return a FastMCP tool decorator, with compatibility for older SDKs."""
     try:
-        return server.tool(name=spec.name, description=spec.description)
+        return server.tool(name=spec.name, description=spec.description,
+                           meta={REFERENCE_CLOCK_META: 1})
     except TypeError:
-        return server.tool()
+        # Legacy SDKs do not advertise clock support; live calls stay compatible.
+        try:
+            return server.tool(name=spec.name, description=spec.description)
+        except TypeError:
+            return server.tool()
 
 
 def register_tools(server: Any, policy: ToolPolicy | None = None) -> list[str]:
@@ -108,12 +115,12 @@ def register_tools(server: Any, policy: ToolPolicy | None = None) -> list[str]:
     registered = []
     for name, spec in visible_specs.items():
         fn = dispatch[name]
-        _tool_decorator(server, spec)(_trusted_tool(name, fn))
+        _tool_decorator(server, spec)(_trusted_tool(name, fn, context_provider=getattr(server, "get_context", None)))
         registered.append(name)
     return registered
 
 
-def _trusted_tool(name: str, function: Callable) -> Callable:
+def _trusted_tool(name: str, function: Callable, *, context_provider=None) -> Callable:
     """This MCP server has one configured owner, not caller-selected tenants."""
     @functools.wraps(function)
     def execute(*args, **kwargs):
@@ -124,13 +131,38 @@ def _trusted_tool(name: str, function: Callable) -> Callable:
         except TypeError:
             _server_audit('tool_call', request_id=request_id, target=name, status='validation_error', started=started)
             return tool_error("validation_error", "Invalid tool arguments.")
+        prepared_reference = None
+        if context_provider is not None:
+            try:
+                sdk_context = context_provider()
+                try:
+                    request_context = sdk_context.request_context
+                except ValueError:
+                    # FastMCP's public direct-call API has no transport request.
+                    # Only the SDK Context's explicit absence is a live call;
+                    # arbitrary context-provider failures remain rejected.
+                    from mcp.server.fastmcp import Context
+                    if not isinstance(sdk_context, Context):
+                        raise
+                    request_context = None
+                request_meta = request_context.meta if request_context is not None else None
+                if request_meta is not None:
+                    meta = request_meta if isinstance(request_meta, dict) else request_meta.model_dump(by_alias=True)
+                    if REFERENCE_CLOCK_META in meta:
+                        from core.run_reference import prepare_reference
+                        prepared_reference = prepare_reference({"reference_clock": meta[REFERENCE_CLOCK_META]})
+            except Exception:
+                _server_audit('tool_call', request_id=request_id, target=name, status='reference_clock_invalid', started=started)
+                return tool_error("mcp_reference_clock_invalid", "Invalid or unavailable reference clock context.")
         context = RunContext(
             owner_id=getattr(cfg, "MCP_OWNER_ID", getattr(cfg, "API_OWNER_ID", "local")),
             session_id="mcp",
             deadline=time.monotonic() + float(getattr(cfg, "AGENT_RUN_TIMEOUT", 120)),
             context_char_limit=int(getattr(cfg, "AGENT_CONTEXT_CHAR_LIMIT", 60000)),
         )
-        with use_run_context(context):
+        from core.run_reference import run_reference
+        clock_scope = run_reference(prepared=prepared_reference) if prepared_reference is not None else nullcontext()
+        with use_run_context(context), clock_scope:
             try:
                 result = normalize_tool_result(call_tool(name, arguments))
             except BaseException:
@@ -142,6 +174,8 @@ def _trusted_tool(name: str, function: Callable) -> Callable:
             # Sources are actual retrieval candidates, not model-verified citations.
             if context.tool_evidence and result["status"] == "success":
                 result["candidate_sources"] = list(context.tool_evidence.values())
+            if prepared_reference is not None:
+                result['reference_clock'] = prepared_reference[1]
             result['server_request_id'] = request_id
             _server_audit('tool_call', request_id=request_id, target=name, status=result['status'],
                           started=started, run_id=context.run_id)

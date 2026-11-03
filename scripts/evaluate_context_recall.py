@@ -27,12 +27,12 @@ from importlib import metadata as package_metadata
 import json
 import logging
 import sys
-import tempfile
 from pathlib import Path
 from typing import Callable, Iterable
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from scripts.eval_output import EvaluationOutput, OutputOwnershipError
 from models.schemas import SearchResult
 from agents.runtime import ContextBudgetExceeded, RunCancelled, RunDeadlineExceeded
 from core.model_clients import ModelBudgetExceeded
@@ -127,20 +127,8 @@ def _load_json(path: str | Path) -> list:
     return payload
 
 
-def _dump_json(path: str | Path, payload: object) -> None:
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent,
-                                         prefix=output.name + ".", suffix=".tmp", delete=False) as f:
-            temporary = Path(f.name)
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-        temporary.replace(output)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+def _dump_json(writer: EvaluationOutput, payload: object) -> None:
+    writer.write(payload)
 
 
 def build_gold_template(testset: list, limit: int | None = None) -> list[dict]:
@@ -325,7 +313,11 @@ def main() -> int:
         parser.error('output already exists; choose a new path to preserve evidence')
     if args.init_template:
         template = build_gold_template(_load_json(args.template_from), limit=args.limit)
-        _dump_json(args.gold, template)
+        try:
+            with EvaluationOutput(args.gold) as writer:
+                _dump_json(writer, template)
+        except FileExistsError:
+            parser.error('output or its ownership lock already exists; choose a new path')
         logger.info("wrote gold chunk template -> %s", args.gold)
         return 0
 
@@ -336,6 +328,29 @@ def main() -> int:
     except ValueError as exc:
         parser.error(str(exc))
     versions = _parse_versions(args.versions)
+    try:
+        with EvaluationOutput(destination) as writer:
+            try:
+                return _run_owned(args, cases, versions, writer)
+            except OutputOwnershipError:
+                return 2
+            except BaseException as exc:
+                try:
+                    if writer.updates == 0:
+                        writer.write({'complete': False, 'batch_status': 'aborted',
+                                      'abort': {'error_type': type(exc).__name__}})
+                except OutputOwnershipError:
+                    pass
+                if isinstance(exc, Exception):
+                    return 2
+                raise
+    except FileExistsError:
+        parser.error('output or its ownership lock already exists; choose a new path')
+    except OSError:
+        return 2
+
+
+def _run_owned(args, cases, versions, writer):
     reference_time = _reference_time(args.reference_time)
     run_metadata = _run_metadata(reference_time, args.gold)
     from scripts.paired_acceptance import _source_hashes
@@ -347,7 +362,7 @@ def main() -> int:
     payload = {"schema_version": 2, "gold_path": args.gold, "run": run_metadata,
                "complete": False, "full_suite": len(selected) == len(cases),
                "planned_n": len(selected), "batch_status": "running", "results": []}
-    _dump_json(args.output, payload)
+    _dump_json(writer, payload)
     completed_summaries = {}
     try:
         for version in versions:
@@ -355,7 +370,7 @@ def main() -> int:
             payload['results'].append(partial)
             def checkpoint(records):
                 partial['records'] = records
-                _dump_json(args.output, payload)
+                _dump_json(writer, payload)
             result = evaluate_version(version, cases, limit=args.limit, reference_time=reference_time,
                                       progress_fn=checkpoint)
             # Until every requested version finishes, all aggregate scores remain absent.
@@ -369,19 +384,22 @@ def main() -> int:
         for result in payload['results']:
             result['summary'] = completed_summaries[result['version']]
         payload.update(complete=True, batch_status='completed')
+        _dump_json(writer, payload)
+    except OutputOwnershipError:
+        raise
     except BaseException as exc:
         provider_error = find_permanent_model_error(exc)
+        payload['complete'] = False
         payload['batch_status'] = 'stopped_provider_error' if provider_error else 'aborted'
         payload['abort'] = {'error_type': type(exc).__name__}
         if provider_error:
             payload['provider_error'] = provider_error.as_dict()
         for result in payload['results']:
             result['summary'] = None
-        _dump_json(args.output, payload)
+        _dump_json(writer, payload)
         if isinstance(exc, Exception):
             return 2
         raise
-    _dump_json(args.output, payload)
     _print_table(payload['results'])
     logger.info("saved context_recall report -> %s", args.output)
     return 0

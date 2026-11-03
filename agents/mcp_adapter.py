@@ -24,6 +24,22 @@ from agents.tool_registry import TOOL_REGISTRY
 from agents.tracing import safe_event
 
 
+# Transport metadata only: never added to model-facing tool arguments.
+REFERENCE_CLOCK_META = "email-agent/reference-clock"
+
+
+class MCPReferenceClockError(RuntimeError):
+    def __init__(self, code="mcp_reference_clock_unsupported"):
+        self.error_code = code
+        super().__init__("MCP server must support the requested reference clock contract; upgrade the server or use local tools.")
+
+
+def _active_reference_clock():
+    from core.pipeline import _clock_reference
+    from core.run_reference import prepare_reference
+    return prepare_reference()[1] if _clock_reference() is not None else None
+
+
 def _get_field(obj: Any, *names: str, default: Any = None) -> Any:
     for name in names:
         if isinstance(obj, dict) and name in obj:
@@ -97,6 +113,10 @@ class LocalToolBackend:
     def tool_schemas(self) -> list[dict]:
         return self._schemas_provider()
 
+    def validate_reference_clock(self, contract: dict) -> None:
+        # Local tools share the run ContextVar directly.
+        return None
+
     def call_tool(self, name: str, arguments: dict) -> Any:
         return normalize_tool_result(self._call_tool_fn(name, arguments))
 
@@ -144,6 +164,13 @@ class MCPToolBackend:
         self._schema_cache_at = 0.0
         return self.tool_schemas()
 
+    def validate_reference_clock(self, contract: dict) -> None:
+        # The production transport owns protocol negotiation. Injected local test
+        # clients do not acquire capabilities through dynamic Mock attributes.
+        if isinstance(self.client, StreamableHttpMCPClient):
+            names = [item["function"]["name"] for item in (self._schema_cache or [])]
+            self.client.validate_reference_clock(contract, names)
+
     def call_tool(self, name: str, arguments: dict) -> Any:
         started = time.perf_counter()
         request_id = str(uuid.uuid4())
@@ -184,6 +211,19 @@ class MCPToolBackend:
             return normalized
         except (RunDeadlineExceeded, ContextBudgetExceeded):
             raise
+        except MCPReferenceClockError as exc:
+            spec = TOOL_REGISTRY.get(name)
+            normalized = tool_error(exc.error_code, str(exc),
+                                    unknown=submitted and (spec is None or spec.risk_level != "low"))
+            # Echo validation happens after the remote operation. Preserve an
+            # uncertain approval outcome so a repeat cannot submit it again.
+            self._cache_approval_result(cache_key, normalized, context)
+            self.audit_logger.record(
+                event="tool_call", tool=name, status=normalized["status"],
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+                request_id=request_id, error_type=type(exc).__name__,
+            )
+            return normalized
         except Exception as exc:
             spec = TOOL_REGISTRY.get(name)
             validation = not submitted and isinstance(exc, (ValueError, TypeError))
@@ -261,6 +301,17 @@ class StreamableHttpMCPClient:
     def __init__(self, server_url: str, timeout: int | None = None):
         self.server_url = server_url
         self.timeout = timeout or cfg.LLM_TIMEOUT
+        self._reference_capabilities = None
+
+    def validate_reference_clock(self, contract: dict, names: list[str]) -> None:
+        from core.run_reference import prepare_reference
+        try:
+            prepare_reference({"reference_clock": contract})
+        except (ValueError, RuntimeError, TypeError):
+            raise MCPReferenceClockError("mcp_reference_clock_invalid") from None
+        capabilities = self._reference_capabilities
+        if capabilities is None or any(capabilities.get(name) != 1 for name in names):
+            raise MCPReferenceClockError()
 
     def headers(self) -> dict[str, str]:
         headers = {"X-Email-Agent-Client": "email-rag-agent"}
@@ -313,12 +364,24 @@ class StreamableHttpMCPClient:
         ) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
-                return await session.list_tools()
+                result = await session.list_tools()
+                capabilities = {}
+                for tool in result.tools:
+                    meta = _get_field(tool, "meta", "_meta", default=None)
+                    version = meta.get(REFERENCE_CLOCK_META) if isinstance(meta, dict) else None
+                    capabilities[tool.name] = version if type(version) is int else None
+                self._reference_capabilities = capabilities
+                return result
 
     async def _call_tool_async(self, name: str, arguments: dict) -> Any:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamablehttp_client
 
+        contract = _active_reference_clock()
+        if contract is not None:
+            if self._reference_capabilities is None:
+                await self._list_tools_async()
+            self.validate_reference_clock(contract, [name])
         async with streamablehttp_client(
             self.server_url,
             headers=self.headers(),
@@ -326,7 +389,19 @@ class StreamableHttpMCPClient:
         ) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
-                return await session.call_tool(name, arguments=arguments)
+                kwargs = {"meta": {REFERENCE_CLOCK_META: contract}} if contract is not None else {}
+                result = await session.call_tool(name, arguments=arguments, **kwargs)
+                if contract is not None:
+                    from core.run_reference import prepare_reference
+                    payload = normalize_mcp_result(result)
+                    echoed = payload.get("reference_clock") if isinstance(payload, dict) else None
+                    try:
+                        canonical = prepare_reference({"reference_clock": echoed})[1]
+                    except (ValueError, RuntimeError, TypeError):
+                        raise MCPReferenceClockError("mcp_reference_clock_mismatch") from None
+                    if canonical != contract:
+                        raise MCPReferenceClockError("mcp_reference_clock_mismatch")
+                return result
 
     def list_tools(self) -> Any:
         return self._run(self._list_tools_async)

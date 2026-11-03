@@ -8,6 +8,8 @@ import re
 import time
 import sqlite3
 from collections import Counter
+from contextlib import ExitStack
+from core.run_reference import run_reference, prepare_reference
 
 from openai import OpenAI
 from agents.tools import TOOL_SCHEMAS, call_tool
@@ -191,12 +193,37 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
     had_error, pending = False, False
     trace.record("agent_start", run_id=context.run_id, query_chars=len(request.query),
                  tool_backend=cfg.AGENT_TOOL_BACKEND)
-    with use_run_context(context):
+    with use_run_context(context), ExitStack() as reference_stack:
         try:
             # Deterministic greetings bypass planning only for a fresh run.
             # Identity setup above and the cancellation/deadline check still
             # apply; restored checkpoints must retain their recovery contract.
             remaining_timeout(cfg.LLM_TIMEOUT)
+            if checkpoint is not None:
+                if (not isinstance(checkpoint, dict) or not checkpoint.get('safe')
+                        or checkpoint.get('kind') != 'agent'
+                        or checkpoint.get('request_hash') != content_digest(request.model_dump())):
+                    raise ValueError('Checkpoint no longer matches the request')
+                if type(checkpoint.get('version')) is not int or checkpoint.get('version') not in (1, 2):
+                    raise ToolResultUnavailable('checkpoint_policy_mismatch')
+                if 'reference_clock' not in checkpoint:
+                    raise ToolResultUnavailable('checkpoint_reference_requires_restart')
+                if checkpoint.get('version') == 1 and (
+                        checkpoint.get('owner_id'), checkpoint.get('session_id')) != (context.owner_id, context.session_id):
+                    raise ToolResultUnavailable('checkpoint_scope_mismatch')
+                validate_checkpoint_references(checkpoint, context)
+                if checkpoint.get('version') == 2:
+                    validate_task_memory_guard(checkpoint.get('task_memory_guard'), context)
+            prepared_reference = prepare_reference(checkpoint)
+            context_fingerprint = content_digest({'model':cfg.AGENT_PLANNER_MODEL,
+                'model_revision':getattr(cfg,'MODEL_REVISION',None), 'max_steps':cfg.AGENT_MAX_STEPS,
+                'max_tool_calls':context.max_tool_calls, 'context_char_limit':context.context_char_limit,
+                'context_token_limit':context.context_token_limit,
+                'configured_context_tokens':getattr(cfg,'MODEL_CONTEXT_TOKENS',None),
+                'output_tokens':cfg.AGENT_MAX_TOKENS,'tool_backend':cfg.AGENT_TOOL_BACKEND,
+                'compaction_policy':POLICY_VERSION, 'reference_clock':prepared_reference[1]})
+            if checkpoint is not None and checkpoint.get('context_fingerprint') != context_fingerprint:
+                raise ToolResultUnavailable('checkpoint_context_policy_changed')
             if checkpoint is None:
                 from agents.general_agent import direct_general_response
                 direct = direct_general_response(request.query)
@@ -206,6 +233,15 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
                     result = _response(answer, context, steps, trace.trace_id, status, direct.metadata)
                     result.intent = direct.intent
                     return result
+            backend = _get_tool_backend()
+            schemas = backend.tool_schemas()
+            schema_by_name = {item["function"]["name"]: item["function"]["parameters"] for item in schemas}
+            if checkpoint is not None and checkpoint.get('schema_hash') != content_digest(schemas):
+                raise ValueError('Checkpoint no longer matches the request or tool schema')
+            validate_reference = getattr(backend, 'validate_reference_clock', None)
+            if callable(validate_reference):
+                validate_reference(prepared_reference[1])
+            reference_clock = reference_stack.enter_context(run_reference(prepared=prepared_reference))
             from core.session_context import apply_session_context, context_for_stage
             context.task_context = context_for_stage(context.task_context, "agent_plan",
                 model=cfg.AGENT_PLANNER_MODEL, model_revision=getattr(cfg,"MODEL_REVISION",None))
@@ -216,16 +252,6 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
             history_message_count = len(prior)
             messages.append({"role": "user", "content": current_query})
             remaining_timeout(cfg.LLM_TIMEOUT)
-            client, backend = _get_client(), _get_tool_backend()
-            schemas = backend.tool_schemas()
-            schema_by_name = {item["function"]["name"]: item["function"]["parameters"] for item in schemas}
-            context_fingerprint = content_digest({'model':cfg.AGENT_PLANNER_MODEL,
-                'model_revision':getattr(cfg,'MODEL_REVISION',None), 'max_steps':cfg.AGENT_MAX_STEPS,
-                'max_tool_calls':context.max_tool_calls, 'context_char_limit':context.context_char_limit,
-                'context_token_limit':context.context_token_limit,
-                'configured_context_tokens':getattr(cfg,'MODEL_CONTEXT_TOKENS',None),
-                'output_tokens':cfg.AGENT_MAX_TOKENS,'tool_backend':cfg.AGENT_TOOL_BACKEND,
-                'compaction_policy':POLICY_VERSION})
             memory_guard = task_memory_guard(context) if context.session_repository is not None and checkpoint is None else None
             start_round = 0
             answer_only = False
@@ -260,6 +286,8 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
                 answer_only = checkpoint.get('answer_only',False)
                 partial_answer = checkpoint.get('partial_answer','')
 
+            client = _get_client()
+
             def save_checkpoint(safe, next_round, **extra):
                 nonlocal latest_checkpoint
                 version = 2 if context.session_repository is not None and context.context_epoch is not None else 1
@@ -271,6 +299,9 @@ def run_agent_loop(request: AgentRequest, memory=None, *, owner_id: str = "local
                         validate_task_memory_guard(memory_guard, context)
                         memory_guard_value = memory_guard
                 payload = {'version':version,'kind':'agent','safe':safe,
+                    'reference_clock':copy.deepcopy(reference_clock),
+                    'context_fingerprint':context_fingerprint,
+                    'owner_id':context.owner_id,'session_id':context.session_id,
                     'request_hash':content_digest(request.model_dump()),'schema_hash':content_digest(schemas),
                     'messages':messages,'history_message_count':history_message_count,'steps':steps,
                     'tool_calls':context.tool_calls,'counts':[[key[0],key[1],value] for key,value in counts.items()],

@@ -26,7 +26,7 @@ from agents.coordinator import route
 from agents.general_agent import direct_general_response
 from agents.approvals import ApprovalStore
 from agents.mail_providers import MailProviderError, create_mail_provider_from_settings
-from agents.mcp_adapter import MCPAuditLogger
+from agents.mcp_adapter import MCPAuditLogger, MCPReferenceClockError
 from api.security import Identity, require_identity
 from api.sessions import SessionStore, SessionBusyError
 from agents.runtime import RunContext, RunCancelled, ContextBudgetExceeded, use_run_context, remaining_timeout
@@ -38,6 +38,7 @@ import config.settings as cfg
 from core.jobs import AdmissionGate, CapacityExceeded, JobStore, JobManager
 from api.readiness import Readiness
 from core.model_clients import ModelBudgetExceeded,model_metrics_snapshot
+from core.run_reference import reference_error_code
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -84,6 +85,13 @@ app.add_middleware(CORSMiddleware, allow_origins=cfg.API_CORS_ORIGINS,
 def _safe_error(exc):
     if isinstance(exc, HTTPException):
         return exc
+    if isinstance(exc, MCPReferenceClockError):
+        return HTTPException(409, str(exc))
+    clock_error = reference_error_code(exc)
+    if clock_error == 'checkpoint_reference_requires_restart':
+        return HTTPException(409, 'This checkpoint has no reliable reference time; inspect completed work and start a new task')
+    if clock_error:
+        return HTTPException(409, 'Saved reference time is invalid or conflicts with this run; inspect completed work and reference settings')
     if isinstance(exc, PermissionError):
         return HTTPException(403, 'Resource access denied')
     if isinstance(exc, KeyError):

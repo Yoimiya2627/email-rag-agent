@@ -15,6 +15,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from core.run_reference import reference_error_code
+
 
 class CapacityExceeded(RuntimeError):
     pass
@@ -113,7 +115,8 @@ class JobStore:
             result[key] = json.loads(result[key]) if result[key] is not None else None
         result['cancel_requested'] = bool(result['cancel_requested'])
         recoverable = result['status'] in {'interrupted','cancelled','failed','incomplete'}
-        reason = ('session_invalidated' if result.get('error_code') == 'session_invalidated' else
+        reason = ('checkpoint_reference_requires_restart' if result.get('error_code') == 'checkpoint_reference_requires_restart' else
+                  'session_invalidated' if result.get('error_code') == 'session_invalidated' else
                   'recovery_budget_exhausted' if result['attempt'] >= 10 else
                   'unsafe_checkpoint' if not (result['checkpoint'] or {}).get('safe') else None)
         result['resumable'] = recoverable and reason is None
@@ -188,9 +191,11 @@ class JobStore:
     def resume(self, owner, job_id):
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT status,checkpoint,attempt FROM jobs WHERE id=? AND owner=?', (job_id,owner)).fetchone()
+            row = db.execute('SELECT status,checkpoint,attempt,error_code FROM jobs WHERE id=? AND owner=?', (job_id,owner)).fetchone()
             if row is None:
                 raise KeyError('Job not found')
+            if row['error_code'] == 'checkpoint_reference_requires_restart':
+                raise JobConflict('This checkpoint has no reliable reference time; inspect completed work and start a new task')
             checkpoint = json.loads(row['checkpoint'] or '{}')
             if row['status'] not in {'interrupted','cancelled','failed','incomplete'} or not checkpoint.get('safe') or row['attempt'] >= 10:
                 raise JobConflict('No safe checkpoint is available, or the recovery budget is exhausted')
@@ -296,8 +301,9 @@ class JobManager:
                       'succeeded' if metadata.get('status','success') in {'success','approval_required'} else 'incomplete')
             self.store.finish(owner,job_id,status,result=result)
         except Exception as exc:
-            # Store only a type code. The API maps it to a safe recovery message.
-            self.store.finish(owner,job_id,'cancelled' if event.is_set() else 'failed',error_code=type(exc).__name__)
+            # Only known recovery codes may cross this boundary; never store arbitrary error text.
+            code = reference_error_code(exc) or type(exc).__name__
+            self.store.finish(owner,job_id,'cancelled' if event.is_set() else 'failed',error_code=code)
         finally:
             with self._lock:
                 self._events.pop(job_id,None)

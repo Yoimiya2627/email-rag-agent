@@ -193,6 +193,8 @@ def _render_jobs():
             elif job['status'] in {'interrupted','failed','incomplete','cancelled'}:
                 if job.get('resume_block_reason')=='recovery_budget_exhausted':
                     st.warning('这项任务已达到恢复次数上限。请核对已有结果，再明确创建新任务。')
+                elif job.get('resume_block_reason')=='checkpoint_reference_requires_restart':
+                    st.warning('旧任务未保存可靠的检索参考时间，无法继续恢复。请先核对已完成的步骤和审批状态，再创建新任务。')
                 else:
                     st.warning('没有可安全恢复的检查点。请先核对已有步骤和审批状态。')
             result = job.get('result') or {}

@@ -2,6 +2,7 @@
 import copy
 import json
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -133,6 +134,7 @@ class ContextHistoryTests(unittest.TestCase):
                 self.assertEqual(memory.to_messages(), [])
         self.assertEqual(caught.exception.status_code, 413)
 
+    @patch('core.pipeline._now', new=lambda: datetime(2026, 4, 28, 4, tzinfo=timezone.utc))
     def test_agent_loop_drops_old_turns_as_tool_messages_grow(self):
         from agents import agent_loop as loop
         memory = ConversationMemory()

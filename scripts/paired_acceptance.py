@@ -27,10 +27,13 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 import time
 from types import SimpleNamespace
 from urllib.parse import urlsplit
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.eval_output import EvaluationOutput, OutputOwnershipError
 
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
@@ -241,7 +244,7 @@ def summarize(records: list[dict]) -> dict:
     }
 
 
-def _checkpoint(path: Path, report: dict) -> None:
+def _checkpoint(writer: EvaluationOutput, report: dict) -> None:
     report['completed_n'] = sum(case['complete'] for case in report['paired_cases'])
     report['results'] = []
     for version in ('V2', 'V7'):
@@ -254,17 +257,7 @@ def _checkpoint(path: Path, report: dict) -> None:
             'summary': summarize(records) if report['complete'] else None,
             'records': records,
         })
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.tmp',
-                                         prefix=path.name + '.', dir=path.parent, delete=False) as stream:
-            temporary = Path(stream.name)
-            json.dump(report, stream, ensure_ascii=False, indent=2)
-            stream.write('\n')
-        temporary.replace(path)
-    finally:
-        if temporary is not None and temporary.exists():
-            temporary.unlink()
+    writer.write(report)
 
 
 def _validate_import_sources(root: Path) -> None:
@@ -379,12 +372,35 @@ def main(argv=None) -> int:
         validate_gold_cases(cases, require_case_ids=True)
     except ValueError as exc:
         parser.error(str(exc))
+    try:
+        with EvaluationOutput(output) as writer:
+            try:
+                return _run_owned(args, root, gold, output, cases, writer)
+            except OutputOwnershipError:
+                return 2
+            except BaseException as exc:
+                try:
+                    if writer.updates == 0:
+                        writer.write({'complete': False, 'batch_status': 'aborted',
+                                      'abort': {'error_type': type(exc).__name__}})
+                except OutputOwnershipError:
+                    pass
+                if isinstance(exc, Exception):
+                    return 2
+                raise
+    except FileExistsError:
+        parser.error('output or its ownership lock already exists; choose a new path')
+    except OSError:
+        return 2
+
+
+def _run_owned(args, root, gold, output, cases, writer):
     selected = cases[:args.limit] if args.limit is not None else cases
     os.chdir(root)
     runtime = _runtime(root)
     fetch_k, top_n = runtime.cfg.TOP_K * 4, runtime.cfg.RERANK_TOP_N
     if type(fetch_k) is not int or type(top_n) is not int or not 1 <= top_n <= fetch_k:
-        parser.error('requires positive top_n <= fetch_k')
+        raise ValueError('requires positive top_n <= fetch_k')
     output.parent.mkdir(parents=True, exist_ok=True)
     flag_names = (*COMMON_FLAGS, 'ENABLE_RERANKER', 'RERANKER_BACKEND')
     original_flags = {name: getattr(runtime.cfg, name) for name in flag_names}
@@ -396,13 +412,13 @@ def main(argv=None) -> int:
         with runtime.index_snapshot():
             report['run'] = _metadata(root, gold, runtime, args.reference_time)
             runtime.reset_circuit_breaker()
-            _checkpoint(output, report)
+            _checkpoint(writer, report)
             for case in selected:
                 record = {}
                 report['paired_cases'].append(record)
                 evaluate_pair(case, runtime, args.reference_time, fetch_k=fetch_k,
                               top_n=top_n, deadline_seconds=args.case_timeout, record=record)
-                _checkpoint(output, report)
+                _checkpoint(writer, report)
                 print(json.dumps({
                     'id': case['id'], 'completed': len(report['paired_cases']), 'planned': len(selected),
                     'V2': record['versions']['V2']['context_recall'],
@@ -420,17 +436,20 @@ def main(argv=None) -> int:
             report['batch_status'] = 'completed'
             report['complete'] = True
             report['finished_at'] = datetime.now(timezone.utc).isoformat()
-            _checkpoint(output, report)
+            _checkpoint(writer, report)
+    except OutputOwnershipError:
+        raise
     except BaseException as exc:
         from core.model_errors import find_permanent_model_error
         provider_error = find_permanent_model_error(exc)
         report['complete'] = False
+        report.pop('finished_at', None)
         report['batch_status'] = 'stopped_provider_error' if provider_error else 'aborted'
         if provider_error:
             report['provider_error'] = provider_error.as_dict()
         report['abort'] = {'error_type': type(exc).__name__,
                            'cause_type': type(exc.__cause__).__name__ if exc.__cause__ else None}
-        _checkpoint(output, report)
+        _checkpoint(writer, report)
         if isinstance(exc, Exception):
             return 2
         raise
