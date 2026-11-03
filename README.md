@@ -7,6 +7,7 @@
 
 ## 最新验证（2026-11-02）
 
+- **Python 3.10 兼容补修**：首次推送后，Ubuntu 两组 CI 通过，Windows 检出 UTC `Z` 时间参数解析差异；已统一三个评测 CLI 并补充回归，补修版本机全量 **1793 passed、3 skipped、190 subtests passed**。下述 80.00% 是此前代码 `245c4d3` 的已完成实验，补修后的 CI 与追加在线配对另行记录，见[补修与复验进度](docs/validation/2026-11-02/python310-reference-cli.md)。
 - **修复回归通过**：统一 Agent 任务及恢复时的检索参考时间，补齐 MCP 时钟传递，并保护评测输出免受并发覆盖。修复版全量离线测试 **1772 passed、3 skipped、190 subtests passed**；原历史裁剪问题用例重复 20 次全部通过。
 - **修复版在线配对复验完成**：代码 `245c4d3`，固定参考时间 `2026-11-02T12:00:00+08:00`，每题一次检索、共用至多 20 个候选取 top-3，30 题宏平均 context recall 为 **V2 63.33% → V7 Cross-Encoder 80.00%**。两版均 28 条正常结果、1 道空结果、1 道连接错误；全部保留在分母，后两类计零。仅运行一轮，没有择优重跑。见[复验、历史差异与公开证据](docs/validation/2026-11-02/final-paired-revalidation.md)。
 - **升级注意**：缺少参考时钟的旧 checkpoint 必须核对已完成操作后重启任务；冻结时间的 MCP Agent 需配套支持时间协议 v1 的服务器。见[兼容性与发布说明](docs/validation/2026-11-02/final-paired-revalidation.md#兼容性与发布说明)。

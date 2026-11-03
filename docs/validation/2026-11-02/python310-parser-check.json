@@ -1,0 +1,9 @@
+{
+  "python": "3.10.20",
+  "scope": "Actual function AST executed without project imports; full imports covered by offline suite/CI",
+  "results": {
+    "scripts/evaluate_context_recall.py": "7 cases passed",
+    "scripts/paired_acceptance.py": "7 cases passed",
+    "scripts/run_agent_eval.py": "7 cases passed"
+  }
+}

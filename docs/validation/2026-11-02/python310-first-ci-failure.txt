@@ -1,0 +1,120 @@
+================================== FAILURES ===================================
+________ test_reference_time_requires_an_explicit_timezone[2026-11-02] ________
+
+raw = '2026-11-02T12:00:00Z'
+
+    def _parse_reference_time(raw: str) -> datetime:
+        try:
+>           return _reference_time(datetime.fromisoformat(raw))
+E           ValueError: Invalid isoformat string: '2026-11-02T12:00:00Z'
+
+scripts\evaluate_context_recall.py:83: ValueError
+
+The above exception was the direct cause of the following exception:
+
+raw = '2026-11-02'
+
+    @pytest.mark.parametrize("raw", ["2026-11-02", "2026-11-02T12:00:00", "not a date"])
+    def test_reference_time_requires_an_explicit_timezone(raw):
+        from scripts import evaluate_context_recall as recall
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            recall._parse_reference_time(raw)
+>       assert recall._parse_reference_time("2026-11-02T12:00:00Z") == datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
+
+tests\test_context_recall_eval.py:256:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+raw = '2026-11-02T12:00:00Z'
+
+    def _parse_reference_time(raw: str) -> datetime:
+        try:
+            return _reference_time(datetime.fromisoformat(raw))
+        except (TypeError, ValueError) as exc:
+>           raise argparse.ArgumentTypeError("reference time must be an ISO datetime with a timezone") from exc
+E           argparse.ArgumentTypeError: reference time must be an ISO datetime with a timezone
+
+scripts\evaluate_context_recall.py:85: ArgumentTypeError
+___ test_reference_time_requires_an_explicit_timezone[2026-11-02T12:00:00] ____
+
+raw = '2026-11-02T12:00:00Z'
+
+    def _parse_reference_time(raw: str) -> datetime:
+        try:
+>           return _reference_time(datetime.fromisoformat(raw))
+E           ValueError: Invalid isoformat string: '2026-11-02T12:00:00Z'
+
+scripts\evaluate_context_recall.py:83: ValueError
+
+The above exception was the direct cause of the following exception:
+
+raw = '2026-11-02T12:00:00'
+
+    @pytest.mark.parametrize("raw", ["2026-11-02", "2026-11-02T12:00:00", "not a date"])
+    def test_reference_time_requires_an_explicit_timezone(raw):
+        from scripts import evaluate_context_recall as recall
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            recall._parse_reference_time(raw)
+>       assert recall._parse_reference_time("2026-11-02T12:00:00Z") == datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
+
+tests\test_context_recall_eval.py:256:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+raw = '2026-11-02T12:00:00Z'
+
+    def _parse_reference_time(raw: str) -> datetime:
+        try:
+            return _reference_time(datetime.fromisoformat(raw))
+        except (TypeError, ValueError) as exc:
+>           raise argparse.ArgumentTypeError("reference time must be an ISO datetime with a timezone") from exc
+E           argparse.ArgumentTypeError: reference time must be an ISO datetime with a timezone
+
+scripts\evaluate_context_recall.py:85: ArgumentTypeError
+________ test_reference_time_requires_an_explicit_timezone[not a date] ________
+
+raw = '2026-11-02T12:00:00Z'
+
+    def _parse_reference_time(raw: str) -> datetime:
+        try:
+>           return _reference_time(datetime.fromisoformat(raw))
+E           ValueError: Invalid isoformat string: '2026-11-02T12:00:00Z'
+
+scripts\evaluate_context_recall.py:83: ValueError
+
+The above exception was the direct cause of the following exception:
+
+raw = 'not a date'
+
+    @pytest.mark.parametrize("raw", ["2026-11-02", "2026-11-02T12:00:00", "not a date"])
+    def test_reference_time_requires_an_explicit_timezone(raw):
+        from scripts import evaluate_context_recall as recall
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            recall._parse_reference_time(raw)
+>       assert recall._parse_reference_time("2026-11-02T12:00:00Z") == datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
+
+tests\test_context_recall_eval.py:256:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+raw = '2026-11-02T12:00:00Z'
+
+    def _parse_reference_time(raw: str) -> datetime:
+        try:
+            return _reference_time(datetime.fromisoformat(raw))
+        except (TypeError, ValueError) as exc:
+>           raise argparse.ArgumentTypeError("reference time must be an ISO datetime with a timezone") from exc
+E           argparse.ArgumentTypeError: reference time must be an ISO datetime with a timezone
+
+scripts\evaluate_context_recall.py:85: ArgumentTypeError
+============================== warnings summary ===============================
+C:\hostedtoolcache\windows\Python\3.10.11\x64\lib\site-packages\fastapi\testclient.py:1
+  C:\hostedtoolcache\windows\Python\3.10.11\x64\lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_context_recall_eval.py::test_reference_time_requires_an_explicit_timezone[2026-11-02] - argparse.ArgumentTypeError: reference time must be an ISO datetime with a timezone
+FAILED tests/test_context_recall_eval.py::test_reference_time_requires_an_explicit_timezone[2026-11-02T12:00:00] - argparse.ArgumentTypeError: reference time must be an ISO datetime with a timezone
+FAILED tests/test_context_recall_eval.py::test_reference_time_requires_an_explicit_timezone[not a date] - argparse.ArgumentTypeError: reference time must be an ISO datetime with a timezone
+3 failed, 1643 passed, 31 skipped, 1 warning, 190 subtests passed in 169.48s (0:02:49)

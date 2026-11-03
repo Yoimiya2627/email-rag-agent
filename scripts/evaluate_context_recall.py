@@ -80,6 +80,8 @@ def _reference_time(value: datetime | None = None) -> datetime:
 
 def _parse_reference_time(raw: str) -> datetime:
     try:
+        if isinstance(raw, str) and raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"  # Python 3.10 does not parse the UTC Z suffix.
         return _reference_time(datetime.fromisoformat(raw))
     except (TypeError, ValueError) as exc:
         raise argparse.ArgumentTypeError("reference time must be an ISO datetime with a timezone") from exc

@@ -1,0 +1,16 @@
+{
+  "parent_commit": "4a651e8a3836164fd5fe1f6b199bc1388ffd786c",
+  "offline_result": {
+    "passed": 1793,
+    "skipped": 3,
+    "subtests": 190,
+    "seconds": 375.08,
+    "exit_code": 0
+  },
+  "source_sha256": {
+    "scripts/evaluate_context_recall.py": "4acefd38dd68ad3cf53816f845641739a3dd4741e8bdb82c36a81635c237d92f",
+    "scripts/paired_acceptance.py": "29844ab462a1a17c0a1a52386a72246a8dcba8f5a1ed71829ba882b7ab3165e4",
+    "scripts/run_agent_eval.py": "8f1d455d67a530717bcbd20b72340beb1b0a5237e7205f5e98cf6929ec9a1deb",
+    "tests/test_eval_reference_cli.py": "da679cbc84c4fc0b7ce094532f76ef8c37d44729fc32636857a79d8d9276bac3"
+  }
+}

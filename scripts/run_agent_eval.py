@@ -56,6 +56,8 @@ def _scope_reference(scope):
 
 def _reference_time_arg(raw: str) -> datetime:
     try:
+        if isinstance(raw, str) and raw.endswith('Z'):
+            raw = raw[:-1] + '+00:00'  # Python 3.10 does not parse the UTC Z suffix.
         value = datetime.fromisoformat(raw)
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError('timezone required')
