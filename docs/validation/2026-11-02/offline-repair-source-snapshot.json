@@ -1,0 +1,75 @@
+{
+  "timestamp_utc": "2026-11-02T18:35:42.7053369Z",
+  "source_files": [
+    {
+      "path": "agents/agent_loop.py",
+      "sha256": "E3426D826E43004A0B98522A88E0DB30D58DBC9DA5B21E34E21E601A2E603412"
+    },
+    {
+      "path": "agents/mcp_adapter.py",
+      "sha256": "ECE2A35D5F1C7A5F2F5FC9265CF347B97D1E479D2750DDA1D9AB0F5B92DB7B10"
+    },
+    {
+      "path": "api/main.py",
+      "sha256": "D22A00F8F30433B986D912BCEDDCD80636860925A6DC3C930ADE3568EA2E6316"
+    },
+    {
+      "path": "core/jobs.py",
+      "sha256": "2BB3C9ACD9FF1CE3B0C50FFC3C95605016CA4E833A15339D6CCF73BAA38259A5"
+    },
+    {
+      "path": "core/run_reference.py",
+      "sha256": "A3B892AA9DCAB2DEF35204E1ED135D3E56CD77E9A777FA2192C5E2C0358F0F27"
+    },
+    {
+      "path": "frontend/app.py",
+      "sha256": "DFE5B4BA623BBCBCFCBD4F6C14601C3C71A7FB2FE6A373708B08A1A6C401C0C3"
+    },
+    {
+      "path": "mcp_server.py",
+      "sha256": "73C1172DE9DB302FC3F10B3F5FFF5061DDEA88E5D763D1961A7FADE29F5F8650"
+    },
+    {
+      "path": "scripts/eval_output.py",
+      "sha256": "0B3EF951912884E18946BD29CB43CEEC2B6D918D85AD45349AEC71E31590B1A5"
+    },
+    {
+      "path": "scripts/evaluate_context_recall.py",
+      "sha256": "A50C48E5555E2E98755E9900A30CF9F9E9CCB6E86502147AE17C1F650FA09CB2"
+    },
+    {
+      "path": "scripts/paired_acceptance.py",
+      "sha256": "73EF07F98547761020547967A24CB64FE0ADEF5D05933DB1E2DC5367C816605E"
+    },
+    {
+      "path": "tests/test_agent_reference_acceptance.py",
+      "sha256": "73B421CD61E18549E1256C166BF01B2E645FAC7B995F8E32F7F9C6F94B9B17B2"
+    },
+    {
+      "path": "tests/test_agent_reference_clock.py",
+      "sha256": "A2A0B4C23EDDAE21AAD3AB2F679CD9BEBFB110D8E4037BD70208791607438639"
+    },
+    {
+      "path": "tests/test_context_history.py",
+      "sha256": "7C5FCBA297456011F59052DE2696513ADE1D8E64D141D64E7989C05D875D634B"
+    },
+    {
+      "path": "tests/test_eval_output.py",
+      "sha256": "B142737ACEC2F465B218470AF997CFEBB91C1F15BC861D4869BCCAA9B39E0FE4"
+    },
+    {
+      "path": "tests/test_mcp_reference_clock.py",
+      "sha256": "122E3717A6B105B26A153B34B378FF104C0B9F83F754BDEE640B49D963E410E3"
+    },
+    {
+      "path": "tests/test_paired_acceptance.py",
+      "sha256": "356771493F69BB80F43E613A5DF9B0B8E7639A233BA4B32E7E58B2E850F241D4"
+    },
+    {
+      "path": "tests/test_reference_recovery_errors.py",
+      "sha256": "3D1E22D03F3782C49CA86FAC81AFAE8FBC7D23D7AB5B9703BB84DCE366D779F7"
+    }
+  ],
+  "branch": "codex/integrate-evaluation-20261102",
+  "head": "dd6c3c259a16dcaa4861f8b5346a4773c3b5a11d"
+}
